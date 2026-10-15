@@ -13,5 +13,5 @@ createServer((req, res) => {
     return;
   }
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ healthy: true, cwd: process.cwd() }));
+  res.end(JSON.stringify({ healthy: true, version: process.env.FAKE_VERSION ?? "2.0.0", cwd: process.cwd() }));
 }).listen(port, "127.0.0.1", () => console.log(`server listening on http://127.0.0.1:${port}`));

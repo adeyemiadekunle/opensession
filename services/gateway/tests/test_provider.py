@@ -5,6 +5,7 @@ import asyncio
 import httpx
 import pytest
 
+from opensession.opencode_version import SUPPORTED_OPENCODE_VERSIONS
 from opensession.orchestrator import SandboxManager
 from opensession.provider import (
     Endpoint,
@@ -80,7 +81,7 @@ def opencode(busy_hosts=()):
     def handler(request):
         if request.url.path == "/api/session/active":
             return httpx.Response(200, json={"data": {"ses_1": {}} if request.url.host in busy_hosts else {}})
-        return httpx.Response(200, json={"healthy": True, "host": request.url.host})
+        return httpx.Response(200, json={"healthy": True, "version": SUPPORTED_OPENCODE_VERSIONS[0], "host": request.url.host})
 
     return httpx.MockTransport(handler)
 

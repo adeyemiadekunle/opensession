@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { SUPPORTED_OPENCODE_VERSIONS, opencodeVersionProblem } from "@opensession/api-client";
 
 export const INSTALL_HINT =
   "OpenCode V2 is not installed. Install it with:\n" +
@@ -39,6 +40,9 @@ export interface StartOptions {
   env?: Record<string, string>;
   timeoutMs?: number;
   onLog?: (line: string) => void;
+  /** Approved OpenCode versions (null: any). Default: SUPPORTED_OPENCODE_VERSIONS,
+   *  or OPENCODE_SUPPORTED_VERSIONS from the environment. */
+  supportedVersions?: readonly string[] | null;
 }
 
 /** Locate the opencode executable: OPENCODE_BIN, PATH, then the installer's default folder. */
@@ -58,6 +62,13 @@ export function findOpencode(env: NodeJS.ProcessEnv = process.env): string | nul
     if (existsSync(p)) return p;
   }
   return null;
+}
+
+/** OPENCODE_SUPPORTED_VERSIONS (comma separated, "*" = any) overrides the approved list. */
+function supportedFromEnv(): readonly string[] | null {
+  const raw = (process.env.OPENCODE_SUPPORTED_VERSIONS ?? "").trim();
+  if (raw === "*") return null;
+  return raw ? raw.split(",").map((v) => v.trim()).filter(Boolean) : SUPPORTED_OPENCODE_VERSIONS;
 }
 
 export function freePort(): Promise<number> {
@@ -121,12 +132,22 @@ export async function startLocalServer(o: StartOptions): Promise<LocalServer> {
     if (exited !== null) {
       throw new Error(`opencode exited (code ${exited}) while starting:\n${tail.join("\n")}`);
     }
+    let health: { version?: string } | null = null;
     try {
       const r = await fetch(`${url}/api/health`, { headers: { authorization: authHeader } });
-      if (r.ok) return { url, password, port, directory: o.directory, process: child, authHeader, stop };
-      last = `HTTP ${r.status}`;
+      if (r.ok) health = ((await r.json().catch(() => ({}))) as { version?: string }) ?? {};
+      else last = `HTTP ${r.status}`;
     } catch (e) {
       last = (e as Error).message;
+    }
+    if (health) {
+      // Only OpenCode releases OpenSession is tested with (its V2 API still changes).
+      const problem = opencodeVersionProblem(health.version, o.supportedVersions === undefined ? supportedFromEnv() : o.supportedVersions);
+      if (problem) {
+        await stop();
+        throw new Error(problem);
+      }
+      return { url, password, port, directory: o.directory, process: child, authHeader, stop };
     }
     await new Promise((r) => setTimeout(r, 300));
   }

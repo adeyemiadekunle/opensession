@@ -1,0 +1,145 @@
+# Checks new OpenCode releases before OpenSession uses them (docs/OPENCODE-UPDATES.md).
+#
+# Weekly, or by hand (Actions > OpenCode update check > Run workflow, optionally with a
+# version): if OpenCode has a release other than the approved one, build the sandbox
+# with it and check that every endpoint OpenSession calls still exists. If it does,
+# run the gateway tests and the Docker smoke test against it, then open a pull
+# request that approves it. Anything failing opens (or updates) an issue instead.
+# Nothing changes until someone merges that pull request.
+name: OpenCode update check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "OpenCode version to check (default: the latest release)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: opencode-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.OPENCODE_UPDATE_TOKEN || github.token }}
+    defaults:
+      run:
+        shell: bash  # -eo pipefail: a failing test isn't hidden by `| tee`
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Which version?
+        id: v
+        run: |
+          current=$(jq -r .version opencode-version.json)
+          candidate="${{ github.event.inputs.version }}"
+          if [ -z "$candidate" ]; then
+            candidate=$(curl -fsSL https://opencode.ai/update/api/latest/cli/npm | jq -r .version)
+          fi
+          candidate="${candidate#v}"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          if [ -z "$candidate" ] || [ "$candidate" = "null" ]; then
+            echo "::error::could not read the latest OpenCode version"; exit 1
+          fi
+          if [ "$candidate" = "$current" ]; then
+            echo "OpenCode $current is still the latest release: nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif gh pr list --state open --head "opencode-$candidate" --json number -q '.[0].number' | grep -q .; then
+            echo "A pull request for OpenCode $candidate is already open."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the sandbox with OpenCode ${{ steps.v.outputs.candidate }}
+        if: steps.v.outputs.skip != 'true'
+        id: build
+        run: docker build -t opencode-sandbox:candidate --build-arg OPENCODE_VERSION=${{ steps.v.outputs.candidate }} services/sandbox
+
+      - name: API check (every endpoint OpenSession calls)
+        if: steps.v.outputs.skip != 'true'
+        id: api
+        run: |
+          docker run -d --name oc-candidate -e OPENCODE_SERVER_PASSWORD=check opencode-sandbox:candidate
+          for i in $(seq 1 60); do
+            docker exec oc-candidate curl -sf -u opencode:check -o /dev/null http://127.0.0.1:4096/openapi.json && break
+            sleep 1
+          done
+          docker exec oc-candidate curl -sf -u opencode:check http://127.0.0.1:4096/openapi.json > candidate-openapi.json
+          docker rm -f oc-candidate
+          ref=docs/reference/opencode-${{ steps.v.outputs.current }}-openapi.json
+          set -o pipefail
+          python3 scripts/opencode/api_check.py candidate-openapi.json --reference "$ref" 2>&1 | tee api-check.txt
+
+      - name: Approve it in the code
+        if: steps.v.outputs.skip != 'true'
+        run: python3 scripts/opencode/bump.py ${{ steps.v.outputs.candidate }} --openapi candidate-openapi.json
+
+      - uses: actions/setup-python@v5
+        if: steps.v.outputs.skip != 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Gateway tests
+        if: steps.v.outputs.skip != 'true'
+        id: tests
+        working-directory: services/gateway
+        run: |
+          pip install -e ".[dev]"
+          pytest -q -rfE 2>&1 | tee ../../gateway-tests.txt
+
+      - name: Smoke test (real Docker, real OpenCode)
+        if: steps.v.outputs.skip != 'true'
+        id: smoke
+        run: bash scripts/check/smoke.sh 2>&1 | tee smoke.txt
+
+      - name: Open the pull request
+        if: steps.v.outputs.skip != 'true'
+        run: |
+          v=${{ steps.v.outputs.candidate }}
+          git config user.name "opencode-update-check"
+          git config user.email "opencode-update-check@users.noreply.github.com"
+          git checkout -b "opencode-$v"
+          git add -A opencode-version.json services/sandbox/Dockerfile docker-compose.dokploy.yml \
+            services/gateway/src/opensession/opencode_version.py packages/api-client/src/types.ts docs/reference
+          git commit -m "Approve OpenCode $v (update check passed)"
+          git push -u origin "opencode-$v"
+          {
+            echo "OpenCode **$v** passed the update check, replacing **${{ steps.v.outputs.current }}**."
+            echo
+            echo "- every endpoint OpenSession calls exists (below), the gateway tests pass, and the Docker smoke test passed against it;"
+            echo "- merging approves it: new sandbox images, the gateway and local mode will use exactly $v."
+            echo
+            echo "Before merging, read the API changes and try the desktop app's local mode with OpenCode $v."
+            echo
+            echo '```'
+            cat api-check.txt
+            echo '```'
+          } > pr.md
+          gh pr create --title "Approve OpenCode $v" --body-file pr.md --base main --head "opencode-$v"
+
+      - name: Report a failed check
+        if: failure() && steps.v.outputs.skip != 'true'
+        run: |
+          v=${{ steps.v.outputs.candidate }}
+          title="OpenCode $v failed the update check"
+          {
+            echo "OpenCode **$v** is not safe to use yet; OpenSession stays on **${{ steps.v.outputs.current }}**."
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            for f in api-check.txt gateway-tests.txt smoke.txt; do
+              [ -s "$f" ] || continue
+              echo; echo "### $f"; echo '```'; tail -n 60 "$f"; echo '```'
+            done
+          } > issue.md
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number')
+          if [ -n "$existing" ]; then gh issue comment "$existing" --body-file issue.md
+          else gh issue create --title "$title" --body-file issue.md; fi
