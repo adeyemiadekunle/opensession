@@ -296,6 +296,16 @@ function AgentsTab({ cfg, set }: TabProps) {
       title="Agents"
       hint="Built-in: build (default), plan (read-only planning), general and explore (subagents). Add your own, e.g. a reviewer subagent the main agent can call."
     >
+      <label className="os-row">
+        <input
+          type="checkbox"
+          checked={cfg.git_approval !== false}
+          onChange={(e) => set({ ...cfg, git_approval: e.target.checked })}
+        />
+        <span>
+          Ask me before the agent commits or pushes <span className="os-muted os-small">(git commit / git push wait for your approval)</span>
+        </span>
+      </label>
       <Field label="Default agent for new sessions">
         <select value={cfg.default_agent ?? ""} onChange={(e) => set({ ...cfg, default_agent: e.target.value || null })}>
           <option value="">build (default)</option>

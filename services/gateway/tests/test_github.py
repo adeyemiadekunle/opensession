@@ -34,6 +34,13 @@ class FakeGitHub:
         self.calls = []
         self.user_installations = [42]
         self.repo_installation = {"alice-gh/app": 42, "bob-gh/secret": 77}
+        self.ci_status = 200
+        self.check_runs = [
+            {"name": "test", "status": "completed", "conclusion": "success", "html_url": "https://ci/1", "head_sha": "abc123"},
+            {"name": "smoke", "status": "in_progress", "conclusion": None, "html_url": "https://ci/2", "head_sha": "abc123"},
+        ]
+        self.statuses = [{"context": "deploy/preview", "state": "success", "target_url": "https://preview"}]
+        self.pulls_queries = []
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.calls.append((req.method, req.url.path, req.headers.get("authorization", ""), req.content))
@@ -58,6 +65,17 @@ class FakeGitHub:
             if repo in self.repo_installation:
                 return httpx.Response(200, json={"id": self.repo_installation[repo]})
             return httpx.Response(404, json={"message": "Not Found"})
+        if p.endswith("/check-runs"):
+            if self.ci_status == 403:
+                return httpx.Response(403, json={"message": "Resource not accessible by integration"})
+            if "/commits/missing" in p:
+                return httpx.Response(404, json={"message": "No commit found for SHA: missing"})
+            return httpx.Response(200, json={"check_runs": self.check_runs})
+        if "/commits/" in p and p.endswith("/status"):
+            return httpx.Response(200, json={"sha": "abc123", "state": "pending", "statuses": self.statuses})
+        if p.endswith("/pulls") and req.method == "GET":
+            self.pulls_queries.append(dict(req.url.params))
+            return httpx.Response(200, json=[{"number": 7, "html_url": "https://github.com/alice-gh/app/pull/7"}])
         if p.endswith("/pulls"):
             return httpx.Response(201, json={"number": 7, "html_url": "https://github.com/alice-gh/app/pull/7"})
         return httpx.Response(404, json={"message": f"unexpected {p}"})
@@ -238,6 +256,70 @@ def test_git_pull_and_commit_for_handoff():
 
         # pulling needs a project linked to a repository
         assert c.post("/git/pull", json={"branch": "main"}, headers=A).status_code == 409
+
+
+def test_ci_checks_fold_into_one_state_and_never_wake_a_project():
+    c, docker, _, fake, gh = client()
+    with c:
+        connect(c, gh)
+        c.post("/workspaces", json={"name": "app", "repo": "alice-gh/app", "branch": "main"}, headers=A)
+        h = {**A, "X-Workspace": "app"}
+
+        # Asleep (never started): the project's branch, and no sandbox is created.
+        r = c.get("/git/checks", headers=h)
+        assert r.status_code == 200 and not docker.containers.by_name
+        ci = r.json()
+        assert ci["ref"] == "main" and ci["sha"] == "abc123" and ci["state"] == "pending"
+        assert ci["pull_request"] == {"number": 7, "url": "https://github.com/alice-gh/app/pull/7"}
+        assert fake.pulls_queries[-1] == {"head": "alice-gh:main", "state": "open"}
+        assert [x["name"] for x in ci["checks"]] == ["test", "smoke", "deploy/preview"]
+
+        # Running: the sandbox's current branch, read without counting as use.
+        assert c.get("/p/app/api/health", headers=h).status_code == 200
+        mgr = c.app.state.sandboxes
+        entry = mgr._entries[mgr._key("alice", "app")]
+        before = entry.last_used
+        docker.containers.exec_handler = lambda cmd: (0, b"feature/login\n")
+        assert c.get("/git/checks", headers=h).json()["ref"] == "feature/login"
+        assert entry.last_used == before
+
+        fake.check_runs[1].update(status="completed", conclusion="failure")
+        assert c.get("/git/checks", headers=h).json()["state"] == "failure"
+        fake.check_runs[1].update(conclusion="success")
+        assert c.get("/git/checks", headers=h).json()["state"] == "success"
+
+        fake.ci_status = 403  # app installed before it asked for Checks permission
+        r = c.get("/git/checks", headers=h)
+        assert r.status_code == 403 and "Checks and Commit statuses" in r.json()["detail"]
+        fake.ci_status = 200
+
+        # Any repo the user's installation covers (desktop, local folders):
+        assert c.get("/github/checks", params={"repo": "alice-gh/app", "ref": "missing"}, headers=A).json()["state"] == "none"
+        assert c.get("/github/checks", params={"repo": "bob-gh/secret", "ref": "main"}, headers=A).status_code == 403
+        assert c.get("/github/checks", params={"repo": "alice-gh/app", "ref": "bad..x"}, headers=A).status_code == 400
+        assert c.get("/git/checks", headers=A).status_code == 409  # default project: no repository
+
+
+def test_outgoing_lists_commits_and_uncommitted_files():
+    c, docker, _, fake, gh = client()
+    with c:
+        connect(c, gh)
+        c.post("/workspaces", json={"name": "app", "repo": "alice-gh/app", "branch": "main"}, headers=A)
+        h = {**A, "X-Workspace": "app"}
+        assert c.get("/p/app/api/health", headers=h).status_code == 200
+        out = b"B:fix/login\nU:origin/main\nC:a1b2c3d\tAgent\tFix login\nC:9f8e7d6\tAlice\tAdd test\nS: M src/a.ts\nS:?? notes.md\n"
+        docker.containers.exec_handler = lambda cmd: (0, out)
+        assert c.get("/git/outgoing", headers=h).json() == {
+            "branch": "fix/login",
+            "base": "origin/main",
+            "commits": [
+                {"sha": "a1b2c3d", "author": "Agent", "subject": "Fix login"},
+                {"sha": "9f8e7d6", "author": "Alice", "subject": "Add test"},
+            ],
+            "uncommitted": ["src/a.ts", "notes.md"],
+        }
+        docker.containers.exec_handler = lambda cmd: (128, b"fatal: not a git repository")
+        assert c.get("/git/outgoing", headers=h).status_code == 409
 
 
 def test_github_not_configured():

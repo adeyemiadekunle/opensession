@@ -315,9 +315,8 @@ def create_app(
             except Exception as e:  # e.g. master key missing; never echo key material
                 raise HTTPException(500, "could not load stored API keys") from e
         raw = await asyncio.to_thread(request.app.state.users.get_agent_config, user)
-        if raw is None:
-            return env, None
-        files = agentconfig.render_files(AgentConfig.model_validate(raw), cloud=True)
+        # Rendered even without a saved setup: the defaults include git approval.
+        files = agentconfig.render_files(AgentConfig.model_validate(raw) if raw else AgentConfig(), cloud=True)
         env = dict(env or {})
         env["OPENSESSION_CONFIG_DIGEST"] = agentconfig.digest(files)
         return env, agentconfig.bundle_tar(files)
@@ -766,6 +765,94 @@ def create_app(
             raise HTTPException(409, out.strip()[-800:] or f"commit failed (exit {code})")
         last = out.strip().splitlines()[-1] if out.strip() else ""
         return {"committed": last != "NOTHING", "head": None if last == "NOTHING" else last}
+
+    @app.get("/git/outgoing")
+    async def git_outgoing(request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """What a push would send (for the review step before push / pull request):
+        commits not on GitHub yet and uncommitted files, which are not pushed."""
+        await get_client(request, ref)
+        ws = await workspace_record(request, ref)
+        default = (ws or {}).get("branch") or "main"
+        if not BRANCH_RE.match(default):
+            default = "main"
+        script = (
+            "cd /workspace || exit 1; "
+            "b=$(git rev-parse --abbrev-ref HEAD) || exit 1; "
+            'u=$(git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null); '
+            f'if [ -z "$u" ] && git show-ref -q --verify "refs/remotes/origin/{default}"; then u="origin/{default}"; fi; '
+            'echo "B:$b"; echo "U:$u"; '
+            'if [ -n "$u" ]; then git log --format="C:%h%x09%an%x09%s" -n 50 "$u..HEAD"; '
+            'else git log --format="C:%h%x09%an%x09%s" -n 50; fi; '
+            "git status --porcelain | sed 's/^/S:/'"
+        )
+        code, out = await sandbox_exec(request, ref, script)
+        if code != 0:
+            raise HTTPException(409, out.strip()[-500:] or "not a git repository")
+        branch, base, commits, uncommitted = "", None, [], []
+        for line in out.splitlines():
+            tag, _, rest = line.partition(":")
+            if tag == "B":
+                branch = rest.strip()
+            elif tag == "U":
+                base = rest.strip() or None
+            elif tag == "C":
+                sha, _, tail = rest.partition("\t")
+                author, _, subject = tail.partition("\t")
+                commits.append({"sha": sha, "author": author, "subject": subject})
+            elif tag == "S" and len(rest) > 3:
+                uncommitted.append(rest[3:])
+        return {"branch": branch, "base": base, "commits": commits, "uncommitted": uncommitted}
+
+    def ci_error(e: GitHubError) -> HTTPException:
+        if "GitHub 403" in str(e):
+            return HTTPException(
+                403,
+                "the OpenSession GitHub App needs read access to Checks and Commit statuses "
+                "(GitHub App settings > Permissions), then accept the new permissions on the installation",
+            )
+        return gh_error(e)
+
+    @app.get("/git/checks")
+    async def git_checks(request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """CI for the project's current branch. Never wakes the sandbox (it is polled):
+        a sleeping project reports the branch it was linked with."""
+        ws = await workspace_record(request, ref)
+        if not ws or not ws.get("repo"):
+            raise HTTPException(409, "this project is not linked to a GitHub repository")
+        gh = require_github(request)
+        branch = ws.get("branch") or "main"
+        mgr: SandboxManager = request.app.state.sandboxes
+        if (await mgr.status(*ref))["state"] == "running":
+            try:  # exec does not count as use: polling CI never keeps a sandbox awake
+                code, out = await mgr.exec(*ref, ["git", "-C", "/workspace", "rev-parse", "--abbrev-ref", "HEAD"])
+                current = out.strip().splitlines()[-1] if code == 0 and out.strip() else ""
+                if BRANCH_RE.match(current) and current != "HEAD":
+                    branch = current
+            except SandboxError:
+                pass
+        try:
+            return await gh.checks(int(ws["installation_id"]), ws["repo"], branch)
+        except GitHubError as e:
+            raise ci_error(e) from None
+
+    @app.get("/github/checks")
+    async def github_checks(repo: str, ref: str, request: Request, user: str = Depends(current_user)):
+        """CI for any branch of a repository the user's GitHub App installation covers
+        (the desktop app uses it for folders on the user's own computer)."""
+        if not REPO_RE.match(repo) or not BRANCH_RE.match(ref):
+            raise HTTPException(400, "invalid repository or branch name")
+        gh = require_github(request)
+        mine = {i["installation_id"] for i in await asyncio.to_thread(request.app.state.users.installations, user)}
+        try:
+            inst = await gh.repo_installation(repo)
+        except GitHubError:
+            raise HTTPException(404, f"{repo} is not available to OpenSession: connect GitHub for it first") from None
+        if inst not in mine:
+            raise HTTPException(403, "connect the GitHub account that owns this repository first")
+        try:
+            return await gh.checks(inst, repo, ref)
+        except GitHubError as e:
+            raise ci_error(e) from None
 
     @app.post("/git/pull-request", status_code=201)
     async def git_pull_request(body: PullRequest, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):

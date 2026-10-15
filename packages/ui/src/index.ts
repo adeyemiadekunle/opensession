@@ -10,3 +10,6 @@ export { GitPanel } from "./GitPanel";
 export { GithubCard, ProjectsPage } from "./Projects";
 export { TerminalPanel } from "./TerminalPanel";
 export { SandboxGate } from "./SandboxGate";
+export { CloudApp } from "./CloudApp";
+export type { CloudAppProps } from "./CloudApp";
+export { useCiWatch } from "./ciWatch";

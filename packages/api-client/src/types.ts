@@ -101,6 +101,57 @@ export interface GitActions {
   checkout(branch: string, create?: boolean): Promise<unknown>;
   push?(): Promise<{ branch: string }>;
   pullRequest?(title: string, body: string): Promise<{ url?: string | null; number?: number | null }>;
+  /** Commit everything changed (shown for approval first). */
+  commit?(message: string): Promise<{ committed: boolean; head: string | null }>;
+  /** What a push would send, for the review screen. */
+  outgoing?(): Promise<OutgoingChanges>;
+  /** GitHub checks (CI) for the current branch. */
+  checks?(): Promise<CiChecks>;
+}
+
+export interface OutgoingChanges {
+  branch: string;
+  /** What the commits are compared with (upstream or the default branch); null if unknown. */
+  base: string | null;
+  commits: { sha: string; author: string; subject: string }[];
+  /** Uncommitted paths (they are not pushed). */
+  uncommitted: string[];
+}
+
+export type CiState = "success" | "failure" | "pending" | "none";
+
+export interface CiCheck {
+  name: string;
+  /** queued | in_progress | completed */
+  status: string;
+  /** success, failure, cancelled, timed_out, skipped, neutral, action_required ... (when completed) */
+  conclusion: string | null;
+  url: string | null;
+}
+
+export interface CiChecks {
+  repo: string;
+  ref: string;
+  sha: string | null;
+  state: CiState;
+  checks: CiCheck[];
+  pull_request: { number: number; url: string } | null;
+}
+
+/** Notifications worth sending when CI moves from `prev` to `next` for the same commit:
+ *  each check that finished since, and the overall result once nothing is pending. */
+export function ciChanges(prev: CiChecks | null, next: CiChecks): string[] {
+  if (!prev || prev.sha !== next.sha || prev.ref !== next.ref) return [];
+  const before = new Map(prev.checks.map((c) => [c.name, c]));
+  const out: string[] = [];
+  for (const c of next.checks) {
+    const was = before.get(c.name);
+    if (c.status === "completed" && was && was.status !== "completed" && c.conclusion !== "success" && c.conclusion !== "skipped")
+      out.push(`${c.name}: ${c.conclusion ?? "done"}`);
+  }
+  if (prev.state === "pending" && next.state !== "pending" && next.state !== "none")
+    out.push(next.state === "success" ? `All checks passed on ${next.ref}` : `Checks failed on ${next.ref}`);
+  return out;
 }
 
 export interface Project {
@@ -261,7 +312,16 @@ export interface AgentConfig {
   instructions: string; // AGENTS.md
   plugins: string[];
   default_agent?: string | null;
+  /** The agent's own `git commit` / `git push` wait for approval (default on). */
+  git_approval?: boolean;
 }
+
+/** Shell commands the agent may only run after the user approves them (git_approval).
+ *  Appended last (OpenCode uses the last matching rule), also to built-in agents. */
+export const GIT_APPROVAL_RULES: PermissionRule[] = [
+  { action: "shell", resource: "git commit *", effect: "ask" },
+  { action: "shell", resource: "git push *", effect: "ask" },
+];
 
 export const emptyAgentConfig = (): AgentConfig => ({
   skills: [],
@@ -272,6 +332,7 @@ export const emptyAgentConfig = (): AgentConfig => ({
   instructions: "",
   plugins: [],
   default_agent: null,
+  git_approval: true,
 });
 
 export interface BuiltinTool {

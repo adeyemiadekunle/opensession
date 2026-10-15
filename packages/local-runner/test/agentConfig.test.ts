@@ -2,10 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
-import { applyAgentConfig } from "../src";
+import { GIT_APPROVAL_RULES, emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
+import { applyAgentConfig, ensureLocalAgentDefaults } from "../src";
 
-const cfg = (over: Partial<AgentConfig>): AgentConfig => ({ ...emptyAgentConfig(), ...over });
+// git approval is tested on its own below; these tests are about everything else.
+const cfg = (over: Partial<AgentConfig>): AgentConfig => ({ ...emptyAgentConfig(), git_approval: false, ...over });
 
 describe("applyAgentConfig", () => {
   it("writes V2 files and only ever removes what it wrote", () => {
@@ -52,6 +53,42 @@ describe("applyAgentConfig", () => {
     expect(oc.agents).toBeUndefined();
     expect(oc.commands).toBeUndefined();
     expect(oc.skills).toEqual(["~/.config/opencode/opensession-skills"]);
+  });
+
+  it("asks before git commit/push: last in the global rules and on every built-in agent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "occfg-"));
+    writeFileSync(
+      join(dir, "opencode.json"),
+      JSON.stringify({
+        permissions: [{ action: "shell", resource: "*", effect: "allow" }],
+        agents: { build: { permissions: [{ action: "shell", resource: "*", effect: "allow" }], model: "a/b" } },
+      }),
+    );
+    applyAgentConfig({ ...emptyAgentConfig(), agents: [{ id: "reviewer", description: "R", mode: "subagent", body: "", permissions: [] }] }, dir);
+    let oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+    expect(oc.permissions).toEqual([{ action: "shell", resource: "*", effect: "allow" }, ...GIT_APPROVAL_RULES]);
+    expect(oc.agents.build).toEqual({ model: "a/b", permissions: [{ action: "shell", resource: "*", effect: "allow" }, ...GIT_APPROVAL_RULES] });
+    expect(oc.agents.plan).toEqual({ permissions: GIT_APPROVAL_RULES });
+    expect(oc.agents.reviewer.permissions).toEqual(GIT_APPROVAL_RULES);
+
+    // Applying again doesn't duplicate; turning it off removes only what we added.
+    applyAgentConfig(emptyAgentConfig(), dir);
+    oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+    expect(oc.agents.build.permissions).toHaveLength(3);
+    applyAgentConfig({ ...emptyAgentConfig(), git_approval: false }, dir);
+    oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+    expect(oc.permissions).toEqual([{ action: "shell", resource: "*", effect: "allow" }]);
+    expect(oc.agents).toEqual({ build: { model: "a/b", permissions: [{ action: "shell", resource: "*", effect: "allow" }] } });
+  });
+
+  it("applies the defaults once on first run, never over a saved setup", () => {
+    const home = mkdtempSync(join(tmpdir(), "osdir-"));
+    const dir = mkdtempSync(join(tmpdir(), "occfg-"));
+    ensureLocalAgentDefaults(home, dir);
+    expect(JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")).permissions).toEqual(GIT_APPROVAL_RULES);
+    applyAgentConfig({ ...emptyAgentConfig(), git_approval: false }, dir); // as if the user turned it off elsewhere
+    ensureLocalAgentDefaults(home, dir); // saved setup exists now: untouched
+    expect(JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")).permissions).toBeUndefined();
   });
 
   it("refuses to overwrite the user's own files and bad input", () => {

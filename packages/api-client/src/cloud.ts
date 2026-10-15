@@ -12,11 +12,16 @@ import type {
   AgentConfig,
   AgentConfigResponse,
   AgentConfigStore,
+  CiChecks,
+  OutgoingChanges,
 } from "./types";
 
 export interface CloudClientOptions {
   /** Gateway URL, e.g. https://api.opensession.dev */
   gatewayUrl: string;
+  /** Where terminal WebSockets connect when gatewayUrl is not the gateway itself
+   *  (the desktop app reaches the gateway through its own ocg:// scheme). */
+  socketBaseUrl?: string;
   /** Clerk session token (web) or personal access token "osk_..." (CLI, desktop). */
   getToken: () => Promise<string | null | undefined> | string | null | undefined;
   workspace?: string;
@@ -97,11 +102,22 @@ export class CloudClient extends OpenCodeClient {
   pullRequest(o: { title: string; body?: string; base?: string }): Promise<{ number: number; url: string; head: string; base: string }> {
     return this.http.post("/git/pull-request", { json: o });
   }
+  /** What a push would send: commits not on GitHub yet, and uncommitted files. */
+  gitOutgoing(): Promise<OutgoingChanges> {
+    return this.http.get("/git/outgoing");
+  }
+  /** GitHub checks (CI) and the open pull request for the project's current branch. */
+  gitChecks(): Promise<CiChecks> {
+    return this.http.get("/git/checks");
+  }
   gitActions(): GitActions {
     return {
       checkout: (b, create) => this.gitCheckout(b, create),
       push: () => this.gitPush(),
       pullRequest: (title, body) => this.pullRequest({ title, body }),
+      commit: (message) => this.gitCommit(message),
+      outgoing: () => this.gitOutgoing(),
+      checks: () => this.gitChecks(),
     };
   }
 
@@ -194,7 +210,8 @@ export class CloudClient extends OpenCodeClient {
       },
       socketUrl: async (id, cursor) => {
         const { ticket } = await this.http.post(`/terminals/${enc(id)}/ticket`);
-        const url = new URL(`terminals/${enc(id)}/connect`, this.o.gatewayUrl.replace(/\/?$/, "/"));
+        const base = this.o.socketBaseUrl ?? this.o.gatewayUrl;
+        const url = new URL(`terminals/${enc(id)}/connect`, base.replace(/\/?$/, "/"));
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
         url.searchParams.set("ticket", ticket);
         if (cursor !== undefined) url.searchParams.set("cursor", String(cursor));

@@ -193,6 +193,42 @@ class GitHubApp:
                 break
         return out
 
+    async def checks(self, installation_id: int, repo: str, ref: str) -> dict:
+        """CI for a branch: GitHub check runs plus commit statuses, folded into one
+        state, and the branch's open pull request. Needs the app's read access to
+        Checks and Commit statuses. A branch not on GitHub yet has state "none"."""
+        from urllib.parse import quote
+
+        token = await self.installation_token(installation_id, repo)
+        r = quote(ref, safe="")
+        try:
+            runs = (await self._req("GET", f"/repos/{repo}/commits/{r}/check-runs", token, params={"per_page": 100})).json()
+            status = (await self._req("GET", f"/repos/{repo}/commits/{r}/status", token)).json()
+        except GitHubError as e:
+            if e.status == 404 or "422" in str(e):  # no such branch (yet)
+                return {"repo": repo, "ref": ref, "sha": None, "state": "none", "checks": [], "pull_request": None}
+            raise
+        checks = [
+            {"name": c.get("name", "?"), "status": c.get("status", "queued"), "conclusion": c.get("conclusion"), "url": c.get("html_url")}
+            for c in runs.get("check_runs", [])
+        ]
+        st_map = {"success": ("completed", "success"), "pending": ("in_progress", None), "failure": ("completed", "failure"), "error": ("completed", "failure")}
+        for s in status.get("statuses", []):
+            st, concl = st_map.get(s.get("state", "pending"), ("in_progress", None))
+            checks.append({"name": s.get("context", "status"), "status": st, "conclusion": concl, "url": s.get("target_url")})
+        bad = {"failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"}
+        if any(c["status"] == "completed" and c["conclusion"] in bad for c in checks):
+            state = "failure"
+        elif any(c["status"] != "completed" for c in checks):
+            state = "pending"
+        else:
+            state = "success" if checks else "none"
+        sha = next((c.get("head_sha") for c in runs.get("check_runs", []) if c.get("head_sha")), None) or status.get("sha")
+        owner = repo.split("/", 1)[0]
+        pulls = (await self._req("GET", f"/repos/{repo}/pulls", token, params={"head": f"{owner}:{ref}", "state": "open"})).json()
+        pr = {"number": pulls[0]["number"], "url": pulls[0]["html_url"]} if pulls else None
+        return {"repo": repo, "ref": ref, "sha": sha, "state": state, "checks": checks, "pull_request": pr}
+
     async def create_pull_request(self, installation_id: int, repo: str, head: str, base: str, title: str, body: str) -> dict:
         token = await self.installation_token(installation_id, repo)
         r = await self._req("POST", f"/repos/{repo}/pulls", token, json={"title": title, "head": head, "base": base, "body": body})

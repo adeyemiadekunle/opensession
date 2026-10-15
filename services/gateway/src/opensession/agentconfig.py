@@ -152,6 +152,8 @@ class AgentConfig(BaseModel):
     instructions: str = Field(default="", max_length=100_000)  # AGENTS.md
     plugins: list[str] = Field(default_factory=list, max_length=20)
     default_agent: str | None = Field(default=None, pattern=ID_RE, max_length=64)
+    # The agent's own `git commit` / `git push` wait for the user's approval.
+    git_approval: bool = True
 
     @field_validator("mcp")
     @classmethod
@@ -226,12 +228,22 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
         oc["update"] = "disable"  # the image pins the OpenCode version
     if cfg.skills:
         oc["skills"] = [f"{CLOUD_CONFIG_DIR}/{SKILLS_DIR}" if cloud else f"~/.config/opencode/{SKILLS_DIR}"]
+    guard = GIT_APPROVAL_RULES if cfg.git_approval else []
     if cfg.agents:
-        oc["agents"] = {a.id: agent_entry(a) for a in cfg.agents}
+        oc["agents"] = {a.id: agent_entry(a, guard) for a in cfg.agents}
+    if guard:
+        # Built-in agents carry their own rules (build: "tools are allowed by default"),
+        # loaded after the global ones. A same-id entry merges with the built-in and
+        # its rules are appended, so the approval rules come last there too.
+        agents = oc.setdefault("agents", {})
+        for b in BUILTIN_AGENTS:
+            agents.setdefault(b["id"], {"permissions": list(guard)})
     if cfg.commands:
         oc["commands"] = {c.name: command_entry(c) for c in cfg.commands}
-    if cfg.permissions:
-        oc["permissions"] = [r.model_dump() for r in cfg.permissions]
+    if cfg.permissions or guard:
+        # OpenCode uses the last matching rule, and agent rules come after global
+        # ones: the approval rules go last in both, so no "allow" can skip them.
+        oc["permissions"] = [r.model_dump() for r in cfg.permissions] + guard
     if cfg.mcp:
         servers = {}
         for name, srv in cfg.mcp.items():
@@ -254,7 +266,14 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
     return files
 
 
-def agent_entry(a: Agent) -> dict:
+# Shell commands the agent may only run after the user approves them (git_approval).
+GIT_APPROVAL_RULES = [
+    {"action": "shell", "resource": "git commit *", "effect": "ask"},
+    {"action": "shell", "resource": "git push *", "effect": "ask"},
+]
+
+
+def agent_entry(a: Agent, guard: list[dict] | None = None) -> dict:
     d: dict = {"description": a.description, "mode": a.mode}
     if a.body.strip():
         d["system"] = a.body.strip()
@@ -263,7 +282,7 @@ def agent_entry(a: Agent) -> dict:
     if a.steps:
         d["steps"] = a.steps
     if a.permissions:
-        d["permissions"] = [r.model_dump() for r in a.permissions]
+        d["permissions"] = [r.model_dump() for r in a.permissions] + (guard or [])
     return d
 
 

@@ -85,6 +85,29 @@ belong to OpenSession and use Clerk:
   bound to 127.0.0.1 with a random password. In the desktop app the window never
   sees it: the main process forwards the window's `ocl://local/...` requests to the
   server and adds the password.
+- **Desktop app, cloud mode:** the same browser sign-in as the CLI
+  (`browserLogin` in `packages/local-runner`) gives the main process an access
+  token, stored encrypted with Electron `safeStorage` (never in plain text). The
+  window talks to `ocg://cloud/...`; the main process forwards that to the gateway
+  with the token, so the page never holds it. The window renders the same
+  `CloudApp` component (`packages/ui`) as the web app. Terminals connect straight
+  to the gateway with a one-time ticket (`CloudClient.socketBaseUrl`).
+
+## Approval and CI
+
+- The review step before commit / push / pull request is in `packages/ui`
+  (`GitPanel`), fed by `GitActions.outgoing()`: `GET /git/outgoing` in the cloud,
+  local git in the desktop app.
+- `git_approval` (agent setup, default on) renders
+  `{"action": "shell", "resource": "git commit *" | "git push *", "effect": "ask"}`
+  last in the global permissions and on every built-in and custom agent (OpenCode:
+  last match wins; agent rules load after global ones). Cloud sandboxes always get a
+  rendered config; local mode applies the defaults once on first run.
+- CI: `GitHubApp.checks` folds check runs and commit statuses into one state.
+  `GET /git/checks` reads the branch from a running sandbox with `exec` (not a use,
+  so polling never keeps it awake) or the project's branch when asleep;
+  `GET /github/checks?repo&ref` serves local folders through the user's
+  installation. `ciChanges` decides what is worth a notification.
 
 ## Internet access for cloud sandboxes
 

@@ -1,15 +1,56 @@
-import { useState } from "react";
-import type { GitActions, GitInfo, OpenSessionClient } from "@opensession/api-client";
+import { useEffect, useState } from "react";
+import type { CiChecks, GitActions, GitInfo, OpenSessionClient, OutgoingChanges } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 
-/** Current branch, changed files and branch actions for the workspace's repository. */
+/** A pending commit, push or pull request, shown for approval before it runs. */
+export interface Review {
+  kind: "commit" | "push" | "pr";
+  out?: OutgoingChanges;
+  message: string;
+  title: string;
+  body: string;
+}
+
+/** Current branch, changed files and branch actions for the workspace's repository.
+ *  Nothing is committed, pushed or opened as a pull request without an explicit
+ *  Approve on a review step that shows what will happen. */
 export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionClient; actions?: GitActions; refreshKey: number }) {
   const [bump, setBump] = useState(0);
   const git = useAsync<GitInfo>(() => client.gitInfo(), [client, refreshKey, bump]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string; url?: string } | null>(null);
   const [newBranch, setNewBranch] = useState("");
-  const [pr, setPr] = useState<{ title: string; body: string } | null>(null);
+  const [review, setReview] = useState<Review | null>(null);
+
+  const openReview = async (kind: "push" | "pr") => {
+    if (!actions?.outgoing) return setReview({ kind, message: "", title: "", body: "" });
+    setBusy("review");
+    setMsg(null);
+    try {
+      setReview({ kind, out: await actions.outgoing(), message: "", title: "", body: "" });
+    } catch (e) {
+      setMsg({ ok: false, text: errText(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const approve = (r: Review) =>
+    run(r.kind, async () => {
+      if (r.kind === "commit") {
+        const c = await actions!.commit!(r.message.trim());
+        setReview(null);
+        return { text: c.committed ? `Committed ${c.head}.` : "Nothing to commit." };
+      }
+      if (r.kind === "push") {
+        const p = await actions!.push!();
+        setReview(null);
+        return { text: `Pushed ${p.branch}.` };
+      }
+      const p = await actions!.pullRequest!(r.title.trim(), r.body);
+      setReview(null);
+      return { text: p.number ? `Pull request #${p.number} opened.` : "Opened the pull request page.", url: p.url ?? undefined };
+    });
 
   const run = async (label: string, f: () => Promise<{ text: string; url?: string } | void>) => {
     setBusy(label);
@@ -87,45 +128,44 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
             </li>
           ))}
         </ul>
-        <div className="os-muted os-small">Ask the agent to commit when you're happy with the changes.</div>
+        {actions?.commit && g.status.length ? (
+          <button disabled={Boolean(busy) || Boolean(review)} onClick={() => setReview({ kind: "commit", message: "", title: "", body: "" })}>
+            Commit…
+          </button>
+        ) : (
+          <div className="os-muted os-small">Ask the agent to commit when you're happy with the changes.</div>
+        )}
       </div>
 
-      {actions?.push ? (
+      {actions?.push && !review ? (
         <div className="os-row">
-          <button disabled={Boolean(busy)} onClick={() => run("push", async () => ({ text: `Pushed ${(await actions.push!()).branch}.` }))}>
-            {busy === "push" ? "Pushing…" : "Push"}
+          <button disabled={Boolean(busy)} onClick={() => void openReview("push")}>
+            {busy === "review" ? "Loading…" : "Push…"}
           </button>
           {actions.pullRequest ? (
-            <button disabled={Boolean(busy) || onDefault} title={onDefault ? "Create a branch first" : undefined} onClick={() => setPr({ title: "", body: "" })}>
-              Create pull request
+            <button
+              disabled={Boolean(busy) || onDefault}
+              title={onDefault ? "Create a branch first" : undefined}
+              onClick={() => void openReview("pr")}
+            >
+              Create pull request…
             </button>
           ) : null}
         </div>
       ) : null}
-      {pr && actions?.pullRequest ? (
-        <form
-          className="os-form-grid"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void run("pr", async () => {
-              const r = await actions.pullRequest!(pr.title, pr.body);
-              setPr(null);
-              return { text: r.number ? `Pull request #${r.number} opened.` : "Opened the pull request page.", url: r.url ?? undefined };
-            });
-          }}
-        >
-          <input placeholder="Title" value={pr.title} onChange={(e) => setPr({ ...pr, title: e.target.value })} />
-          <textarea placeholder="What changed and why" value={pr.body} onChange={(e) => setPr({ ...pr, body: e.target.value })} />
-          <div className="os-row">
-            <button className="os-primary" type="submit" disabled={!pr.title.trim() || Boolean(busy)}>
-              {busy === "pr" ? "Opening…" : "Open pull request"}
-            </button>
-            <button type="button" onClick={() => setPr(null)}>
-              Cancel
-            </button>
-          </div>
-        </form>
+
+      {review ? (
+        <ReviewStep
+          review={review}
+          files={g.status.map((f) => f.file)}
+          busy={busy}
+          onChange={setReview}
+          onCancel={() => setReview(null)}
+          onApprove={() => void approve(review)}
+        />
       ) : null}
+
+      {actions?.checks ? <ChecksView checks={actions.checks} refreshKey={bump + refreshKey} /> : null}
       {msg ? (
         <div className={msg.ok ? "os-ok" : "os-error"}>
           {msg.text}{" "}
@@ -136,6 +176,131 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** What will happen, and the explicit Approve. */
+function ReviewStep({
+  review,
+  files,
+  busy,
+  onChange,
+  onCancel,
+  onApprove,
+}: {
+  review: Review;
+  files: string[];
+  busy: string | null;
+  onChange: (r: Review) => void;
+  onCancel: () => void;
+  onApprove: () => void;
+}) {
+  const out = review.out;
+  const commits = out?.commits ?? [];
+  const nothingToSend = review.kind !== "commit" && out !== undefined && commits.length === 0;
+  const ready =
+    review.kind === "commit" ? review.message.trim() !== "" : review.kind === "pr" ? review.title.trim() !== "" && !nothingToSend : !nothingToSend;
+  const verb = review.kind === "commit" ? "commit" : review.kind === "push" ? "push" : "open pull request";
+  return (
+    <form
+      className="os-card os-review"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready) onApprove();
+      }}
+    >
+      <strong>{review.kind === "commit" ? "Review commit" : review.kind === "push" ? "Review push" : "Review pull request"}</strong>
+      {review.kind === "commit" ? (
+        <>
+          <div className="os-muted os-small">These {files.length} file(s) will be committed:</div>
+          <ul className="os-list">
+            {files.map((f) => (
+              <li key={f} className="os-path">
+                {f}
+              </li>
+            ))}
+          </ul>
+          <input autoFocus placeholder="Commit message" value={review.message} onChange={(e) => onChange({ ...review, message: e.target.value })} />
+        </>
+      ) : (
+        <>
+          <div className="os-muted os-small">
+            {out
+              ? commits.length
+                ? `${commits.length} commit(s) on ${out.branch} will go to GitHub${out.base ? ` (not yet on ${out.base})` : ""}:`
+                : `Nothing to send: ${out.branch} has no commits that aren't on ${out.base ?? "GitHub"} yet.`
+              : "The current branch will be sent to GitHub."}
+          </div>
+          {commits.length ? (
+            <ul className="os-list">
+              {commits.map((c) => (
+                <li key={c.sha}>
+                  <code>{c.sha}</code> {c.subject} <span className="os-muted os-small">{c.author}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {out?.uncommitted.length ? (
+            <div className="os-warn os-small">
+              {out.uncommitted.length} uncommitted file(s) will not be included. Commit them first if they belong in this {review.kind === "pr" ? "pull request" : "push"}.
+            </div>
+          ) : null}
+          {review.kind === "pr" ? (
+            <>
+              <input autoFocus placeholder="Title" value={review.title} onChange={(e) => onChange({ ...review, title: e.target.value })} />
+              <textarea placeholder="What changed and why" value={review.body} onChange={(e) => onChange({ ...review, body: e.target.value })} />
+            </>
+          ) : null}
+        </>
+      )}
+      <div className="os-row">
+        <button className="os-primary" type="submit" disabled={!ready || Boolean(busy)}>
+          {busy === review.kind ? "Working…" : `Approve and ${verb}`}
+        </button>
+        <button type="button" onClick={onCancel} disabled={Boolean(busy)}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+const CI_LABEL: Record<string, string> = { success: "passing", failure: "failing", pending: "running", none: "no checks" };
+
+/** GitHub checks for the current branch, refreshed while the panel is open. */
+function ChecksView({ checks, refreshKey }: { checks: () => Promise<CiChecks>; refreshKey: number }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 20_000);
+    return () => clearInterval(t);
+  }, []);
+  const ci = useAsync(() => checks(), [checks, refreshKey, tick]);
+  if (ci.error) return <div className="os-muted os-small">CI: {ci.error}</div>;
+  const d = ci.data;
+  if (!d) return <div className="os-muted os-small">CI: loading…</div>;
+  return (
+    <div className="os-git-ci">
+      <div className="os-row os-between">
+        <strong className="os-small">
+          CI <span className={`os-ci os-ci-${d.state}`}>{CI_LABEL[d.state] ?? d.state}</span>
+        </strong>
+        {d.pull_request ? (
+          <a className="os-small" href={d.pull_request.url} target="_blank" rel="noreferrer">
+            PR #{d.pull_request.number}
+          </a>
+        ) : null}
+      </div>
+      <ul className="os-list">
+        {d.checks.map((c) => (
+          <li key={c.name} className="os-row os-between">
+            <span>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}</span>
+            <span className={`os-small os-ci os-ci-${c.status !== "completed" ? "pending" : c.conclusion === "success" || c.conclusion === "skipped" || c.conclusion === "neutral" ? "success" : "failure"}`}>
+              {c.status !== "completed" ? c.status.replace("_", " ") : c.conclusion}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
