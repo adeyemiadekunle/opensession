@@ -1,0 +1,14 @@
+# Build context for apps/web/Dockerfile (the repository root).
+**/node_modules
+**/dist
+**/.turbo
+**/release
+.git
+.trash
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/.venv
+services/gateway/tests
+scripts/check

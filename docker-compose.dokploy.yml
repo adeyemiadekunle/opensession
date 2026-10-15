@@ -1,0 +1,86 @@
+# OpenSession on one VPS with Dokploy (docs/DEPLOY-dokploy.md).
+#
+# In Dokploy: Create Service > Compose > this repository, compose path
+# docker-compose.dokploy.yml. Put the settings from .env.example in the Environment
+# tab, attach domains in the Domains tab (web -> port 80, gateway -> port 8000), and
+# run scripts/vps/setup-host.sh on the server once first (gVisor, network pools).
+#
+# No container_name anywhere: Dokploy rewrites names, so the gateway finds itself
+# ("self") and the egress proxy ("compose:egress") through Docker Compose's labels.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
+        VITE_GATEWAY_URL: ${VITE_GATEWAY_URL}
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  gateway:
+    build: services/gateway
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SANDBOX_GATEWAY_CONTAINER: self
+      SANDBOX_EGRESS_PROXY: compose:egress
+      EGRESS_CONF_DIR: /egress-conf
+      EGRESS_GLOBAL_ALLOWLIST: /etc/opensession/egress-allowlist.txt
+      DATABASE_URL: postgresql://opensession:${POSTGRES_PASSWORD}@db:5432/opensession
+      OPENSESSION_DB: /data/opensession.db
+    expose:
+      - "8000"
+    volumes:
+      # Full control of Docker: this server should run nothing you don't trust it with.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gateway-data:/data
+      - egress-conf:/egress-conf
+      - ./services/egress/allowlist.txt:/etc/opensession/egress-allowlist.txt:ro
+    depends_on:
+      sandbox-image:
+        condition: service_completed_successfully
+      egress:
+        condition: service_started
+      db:
+        condition: service_healthy
+
+  # Builds the sandbox image (opencode-sandbox:latest) on each deploy, then exits.
+  # The gateway starts one container from it per user and project.
+  sandbox-image:
+    build:
+      context: services/sandbox
+      args:
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-2.0.0}
+    image: ${SANDBOX_IMAGE:-opencode-sandbox:latest}
+    entrypoint: ["true"]
+    restart: "no"
+
+  # The gateway's database. Not published and not on any sandbox network.
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opensession
+      POSTGRES_DB: opensession
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opensession -d opensession"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Allowlist proxy: the only route from sandboxes to the internet.
+  egress:
+    build: services/egress
+    restart: unless-stopped
+    volumes:
+      - egress-conf:/etc/squid/conf.d
+
+volumes:
+  pg-data:
+  gateway-data:
+  egress-conf:
