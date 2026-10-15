@@ -304,10 +304,39 @@ def test_egress_proxy_makes_networks_internal_and_injects_proxy_env():
         assert net.kw["internal"] is True
         assert net.members == {"gw", "egress"}
         env = c.kwargs["environment"]
-        assert env["HTTPS_PROXY"] == env["HTTP_PROXY"] == "http://egress:3128"  # not overridable
+        assert env["HTTPS_PROXY"] == env["HTTP_PROXY"] == "http://opensession-egress:3128"  # not overridable
+        assert net.aliases["egress"] == ["opensession-egress"]  # the proxy's name in every sandbox network
         assert "localhost" in env["NO_PROXY"]
         await mgr.stop("alice", "default")
         assert c.kwargs["network"] not in docker.networks.live
+
+    asyncio.run(go())
+
+
+def test_gateway_and_proxy_found_by_compose_labels(monkeypatch):
+    """Under Dokploy (no fixed container_name): "self" and "compose:<service>"."""
+    import socket
+
+    from .fakes import FakeHelper
+
+    mgr, docker, _ = make_manager(egress_proxy="compose:egress", gateway_container="self")
+    project = {"com.docker.compose.project": "opensession-abc12"}
+    docker.containers.helpers = {
+        "f00dcafe1234": FakeHelper("opensession-abc12-gateway-1", {**project, "com.docker.compose.service": "gateway"}),
+        "opensession-abc12-egress-1": FakeHelper("opensession-abc12-egress-1", {**project, "com.docker.compose.service": "egress"}),
+        "other-egress-1": FakeHelper("other-egress-1", {"com.docker.compose.project": "other", "com.docker.compose.service": "egress"}),
+    }
+    monkeypatch.setattr(socket, "gethostname", lambda: "f00dcafe1234")
+
+    async def go():
+        await mgr.ensure("alice", "default")
+        (c,) = docker.containers.by_name.values()
+        net = docker.networks.live[c.kwargs["network"]]
+        assert net.members == {"opensession-abc12-gateway-1", "opensession-abc12-egress-1"}
+        assert net.aliases["opensession-abc12-egress-1"] == ["opensession-egress"]
+        assert c.kwargs["environment"]["HTTPS_PROXY"] == "http://opensession-egress:3128"
+        assert mgr.exec_in("compose:egress", ["squid", "-k", "reconfigure"])
+        assert docker.containers.helpers["opensession-abc12-egress-1"].execs == [["squid", "-k", "reconfigure"]]
 
     asyncio.run(go())
 

@@ -60,8 +60,10 @@ class FakeContainer:
 class FakeHelper:
     """A helper container such as the egress proxy; records exec calls."""
 
-    def __init__(self, name):
+    def __init__(self, name, labels=None):
         self.name = name
+        self.labels = labels or {}
+        self.status = "running"
         self.execs = []
 
     def exec_run(self, cmd):
@@ -113,6 +115,9 @@ class FakeContainers:
             wanted = (x.split("=", 1) for x in labels)
             if not [k for k, v in wanted if c.labels.get(k) != v]:
                 out.append(c)
+        for h in self.helpers.values():  # helper containers carry compose labels
+            if h.labels and not [k for k, v in (x.split("=", 1) for x in labels) if h.labels.get(k) != v]:
+                out.append(h)
         return out
 
 
@@ -145,7 +150,8 @@ class FakeNetwork:
     def reload(self):
         pass
 
-    def connect(self, container):
+    def connect(self, container, aliases=None):
+        self.aliases = {**getattr(self, "aliases", {}), str(getattr(container, "name", container)): aliases or []}
         if isinstance(container, FakeContainer):
             container.attrs["NetworkSettings"]["Networks"][self.name] = {"IPAddress": container.ip}
             self.members.add(container.name)

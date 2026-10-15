@@ -84,6 +84,13 @@ Windows binary from the OpenCode site; set `OPENCODE_BIN` if it is not on PATH).
     pnpm cli attach --local -C ./my-project              # chat from the terminal
     pnpm cli local serve -C ./my-project
 
+### Production: one VPS with Dokploy
+
+[docs/DEPLOY-dokploy.md](docs/DEPLOY-dokploy.md) deploys everything (web app,
+gateway, Postgres, egress proxy, sandboxes) on one Ubuntu VPS behind Dokploy's
+HTTPS: `docker-compose.dokploy.yml`, plus `scripts/vps/setup-host.sh` once for
+gVisor and Docker's network pools.
+
 ### Desktop installers
 
 `pnpm --filter @opensession/desktop dist` builds an installer for the current OS into

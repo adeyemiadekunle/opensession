@@ -11,12 +11,16 @@ Network isolation
   disconnected and the network removed on stop/destroy. That keeps the number of
   Docker networks close to max_running.
 - If the gateway itself runs in a container (required on Docker Desktop), set
-  SANDBOX_GATEWAY_CONTAINER to its name; it is connected to each sandbox network
-  so it can reach the sandbox, and disconnected before the network is removed.
-- Egress: with SANDBOX_EGRESS_PROXY set (the proxy container's name), sandbox
-  networks are created "internal" (no route out), the proxy is connected to each
-  one, and sandboxes get HTTP(S)_PROXY pointing at it. The proxy only allows an
-  allowlist of domains (egress/allowlist.txt).
+  SANDBOX_GATEWAY_CONTAINER; it is connected to each sandbox network so it can
+  reach the sandbox, and disconnected before the network is removed.
+- Egress: with SANDBOX_EGRESS_PROXY set, sandbox networks are created "internal"
+  (no route out), the proxy is connected to each one under the alias
+  "opensession-egress", and sandboxes get HTTP(S)_PROXY pointing at that alias. The
+  proxy only allows an allowlist of domains (egress/allowlist.txt).
+- Both settings take a container name, "self" (the container the gateway runs
+  in) or "compose:<service>" (a service of the gateway's own compose project).
+  The last two need no fixed container_name, which platforms such as Dokploy
+  rewrite or discourage.
 - Docker's default address pools allow only ~30 bridge networks. For more running
   sandboxes, configure "default-address-pools" in daemon.json with small (/24 or
   /28) subnets.
@@ -38,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import secrets
+import socket
 from typing import Any
 
 from .provider import (
@@ -64,6 +69,7 @@ except ImportError:  # pragma: no cover
 
 
 LABEL = "oc.managed"
+PROXY_ALIAS = "opensession-egress"  # the egress proxy's name inside every sandbox network
 
 
 class DockerProvider(SandboxProvider):
@@ -72,6 +78,43 @@ class DockerProvider(SandboxProvider):
         self.cfg = cfg
         self._docker = docker_client
         self.sandbox_subnets: set[ipaddress._BaseNetwork] = set()
+        self._helpers: dict[str, str] = {}  # resolved SANDBOX_*_CONTAINER specs
+        self._self: Any = None  # the gateway's own container (False: not in one)
+
+    # ---- helper containers (gateway, egress proxy) -----------------------------------
+
+    def _self_container(self) -> Any | None:
+        """The container this process runs in (Docker sets its hostname to the id)."""
+        if self._self is None:
+            try:
+                self._self = self._d().containers.get(socket.gethostname())
+            except Exception:
+                self._self = False
+        return self._self or None
+
+    def helper(self, spec: str | None) -> str | None:
+        """Container name for a helper spec: a name, "self" or "compose:<service>"."""
+        if not spec:
+            return None
+        if spec in self._helpers:
+            return self._helpers[spec]
+        name: str | None = None
+        if spec == "self":
+            me = self._self_container()
+            name = me.name if me is not None else None
+        elif spec.startswith("compose:"):
+            me = self._self_container()
+            project = self._label(me, "com.docker.compose.project") if me is not None else ""
+            if project:
+                found = self._d().containers.list(
+                    filters={"label": [f"com.docker.compose.project={project}", f"com.docker.compose.service={spec[8:]}"]}
+                )
+                name = found[0].name if found else None
+        else:
+            name = spec
+        if name:
+            self._helpers[spec] = name  # only successes: a missing proxy may start later
+        return name
 
     # ---- names --------------------------------------------------------------
 
@@ -200,7 +243,7 @@ class DockerProvider(SandboxProvider):
     def exec_in(self, container: str, cmd: list[str]) -> bool:
         """Run a command in a helper container (e.g. reload the egress proxy)."""
         try:
-            res = self._d().containers.get(container).exec_run(cmd)
+            res = self._d().containers.get(self.helper(container) or container).exec_run(cmd)
             return getattr(res, "exit_code", 1) == 0
         except Exception:
             return False
@@ -266,9 +309,12 @@ class DockerProvider(SandboxProvider):
                 internal=self.cfg.internal_network or bool(self.cfg.egress_proxy),
                 labels=labels,
             )
-        for helper in (self.cfg.gateway_container, self.cfg.egress_proxy):
-            if helper:
-                self._connect(net, helper)
+        gw = self.helper(self.cfg.gateway_container)
+        if gw:
+            self._connect(net, gw)
+        proxy = self.helper(self.cfg.egress_proxy)
+        if proxy:
+            self._connect(net, proxy, aliases=[PROXY_ALIAS])
         self._record_subnet(net)
         return net
 
@@ -289,9 +335,12 @@ class DockerProvider(SandboxProvider):
                 pass
 
     @staticmethod
-    def _connect(net: Any, container: Any) -> None:
+    def _connect(net: Any, container: Any, aliases: list[str] | None = None) -> None:
         try:
-            net.connect(container)
+            if aliases:
+                net.connect(container, aliases=aliases)
+            else:
+                net.connect(container)
         except APIError as e:  # already connected is fine
             if "already" not in str(e).lower():
                 raise
@@ -312,7 +361,7 @@ class DockerProvider(SandboxProvider):
             return
         targets = [
             t
-            for t in (container, self.cfg.gateway_container, self.cfg.egress_proxy)
+            for t in (container, self.helper(self.cfg.gateway_container), self.helper(self.cfg.egress_proxy))
             if t is not None
         ]
         for t in targets:
@@ -342,7 +391,7 @@ class DockerProvider(SandboxProvider):
         password = secrets.token_urlsafe(24)
         env = {**(extra_env or {})}
         if self.cfg.egress_proxy:
-            proxy = f"http://{self.cfg.egress_proxy}:{self.cfg.egress_proxy_port}"
+            proxy = f"http://{PROXY_ALIAS}:{self.cfg.egress_proxy_port}"
             for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
                 env[k] = proxy
             env["NO_PROXY"] = env["no_proxy"] = "localhost,127.0.0.1"
