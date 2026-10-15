@@ -20,4 +20,9 @@ if [ -d "$IN" ]; then
   cp -R "$IN/." "$CFG/"
   rm -rf "$IN"
 fi
+# /tmp is a noexec tmpfs. OpenCode (a Bun binary) extracts native libraries, e.g. for
+# the terminal (PTY), to its temp folder and loads them, which noexec forbids; give it
+# a temp folder in the container's own filesystem instead.
+export TMPDIR="$HOME/.cache/tmp" BUN_TMPDIR="$HOME/.cache/tmp"
+mkdir -p "$TMPDIR" && chmod 700 "$TMPDIR"
 exec opencode serve --hostname 0.0.0.0 --port 4096
