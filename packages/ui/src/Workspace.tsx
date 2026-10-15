@@ -4,6 +4,7 @@ import {
   eventCursor,
   type CommandInfo,
   type FormRequest,
+  type GitActions,
   type Message,
   type Model,
   type ModelRef,
@@ -14,6 +15,7 @@ import {
 import { errText, storageGet, storageSet, useAsync } from "./hooks";
 import { MessageView } from "./Messages";
 import { DiffPanel, FilesPanel } from "./Panels";
+import { GitPanel } from "./GitPanel";
 import { Requests } from "./Requests";
 
 const MODEL_KEY = "opensession.model";
@@ -33,10 +35,12 @@ export interface WorkspaceProps {
   agents?: string[];
   /** Commands from the agent setup; shown even before OpenCode has listed them. */
   commands?: { name: string; description?: string | null }[];
+  /** Branch actions (checkout, push, pull request) for the Git tab. */
+  git?: GitActions;
 }
 
 /** Chat with the agent, plus the workspace's files and changes. Works for cloud and local. */
-export function Workspace({ client, noModels, skills = [], agents = [], commands: setupCommands = [] }: WorkspaceProps) {
+export function Workspace({ client, noModels, skills = [], agents = [], commands: setupCommands = [], git }: WorkspaceProps) {
   const models = useAsync<Model[]>(() => client.listModels(), [client]);
   const commands = useAsync<CommandInfo[]>(() => client.listCommands().catch(() => []), [client]);
   const agentChoices = useMemo(
@@ -53,7 +57,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<"files" | "changes">("files");
+  const [tab, setTab] = useState<"files" | "changes" | "git">("files");
   const [refreshKey, setRefreshKey] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -305,11 +309,16 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
           <button className={tab === "changes" ? "active" : undefined} onClick={() => setTab("changes")}>
             Changes
           </button>
+          <button className={tab === "git" ? "active" : undefined} onClick={() => setTab("git")}>
+            Git
+          </button>
         </div>
         {tab === "files" ? (
           <FilesPanel client={client} refreshKey={refreshKey} />
-        ) : (
+        ) : tab === "changes" ? (
           <DiffPanel client={client} refreshKey={refreshKey} />
+        ) : (
+          <GitPanel client={client} actions={git} refreshKey={refreshKey} />
         )}
       </section>
     </div>

@@ -96,6 +96,22 @@ class UserStore:
                     user_id TEXT PRIMARY KEY,
                     config TEXT NOT NULL,
                     updated_at REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS github_installations (
+                    user_id TEXT NOT NULL,
+                    installation_id INTEGER NOT NULL,
+                    account TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (user_id, installation_id));
+                CREATE TABLE IF NOT EXISTS workspaces (
+                    user_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    repo TEXT,
+                    branch TEXT,
+                    installation_id INTEGER,
+                    cloned_at REAL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (user_id, id));
                 CREATE TABLE IF NOT EXISTS egress_domains (
                     user_id TEXT NOT NULL,
                     domain TEXT NOT NULL,
@@ -217,5 +233,81 @@ class UserStore:
                 (user, text, time.time()),
             )
 
+    # ---- GitHub installations ----------------------------------------------------
+
+    def add_installation(self, user: str, installation_id: int, account: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO github_installations VALUES (?,?,?,?) ON CONFLICT(user_id, installation_id) "
+                "DO UPDATE SET account=excluded.account",
+                (user, installation_id, account, time.time()),
+            )
+
+    def installations(self, user: str) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT installation_id, account FROM github_installations WHERE user_id=? ORDER BY created_at", (user,)
+            ).fetchall()
+        return [{"installation_id": i, "account": a} for i, a in rows]
+
+    def remove_installation(self, user: str, installation_id: int) -> bool:
+        with self._lock, self._db:
+            cur = self._db.execute(
+                "DELETE FROM github_installations WHERE user_id=? AND installation_id=?", (user, installation_id)
+            )
+        return cur.rowcount > 0
+
+    # ---- workspaces (projects) ------------------------------------------------------
+
+    def upsert_workspace(self, user: str, ws: dict) -> dict:
+        with self._lock, self._db:
+            self._db.execute(
+                """INSERT INTO workspaces (user_id, id, name, repo, branch, installation_id, cloned_at, created_at)
+                   VALUES (?,?,?,?,?,?,NULL,?) ON CONFLICT(user_id, id) DO UPDATE SET name=excluded.name,
+                   repo=excluded.repo, branch=excluded.branch, installation_id=excluded.installation_id""",
+                (user, ws["id"], ws["name"], ws.get("repo"), ws.get("branch"), ws.get("installation_id"), time.time()),
+            )
+        return self.get_workspace(user, ws["id"])  # type: ignore[return-value]
+
+    def get_workspace(self, user: str, ws_id: str) -> dict | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT id, name, repo, branch, installation_id, cloned_at, created_at FROM workspaces "
+                "WHERE user_id=? AND id=?",
+                (user, ws_id),
+            ).fetchone()
+        return _ws(row) if row else None
+
+    def list_workspaces(self, user: str) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, name, repo, branch, installation_id, cloned_at, created_at FROM workspaces "
+                "WHERE user_id=? ORDER BY created_at",
+                (user,),
+            ).fetchall()
+        return [_ws(r) for r in rows]
+
+    def mark_cloned(self, user: str, ws_id: str) -> None:
+        with self._lock, self._db:
+            self._db.execute("UPDATE workspaces SET cloned_at=? WHERE user_id=? AND id=?", (time.time(), user, ws_id))
+
+    def delete_workspace(self, user: str, ws_id: str) -> bool:
+        with self._lock, self._db:
+            cur = self._db.execute("DELETE FROM workspaces WHERE user_id=? AND id=?", (user, ws_id))
+        return cur.rowcount > 0
+
     def close(self) -> None:
         self._db.close()
+
+
+def _ws(row) -> dict:
+    i, name, repo, branch, inst, cloned, created = row
+    return {
+        "id": i,
+        "name": name,
+        "repo": repo,
+        "branch": branch,
+        "installation_id": inst,
+        "cloned": cloned is not None,
+        "created_at": created,
+    }

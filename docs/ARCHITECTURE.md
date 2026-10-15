@@ -68,6 +68,25 @@ is validated (hostnames only; `*.example.com` for subdomains; `localhost`,
 private, loopback and link-local destinations before any allow rule, so an allowed
 name that resolves to an internal address is still blocked.
 
+## Projects and GitHub
+
+A project is a row in the gateway's `workspaces` table (name, optional GitHub repo
+and branch, installation id). The web app, CLI (`-p`) and API (`X-Workspace`) pick
+the project; the orchestrator runs one sandbox per (user, project).
+
+GitHub access uses a GitHub App (`services/gateway/src/opensession/github.py`):
+
+- connect: install URL with an HMAC-signed, 10-minute state -> callback verifies the
+  state, exchanges the OAuth code and checks the installation is in the GitHub
+  user's `/user/installations` before storing (user, installation);
+- linking a repo checks `/repos/{repo}/installation` is one of the user's;
+- clone (first open), push and PR mint an installation token limited to that one
+  repository (cached until 5 minutes before expiry) and pass it to git as an
+  `http.extraheader` through `GIT_CONFIG_*` env variables of a single `exec`;
+- the branch view comes from OpenCode's `/api/vcs` endpoints inside the sandbox.
+
+The desktop app uses the user's own git and credentials instead.
+
 ## Later: driving a local computer from the web
 
 To let the web app control a user's own machine, the desktop app (or

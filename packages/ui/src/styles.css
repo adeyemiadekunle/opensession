@@ -179,3 +179,10 @@ code { font-family: var(--os-mono); font-size: 0.92em; }
 .os-suggest { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .os-suggest button { font-size: 12px; padding: 2px 8px; }
 @media (max-width: 800px) { .os-split { grid-template-columns: 1fr; } }
+
+/* Git panel, projects */
+.os-git { display: flex; flex-direction: column; gap: 10px; }
+.os-git-changes { border-top: 1px solid var(--os-border); padding-top: 8px; }
+.os-project-switch { display: flex; align-items: center; gap: 6px; }
+.os-project-switch select { max-width: 220px; }
+.os-repo-list { max-height: 260px; overflow: auto; }

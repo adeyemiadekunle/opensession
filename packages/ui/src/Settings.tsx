@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CloudClient, LocalClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
+import { GithubCard } from "./Projects";
 
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: "Anthropic",
@@ -18,6 +19,7 @@ export function CloudSettings({ client }: { client: CloudClient }) {
   return (
     <div className="os-settings">
       <ApiKeys client={client} />
+      <GithubCard client={client} />
       <AllowedDomains client={client} />
       <AccessTokens client={client} />
     </div>

@@ -39,6 +39,17 @@ class FakeContainer:
         self.removed = True
         self.status = "removed"
 
+    def exec_run(self, cmd, environment=None, workdir=None, user=None, demux=False):
+        """Records commands; replies via the containers' exec_handler (default: success)."""
+        self.execs = getattr(self, "execs", []) + [(cmd, dict(environment or {}), workdir, user)]
+        code, out = self.exec_handler(cmd) if getattr(self, "exec_handler", None) else (0, b"")
+
+        class R:
+            exit_code = code
+            output = out
+
+        return R()
+
     def put_archive(self, path, data):
         self.archives = getattr(self, "archives", []) + [(path, data)]
         return True
@@ -71,9 +82,12 @@ class FakeContainers:
         c.start()
         return c
 
+    exec_handler = None
+
     def create(self, image, **kwargs):
         self.run_calls += 1
         c = FakeContainer(kwargs["name"], kwargs, f"10.0.0.{self.run_calls}")
+        c.exec_handler = lambda cmd: (self.exec_handler or (lambda _c: (0, b"")))(cmd)
         c.status = "created"
         c.image = image
         self.by_name[c.name] = c
@@ -175,6 +189,12 @@ def sandbox_transport(seen):
         if request.url.path.endswith("/log"):
             return httpx.Response(200, stream=httpx.ByteStream(b'data: {"type":"log.synced"}\n\n'),
                                   headers={"content-type": "text/event-stream"})
+        if request.url.path == "/api/vcs":
+            return httpx.Response(200, json={"data": {"branch": {"current": "feature-x", "default": "main"}}})
+        if request.url.path == "/api/vcs/status":
+            return httpx.Response(200, json={"data": [{"file": "a.py", "additions": 3, "deletions": 1, "status": "modified"}]})
+        if request.url.path == "/api/vcs/branches":
+            return httpx.Response(200, json={"data": ["main", "feature-x"]})
         if request.url.path == "/api/health":
             return httpx.Response(200, json={"healthy": True, "host": request.url.host})
         if request.url.path == "/api/session" and request.method == "POST":

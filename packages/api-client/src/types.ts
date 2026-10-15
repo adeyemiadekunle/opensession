@@ -79,9 +79,52 @@ export interface LogEvent {
 export type PermissionReply = "once" | "always" | "reject";
 
 /** Everything the workspace UI needs; implemented by CloudClient and LocalClient. */
+export interface GitFileStatus {
+  file: string;
+  additions: number;
+  deletions: number;
+  status: "added" | "deleted" | "modified" | string;
+}
+
+export interface GitInfo {
+  branch: string | null;
+  default_branch: string | null;
+  status: GitFileStatus[];
+  branches: string[];
+  /** owner/name when the project is linked to GitHub (cloud). */
+  repo: string | null;
+  can_push: boolean;
+}
+
+/** Branch actions; cloud uses the gateway, the desktop app runs git locally. */
+export interface GitActions {
+  checkout(branch: string, create?: boolean): Promise<unknown>;
+  push?(): Promise<{ branch: string }>;
+  pullRequest?(title: string, body: string): Promise<{ url?: string | null; number?: number | null }>;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  repo: string | null;
+  branch: string | null;
+  installation_id?: number | null;
+  cloned: boolean;
+}
+
+export interface GithubRepo {
+  full_name: string;
+  default_branch: string;
+  private: boolean;
+  installation_id: number;
+  account: string;
+}
+
 export interface OpenSessionClient {
   readonly mode: Mode;
   health(): Promise<unknown>;
+  /** Branch, changed files and branches of the workspace's git repository. */
+  gitInfo(): Promise<GitInfo>;
   listModels(): Promise<Model[]>;
   listSessions(): Promise<Session[]>;
   createSession(opts: { model: ModelRef; agent?: string }): Promise<Session>;

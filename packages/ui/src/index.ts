@@ -6,3 +6,5 @@ export { FilesPanel, DiffPanel } from "./Panels";
 export { useAsync, errText } from "./hooks";
 export { AgentSetup } from "./AgentSetup";
 export type { SecretsApi } from "./AgentSetup";
+export { GitPanel } from "./GitPanel";
+export { GithubCard, ProjectsPage } from "./Projects";

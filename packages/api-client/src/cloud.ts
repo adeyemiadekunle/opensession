@@ -1,6 +1,10 @@
 import { Http, type HeadersFn, unwrap } from "./http";
 import { parseSSE } from "./sse";
 import type {
+  GitActions,
+  GitInfo,
+  GithubRepo,
+  Project,
   AgentConfig,
   AgentConfigResponse,
   AgentConfigStore,
@@ -68,6 +72,32 @@ export class CloudClient implements OpenSessionClient {
 
   health() {
     return this.http.get("/health");
+  }
+  /** The same account, working in another project (workspace). */
+  withWorkspace(workspace: string): CloudClient {
+    return new CloudClient({ ...this.o, workspace });
+  }
+  get workspace(): string {
+    return this.o.workspace ?? "default";
+  }
+  gitInfo(): Promise<GitInfo> {
+    return this.http.get("/git");
+  }
+  gitCheckout(branch: string, create = false) {
+    return this.http.post("/git/checkout", { json: { branch, create } });
+  }
+  gitPush(branch?: string): Promise<{ repo: string; branch: string }> {
+    return this.http.post("/git/push", { json: branch ? { branch } : {} });
+  }
+  pullRequest(o: { title: string; body?: string; base?: string }): Promise<{ number: number; url: string; head: string; base: string }> {
+    return this.http.post("/git/pull-request", { json: o });
+  }
+  gitActions(): GitActions {
+    return {
+      checkout: (b, create) => this.gitCheckout(b, create),
+      push: () => this.gitPush(),
+      pullRequest: (title, body) => this.pullRequest({ title, body }),
+    };
   }
   async listModels(): Promise<Model[]> {
     return unwrap<Model[]>(await this.http.get("/models"));
@@ -190,6 +220,31 @@ export class CloudClient implements OpenSessionClient {
   async deleteToken(id: string) {
     await this.http.del(`/tokens/${enc(id)}`);
   }
+  // ---- GitHub and projects ------------------------------------------------------
+
+  github(): Promise<{ configured: boolean; installations: { installation_id: number; account: string }[] }> {
+    return this.http.get("/github");
+  }
+  /** URL to install the OpenSession GitHub App on the repositories the user picks. */
+  async githubConnectUrl(): Promise<string> {
+    return (await this.http.post("/github/connect")).url;
+  }
+  githubRepos(): Promise<GithubRepo[]> {
+    return this.http.get("/github/repos");
+  }
+  async githubForget(installationId: number) {
+    await this.http.del(`/github/installations/${installationId}`);
+  }
+  listProjects(): Promise<Project[]> {
+    return this.http.get("/workspaces");
+  }
+  createProject(o: { name: string; repo?: string; branch?: string }): Promise<Project> {
+    return this.http.post("/workspaces", { json: o });
+  }
+  async deleteProject(id: string, deleteData = false) {
+    await this.http.del(`/workspaces/${enc(id)}`, { query: { delete_data: String(deleteData) } });
+  }
+
   async stopWorkspace() {
     await this.http.post("/workspace/stop");
   }

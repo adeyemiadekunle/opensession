@@ -8,5 +8,8 @@ const bridge: DesktopBridge = {
   chooseFolder: () => ipcRenderer.invoke("local:chooseFolder"),
   restart: () => ipcRenderer.invoke("local:restart"),
   openCloud: () => ipcRenderer.invoke("open:cloud"),
+  gitCheckout: (branch, create) => ipcRenderer.invoke("git:checkout", branch, Boolean(create)),
+  gitPush: () => ipcRenderer.invoke("git:push"),
+  gitPullRequest: (title, body) => ipcRenderer.invoke("git:pr", title, body),
 };
 contextBridge.exposeInMainWorld("opensession", bridge);

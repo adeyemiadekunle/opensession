@@ -1,4 +1,4 @@
-import { LocalClient, type AgentConfigStore } from "@opensession/api-client";
+import { LocalClient, type AgentConfigStore, type GitActions } from "@opensession/api-client";
 import { AgentSetup, LocalKeys, Workspace, useAsync } from "@opensession/ui";
 import { useEffect, useMemo, useState } from "react";
 import type { DesktopBridge, LocalStatus } from "../main/bridge";
@@ -32,6 +32,14 @@ export function App() {
     [],
   );
   const setup = useAsync(() => store.get(), [store, gen]);
+  const git = useMemo<GitActions>(
+    () => ({
+      checkout: (b, create) => window.opensession.gitCheckout(b, create),
+      push: () => window.opensession.gitPush(),
+      pullRequest: (t, b) => window.opensession.gitPullRequest(t, b),
+    }),
+    [],
+  );
   const client = useMemo(
     () => (st?.running && st.folder ? new LocalClient({ baseUrl: "ocl://local", directory: st.folder }) : null),
     [st?.running, st?.folder, gen],
@@ -99,6 +107,7 @@ export function App() {
           <Workspace
             key={gen}
             client={client}
+            git={git}
             skills={setup.data?.config.skills.map((s) => s.id) ?? []}
             agents={setup.data?.config.agents.filter((a) => a.mode !== "subagent").map((a) => a.id) ?? []}
             commands={setup.data?.config.commands ?? []}

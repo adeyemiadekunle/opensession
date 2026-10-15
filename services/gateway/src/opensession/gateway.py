@@ -40,13 +40,14 @@ from typing import Annotated, Literal
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import AfterValidator, BaseModel, Field, SecretStr
 
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import agentconfig
 from .agentconfig import BUILTIN_AGENTS, BUILTIN_TOOLS, AgentConfig
 from .auth import USER_ID_RE, AuthConfig, Authenticator, Principal
+from .github import BRANCH_RE, REPO_RE, GitHubApp, GitHubAppConfig, GitHubError, git_auth_env
 from .egress import EgressRules
 from .userstore import UserStore, UserStoreError
 from .keystore import (
@@ -137,6 +138,37 @@ class SecretBody(BaseModel):
     value: SecretStr = Field(min_length=1, max_length=4096)
 
 
+def _check_branch(v: str | None) -> str | None:
+    if v is not None and not BRANCH_RE.match(v):
+        raise ValueError("invalid git branch name")
+    return v
+
+
+BranchName = Annotated[str | None, AfterValidator(_check_branch)]
+
+
+class WorkspaceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    repo: str | None = Field(default=None, pattern=REPO_RE.pattern)
+    branch: BranchName = None
+
+
+class Checkout(BaseModel):
+    branch: Annotated[str, AfterValidator(_check_branch)] = Field(min_length=1, max_length=200)
+    create: bool = False
+
+
+class Push(BaseModel):
+    branch: BranchName = None
+
+
+class PullRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=256)
+    body: str = Field(default="", max_length=60_000)
+    base: BranchName = None
+    branch: BranchName = None
+
+
 class TokenCreate(BaseModel):
     name: str = Field(default="cli", max_length=64)
 
@@ -208,6 +240,7 @@ def create_app(
     auth_config: AuthConfig | None = None,
     users: UserStore | None = None,
     egress: EgressRules | None = None,
+    github: "GitHubApp | None | object" = _FROM_ENV,
 ) -> FastAPI:
     """keystore: a KeyStore, None to disable key storage, or (default) from env.
     http_transport: used for outbound key-validation requests (tests pass a mock).
@@ -224,6 +257,12 @@ def create_app(
         if app.state.egress.enabled:
             mgr.network_listeners.append(app.state.egress.sync)
         app.state.http = httpx.AsyncClient(transport=http_transport)
+        if github is _FROM_ENV:
+            gh_cfg = GitHubAppConfig.from_env()
+            app.state.github = GitHubApp(gh_cfg, app.state.http) if gh_cfg else None
+        else:
+            app.state.github = github
+        app.state.clone_locks = {}
         task = asyncio.create_task(mgr.run_reaper()) if reaper else None
         try:
             if app.state.egress.enabled:
@@ -301,7 +340,9 @@ def create_app(
         mgr: SandboxManager = request.app.state.sandboxes
         env, cfg = await user_profile(request, ref[0])
         try:
-            return await mgr.client(*ref, env, cfg)
+            client = await mgr.client(*ref, env, cfg)
+            await prepare_repo(request, ref)
+            return client
         except SandboxCapacityError as e:
             raise HTTPException(503, str(e)) from e
         except SandboxError as e:
@@ -420,6 +461,227 @@ def create_app(
             raise HTTPException(400, str(e)) from None
         await after_domain_change(request)
         return await domains_response(request, user)
+
+    # ---- GitHub, projects (workspaces) and git ----------------------------------
+
+    WEB_URL = os.environ.get("OPENSESSION_WEB_URL", "http://localhost:5173")
+
+    def require_github(request: Request) -> GitHubApp:
+        gh = request.app.state.github
+        if gh is None:
+            raise HTTPException(503, "GitHub is not configured on this server (GITHUB_APP_* settings)")
+        return gh
+
+    def gh_error(e: GitHubError) -> HTTPException:
+        return HTTPException(e.status, str(e))
+
+    async def workspace_record(request: Request, ref: tuple[str, str]) -> dict | None:
+        return await asyncio.to_thread(request.app.state.users.get_workspace, *ref)
+
+    async def sandbox_exec(request: Request, ref: tuple[str, str], script: str, env: dict | None = None) -> tuple[int, str]:
+        return await request.app.state.sandboxes.exec(*ref, ["sh", "-c", script], env=env)
+
+    async def prepare_repo(request: Request, ref: tuple[str, str]) -> None:
+        """First start of a project linked to a repository: clone it into /workspace."""
+        ws = await workspace_record(request, ref)
+        if not ws or not ws.get("repo") or ws.get("cloned"):
+            return
+        lock = request.app.state.clone_locks.setdefault(ref, asyncio.Lock())
+        async with lock:
+            ws = await workspace_record(request, ref)
+            if not ws or ws.get("cloned"):
+                return
+            gh = require_github(request)
+            try:
+                token = await gh.installation_token(int(ws["installation_id"]), ws["repo"])
+            except GitHubError as e:
+                raise gh_error(e) from None
+            branch = ws.get("branch") or "main"
+            if not BRANCH_RE.match(branch) or not REPO_RE.match(ws["repo"]):
+                raise HTTPException(409, "invalid repository or branch name on this project")
+            script = (
+                "set -e; cd /workspace; "
+                'if [ -d .git ]; then exit 0; fi; '
+                f'git init -q -b "{branch}"; '
+                f'git remote add origin "https://github.com/{ws["repo"]}.git"; '
+                f'git fetch -q --depth 200 origin "+refs/heads/{branch}:refs/remotes/origin/{branch}"; '
+                f'git checkout -q -B "{branch}" "origin/{branch}"; '
+                f'git branch -q --set-upstream-to="origin/{branch}" "{branch}"'
+            )
+            code, out = await sandbox_exec(request, ref, script, git_auth_env(token))
+            if code != 0:
+                raise HTTPException(502, f"could not clone {ws['repo']}: {out[-400:]}")
+            await asyncio.to_thread(request.app.state.users.mark_cloned, *ref)
+
+    @app.get("/github")
+    async def github_status(request: Request, user: str = Depends(current_user)):
+        gh = request.app.state.github
+        insts = await asyncio.to_thread(request.app.state.users.installations, user)
+        return {"configured": gh is not None, "installations": insts}
+
+    @app.post("/github/connect")
+    async def github_connect(request: Request, user: str = Depends(current_user)):
+        """URL that installs the OpenSession GitHub App on the repos the user picks."""
+        gh = require_github(request)
+        return {"url": gh.install_url(gh.make_state(user))}
+
+    @app.get("/github/callback")
+    async def github_callback(
+        request: Request,
+        state: str = "",
+        code: str = "",
+        installation_id: int | None = None,
+        setup_action: str = "",
+    ):
+        """Where GitHub sends the user after installing the app (no OpenSession auth
+        header here: the signed state identifies the user)."""
+        from fastapi.responses import RedirectResponse
+
+        gh = require_github(request)
+        try:
+            user = gh.verify_state(state)
+            if not code or installation_id is None:
+                raise GitHubError("GitHub did not send the installation details; connect again", 400)
+            user_token = await gh.exchange_code(code)
+            if installation_id not in await gh.user_installation_ids(user_token):
+                raise GitHubError("that installation does not belong to your GitHub account", 403)
+            account = await gh.installation_account(installation_id)
+            await asyncio.to_thread(request.app.state.users.add_installation, user, installation_id, account)
+        except GitHubError as e:
+            from urllib.parse import quote
+
+            return RedirectResponse(f"{WEB_URL}/settings?github=error&reason={quote(str(e))}", 302)
+        return RedirectResponse(f"{WEB_URL}/settings?github=connected", 302)
+
+    @app.delete("/github/installations/{installation_id}", status_code=204)
+    async def github_forget(installation_id: int, request: Request, user: str = Depends(current_user)):
+        """Stop using an installation (uninstall the app on GitHub to revoke access)."""
+        if not await asyncio.to_thread(request.app.state.users.remove_installation, user, installation_id):
+            raise HTTPException(404, "no such installation")
+
+    @app.get("/github/repos")
+    async def github_repos(request: Request, user: str = Depends(current_user)):
+        gh = require_github(request)
+        out = []
+        for inst in await asyncio.to_thread(request.app.state.users.installations, user):
+            try:
+                for r in await gh.list_repos(inst["installation_id"]):
+                    out.append({**r, "installation_id": inst["installation_id"], "account": inst["account"]})
+            except GitHubError as e:
+                raise gh_error(e) from None
+        return out
+
+    @app.get("/workspaces")
+    async def list_workspaces(request: Request, user: str = Depends(current_user)):
+        """The user's projects. "default" always exists."""
+        items = await asyncio.to_thread(request.app.state.users.list_workspaces, user)
+        if not any(w["id"] == "default" for w in items):
+            items.insert(0, {"id": "default", "name": "Default", "repo": None, "branch": None, "cloned": False})
+        return items
+
+    @app.post("/workspaces", status_code=201)
+    async def create_workspace(body: WorkspaceCreate, request: Request, user: str = Depends(current_user)):
+        """Create a project, optionally linked to a GitHub repository (cloned into
+        its sandbox on first use)."""
+        ws_id = re.sub(r"[^a-z0-9]+", "-", body.name.lower()).strip("-")[:40] or "project"
+        if await asyncio.to_thread(request.app.state.users.get_workspace, user, ws_id):
+            raise HTTPException(409, f"a project with id {ws_id!r} already exists")
+        rec: dict = {"id": ws_id, "name": body.name.strip()}
+        if body.repo:
+            gh = require_github(request)
+            mine = {i["installation_id"] for i in await asyncio.to_thread(request.app.state.users.installations, user)}
+            try:
+                inst = await gh.repo_installation(body.repo)
+            except GitHubError as e:
+                raise HTTPException(404, f"{body.repo} is not available to OpenSession ({e})") from None
+            if inst not in mine:
+                raise HTTPException(403, "connect the GitHub account that owns this repository first")
+            branch = body.branch
+            if not branch:
+                repos = await gh.list_repos(inst)
+                branch = next((r["default_branch"] for r in repos if r["full_name"].lower() == body.repo.lower()), "main")
+            rec.update(repo=body.repo, branch=branch, installation_id=inst)
+        return await asyncio.to_thread(request.app.state.users.upsert_workspace, user, rec)
+
+    @app.delete("/workspaces/{ws_id}", status_code=204)
+    async def delete_workspace(ws_id: str, request: Request, delete_data: bool = False, user: str = Depends(current_user)):
+        if not WORKSPACE_ID_RE.match(ws_id):
+            raise HTTPException(400, "invalid workspace id")
+        await request.app.state.sandboxes.destroy(user, ws_id, delete_data=delete_data)
+        await asyncio.to_thread(request.app.state.users.delete_workspace, user, ws_id)
+
+    @app.get("/git")
+    async def git_info(
+        request: Request, ref: tuple[str, str] = Depends(sandbox_ref), client: httpx.AsyncClient = Depends(oc_client)
+    ):
+        """Branch, changed files and branches of the project's repository."""
+        info = (await call(client, "GET", "/api/vcs")).json().get("data") or {}
+        status = (await call(client, "GET", "/api/vcs/status")).json().get("data") or []
+        branches = (await call(client, "GET", "/api/vcs/branches", params={"limit": "100"})).json().get("data") or []
+        ws = await workspace_record(request, ref)
+        branch = info.get("branch") or {}
+        return {
+            "branch": branch.get("current") if isinstance(branch, dict) else branch,
+            "default_branch": branch.get("default") if isinstance(branch, dict) else None,
+            "status": status,
+            "branches": branches,
+            "repo": ws.get("repo") if ws else None,
+            "can_push": bool(ws and ws.get("repo") and request.app.state.github),
+        }
+
+    @app.post("/git/checkout")
+    async def git_checkout(body: Checkout, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        await get_client(request, ref)
+        flag = "-b " if body.create else ""
+        code, out = await sandbox_exec(request, ref, f'git checkout {flag}"{body.branch}" 2>&1')
+        if code != 0:
+            raise HTTPException(409, out[-500:])
+        return {"branch": body.branch, "output": out[-2000:]}
+
+    async def push_current(request: Request, ref: tuple[str, str], branch: str | None) -> tuple[dict, str]:
+        await get_client(request, ref)
+        ws = await workspace_record(request, ref)
+        if not ws or not ws.get("repo"):
+            raise HTTPException(409, "this project is not linked to a GitHub repository")
+        gh = require_github(request)
+        code, current = await sandbox_exec(request, ref, "git rev-parse --abbrev-ref HEAD")
+        current = current.strip()
+        if code != 0 or current in ("", "HEAD"):
+            raise HTTPException(409, "not on a branch (check out a branch first)")
+        target = branch or current
+        if not BRANCH_RE.match(target):
+            raise HTTPException(400, "invalid branch name")
+        try:
+            token = await gh.installation_token(int(ws["installation_id"]), ws["repo"])
+        except GitHubError as e:
+            raise gh_error(e) from None
+        code, out = await sandbox_exec(
+            request, ref, f'git push origin "HEAD:refs/heads/{target}" 2>&1', git_auth_env(token)
+        )
+        if code != 0:
+            raise HTTPException(409, f"push failed: {out[-800:]}")
+        return ws, target
+
+    @app.post("/git/push")
+    async def git_push(body: Push, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """Push the current branch to GitHub (never force)."""
+        ws, target = await push_current(request, ref, body.branch)
+        return {"repo": ws["repo"], "branch": target}
+
+    @app.post("/git/pull-request", status_code=201)
+    async def git_pull_request(body: PullRequest, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """Push the current branch and open a pull request into the project's branch."""
+        ws, head = await push_current(request, ref, body.branch)
+        base = body.base or ws.get("branch") or "main"
+        if head == base:
+            raise HTTPException(409, f"you're on {base}: create a new branch for your changes first")
+        try:
+            pr = await require_github(request).create_pull_request(
+                int(ws["installation_id"]), ws["repo"], head, base, body.title, body.body
+            )
+        except GitHubError as e:
+            raise gh_error(e) from None
+        return {**pr, "head": head, "base": base}
 
     # ---- agent setup: skills, agents, commands, MCP, permissions, ... ------------
 

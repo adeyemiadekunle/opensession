@@ -25,6 +25,12 @@ USER agent
 WORKDIR /workspace
 ENV HOME=/home/agent
 
+# Commits the agent makes are attributed to this identity (the user pushes them
+# through OpenSession with their GitHub connection).
+RUN git config --global user.name "OpenSession Agent" \
+ && git config --global user.email "agent@users.noreply.opensession.dev" \
+ && git config --global init.defaultBranch main
+
 # OpenCode's data (session database) and config live under /home/agent/.state,
 # which the orchestrator mounts as a per-sandbox volume so they survive rebuilds.
 RUN mkdir -p /home/agent/.state/data /home/agent/.state/config \

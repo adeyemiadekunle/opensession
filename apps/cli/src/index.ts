@@ -5,18 +5,21 @@ import { ApiError, CloudClient, LocalClient } from "@opensession/api-client";
 import { emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
 import { loadLocalAgentConfig, saveLocalAgentConfig, startLocalServer } from "@opensession/local-runner";
 import { configDir, loadConfig, saveConfig } from "./config";
-import { browserLogin } from "./login";
+import { browserLogin, openBrowser } from "./login";
 import { pickModel, runPrompt } from "./run";
 
 const program = new Command()
   .name("opensession")
   .description("OpenSession: an AI coding agent with your own model keys, in the cloud or on this computer.")
-  .version("0.1.0");
+  .version("0.1.0")
+  .option("-p, --project <id>", "cloud project to use (default: $OPENSESSION_PROJECT or your default workspace)");
 
 function cloud(): CloudClient {
   const cfg = loadConfig();
   if (!cfg.token) throw new Error("not signed in: run `opensession login`");
-  return new CloudClient({ gatewayUrl: cfg.gatewayUrl, getToken: () => cfg.token });
+  const c = new CloudClient({ gatewayUrl: cfg.gatewayUrl, getToken: () => cfg.token });
+  const project = (program.opts().project as string | undefined) ?? process.env.OPENSESSION_PROJECT;
+  return project ? c.withWorkspace(project) : c;
 }
 
 async function readSecret(prompt: string): Promise<string> {
@@ -194,6 +197,72 @@ program
     console.error(`session ${sessionId}`);
     const skills = (await c.getAgentConfig().catch(() => null))?.config.skills.map((s) => s.id) ?? [];
     await runPrompt(c, sessionId, words.join(" "), (s) => console.log(s), { skills });
+  });
+
+// ---- projects, GitHub and git (cloud) ------------------------------------------------
+
+const projects = program.command("projects").description("Cloud projects: each has its own sandbox and can be linked to a GitHub repo");
+projects.command("list").action(async () => {
+  for (const p of await cloud().listProjects())
+    console.log(`${p.id}  ${p.name}${p.repo ? `  ${p.repo}@${p.branch ?? "default"}` : ""}${p.repo && !p.cloned ? "  (not cloned yet)" : ""}`);
+});
+projects
+  .command("create <name>")
+  .option("--repo <owner/name>", "GitHub repository to clone into the project")
+  .option("--branch <branch>", "branch to check out")
+  .action(async (name: string, o) => {
+    const p = await cloud().createProject({ name, repo: o.repo, branch: o.branch });
+    console.log(`created ${p.id}  (use: opensession -p ${p.id} run "...")`);
+  });
+projects
+  .command("rm <id>")
+  .option("--delete-data", "also delete the project's files")
+  .action(async (id: string, o) => {
+    await cloud().deleteProject(id, Boolean(o.deleteData));
+    console.log("removed");
+  });
+
+const github = program.command("github").description("Connect GitHub so projects can clone, push and open pull requests");
+github.command("status").action(async () => {
+  const g = await cloud().github();
+  if (!g.configured) return console.log("GitHub is not set up on this OpenSession server");
+  if (!g.installations.length) return console.log("not connected: run `opensession github connect`");
+  for (const i of g.installations) console.log(`${i.installation_id}  ${i.account}`);
+});
+github.command("connect").description("Open the browser to install the OpenSession GitHub App").action(async () => {
+  const url = await cloud().githubConnectUrl();
+  console.log(`Opening ${url}`);
+  openBrowser(url);
+});
+github.command("repos").action(async () => {
+  for (const r of await cloud().githubRepos()) console.log(`${r.full_name}${r.private ? "  (private)" : ""}  default: ${r.default_branch}`);
+});
+
+const gitCmd = program.command("git").description("Git in a cloud project (use -p <project>)");
+gitCmd.command("status").action(async () => {
+  const g = await cloud().gitInfo();
+  console.log(`${g.repo ?? "(no GitHub repo)"}  on ${g.branch ?? "?"}${g.default_branch ? `  (default ${g.default_branch})` : ""}`);
+  for (const f of g.status) console.log(`  ${f.status.padEnd(9)} ${f.file}  +${f.additions} -${f.deletions}`);
+  if (!g.status.length) console.log("  no changes");
+});
+gitCmd
+  .command("checkout <branch>")
+  .option("-b", "create the branch")
+  .action(async (branch: string, o) => {
+    await cloud().gitCheckout(branch, Boolean(o.b));
+    console.log(`on ${branch}`);
+  });
+gitCmd.command("push").action(async () => {
+  const r = await cloud().gitPush();
+  console.log(`pushed ${r.branch} to ${r.repo}`);
+});
+gitCmd
+  .command("pr <title>")
+  .option("--body <text>", "description", "")
+  .option("--base <branch>", "target branch (default: the repo's default)")
+  .action(async (title: string, o) => {
+    const r = await cloud().pullRequest({ title, body: o.body, base: o.base });
+    console.log(`#${r.number} ${r.url}`);
   });
 
 // ---- local mode ---------------------------------------------------------------------

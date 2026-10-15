@@ -3,6 +3,7 @@ import { enc } from "./cloud";
 import { parseSSE } from "./sse";
 import { skillMentions } from "./types";
 import type {
+  GitInfo,
   CommandInfo,
   DiffFile,
   FileEntry,
@@ -40,6 +41,22 @@ export class LocalClient implements OpenSessionClient {
 
   health() {
     return this.http.get("/api/health");
+  }
+  async gitInfo(): Promise<GitInfo> {
+    const [info, status, branches] = await Promise.all([
+      this.http.get("/api/vcs").catch(() => null),
+      this.http.get("/api/vcs/status").catch(() => null),
+      this.http.get("/api/vcs/branches", { query: { limit: 100 } }).catch(() => null),
+    ]);
+    const b = unwrap<{ branch?: { current?: string; default?: string } }>(info)?.branch ?? {};
+    return {
+      branch: b.current ?? null,
+      default_branch: b.default ?? null,
+      status: unwrap<GitInfo["status"]>(status) ?? [],
+      branches: unwrap<string[]>(branches) ?? [],
+      repo: null,
+      can_push: false,
+    };
   }
   async listModels(): Promise<Model[]> {
     const data = unwrap<any[]>(await this.http.get("/api/model")) ?? [];

@@ -8,6 +8,7 @@
  * no CORS problems. The UI itself is served from "app://opensession".
  */
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -126,6 +127,42 @@ ipcMain.handle("local:chooseFolder", async () => {
   return startFor(r.filePaths[0]);
 });
 ipcMain.handle("open:cloud", () => shell.openExternal(WEB_URL));
+
+// ---- local git (the user's own git and credentials, in the open folder) --------------
+
+const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._/-]{1,200}(?<![./])$/;
+
+function git(args: string[]): Promise<string> {
+  if (!folder) return Promise.reject(new Error("open a folder first"));
+  return new Promise((resolve, reject) =>
+    execFile("git", args, { cwd: folder!, timeout: 120_000, windowsHide: true }, (err, stdout, stderr) =>
+      err ? reject(new Error((stderr || err.message).trim().slice(-800))) : resolve(stdout.trim()),
+    ),
+  );
+}
+
+ipcMain.handle("git:checkout", async (_e, branch: string, create: boolean) => {
+  if (!BRANCH_RE.test(branch)) throw new Error("invalid branch name");
+  await git(create ? ["checkout", "-b", branch] : ["checkout", branch]);
+});
+ipcMain.handle("git:push", async () => {
+  const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  await git(["push", "-u", "origin", "HEAD"]);
+  return { branch };
+});
+ipcMain.handle("git:pr", async (_e, title: string, body: string) => {
+  const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  const remote = await git(["remote", "get-url", "origin"]);
+  const m = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/.exec(remote);
+  if (!m) throw new Error("the origin remote is not a GitHub repository");
+  const base = (await git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).catch(() => "origin/main")).replace(/^origin\//, "");
+  const url = new URL(`https://github.com/${m[1]}/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}`);
+  url.searchParams.set("expand", "1");
+  url.searchParams.set("title", title);
+  url.searchParams.set("body", body);
+  await shell.openExternal(url.toString());
+  return { url: url.toString() };
+});
 
 // Agent setup for local mode: kept in the app's data folder and written into
 // OpenCode's own config folder (~/.config/opencode) on save.

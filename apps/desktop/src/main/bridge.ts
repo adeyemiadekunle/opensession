@@ -15,4 +15,9 @@ export interface DesktopBridge {
   chooseFolder(): Promise<LocalStatus>;
   restart(): Promise<LocalStatus>;
   openCloud(): Promise<void>;
+  /** Local git in the open folder (uses your own git credentials). */
+  gitCheckout(branch: string, create?: boolean): Promise<void>;
+  gitPush(): Promise<{ branch: string }>;
+  /** Opens GitHub's "compare & pull request" page for the current branch. */
+  gitPullRequest(title: string, body: string): Promise<{ url: string }>;
 }

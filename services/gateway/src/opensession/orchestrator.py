@@ -557,6 +557,29 @@ class SandboxManager:
             entry.leases -= 1
             entry.last_used = time.monotonic()
 
+    async def exec(
+        self,
+        user: str,
+        workspace: str,
+        cmd: list[str],
+        env: dict[str, str] | None = None,
+        workdir: str = "/workspace",
+    ) -> tuple[int, str]:
+        """Run a command in the user's (running) sandbox as the agent user. env is
+        only visible to this one process (used for short-lived git credentials)."""
+        self._check_ids(user, workspace)
+        name, _ = self._names(user, workspace)
+        c = await asyncio.to_thread(self._get_container, name)
+        if c is None:
+            raise SandboxError("sandbox is not running")
+
+        def run() -> tuple[int, str]:
+            res = c.exec_run(cmd, environment=env or {}, workdir=workdir, user="agent", demux=False)
+            out = res.output.decode("utf-8", "replace") if isinstance(res.output, (bytes, bytearray)) else str(res.output)
+            return int(res.exit_code or 0), out[-20_000:]
+
+        return await asyncio.to_thread(run)
+
     async def stop(self, user: str, workspace: str) -> None:
         self._check_ids(user, workspace)
         entry = self._entries.pop(self._key(user, workspace), None)

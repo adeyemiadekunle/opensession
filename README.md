@@ -79,6 +79,12 @@ Windows binary from the OpenCode site; set `OPENCODE_BIN` if it is not on PATH).
     pnpm cli keys set anthropic
     pnpm cli egress add api.example.com
     pnpm cli run "fix the failing tests" -m anthropic/claude-sonnet-4-5
+    pnpm cli github connect          # install the GitHub App on some repos
+    pnpm cli projects create api --repo you/api
+    pnpm cli -p <project-id> run "add pagination to /users"
+    pnpm cli -p <project-id> git checkout -b feature/pagination
+    pnpm cli -p <project-id> git push
+    pnpm cli -p <project-id> git pr "Add pagination"
 
 Build a standalone CLI with `pnpm --filter @opensession/cli build` (`apps/cli/dist/index.js`).
 
@@ -118,6 +124,42 @@ while a `skills` folder listed in `opencode.json` and inline `agents`/`commands`
 are. Skill and command lists fill in shortly after the server starts, and a local
 MCP server started with `npx` can take a minute on first use while it downloads.
 
+## GitHub, projects and branches
+
+**Projects.** Each cloud project has its own sandbox and files. Pick one in the web
+app's header (or `opensession -p <id>`); a new project can be linked to a GitHub
+repository, which is cloned into the sandbox the first time the project opens.
+Projects without a repo start from an empty folder.
+
+**Git tab.** The workspace's Git tab shows the current and default branch, the
+changed files (+/-), and lets you switch or create a branch, push it and open a pull
+request. In the cloud the gateway does this; in the desktop app it runs your own
+`git` in the open folder (pull requests open GitHub's compare page in your browser).
+
+**How GitHub is connected (cloud).** Through a GitHub App, so users choose exactly
+which repositories OpenSession can see:
+
+1. Settings > GitHub > Connect sends you to GitHub to install the app. GitHub sends
+   you back to `/github/callback`; the gateway checks that the installation belongs
+   to you (signed state + OAuth code) before remembering it.
+2. For clone, push and pull requests the gateway asks GitHub for a token that lasts
+   one hour and covers only that project's repository. It is given to that one git
+   command through environment variables, never stored, written to `.git/config`
+   or put on the command line. The agent itself cannot push: only the Push button
+   (or `opensession git push`) does.
+
+Create the app once per OpenSession server (GitHub > Settings > Developer settings >
+GitHub Apps > New):
+
+- Callback URL: `<gateway URL>/github/callback`, and switch on **Request user
+  authorization (OAuth) during installation**. Setup URL: leave empty.
+- Webhook: off.
+- Repository permissions: **Contents** read & write, **Pull requests** read & write,
+  **Metadata** read.
+- Then fill `GITHUB_APP_*`, `GITHUB_STATE_SECRET` and `OPENSESSION_WEB_URL` in `.env`
+  (see `.env.example`) and restart the gateway. Without them the GitHub endpoints
+  answer 503 and projects work without repositories.
+
 ## Gateway API (services/gateway)
 
 Every request needs `Authorization: Bearer <token>`: a Clerk session token (web) or
@@ -139,6 +181,9 @@ for local testing only.
     /sessions/{id}/permissions, /sessions/{id}/forms   approvals and agent questions
     /mcp/{server}                         MCP servers in the user's sandbox
     POST /workspace/stop, DELETE /workspace
+    GET/POST /workspaces, DELETE /workspaces/{id}     projects (send X-Workspace: <id> to use one)
+    GET /github, /github/connect, /github/repos, /github/callback, DELETE /github/installations/{id}
+    GET /git, POST /git/checkout | push | pull-request
 
 ## Security model (cloud)
 
@@ -186,6 +231,11 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request:
 - Web terminal (OpenCode PTY WebSocket) is not wired up yet.
 - The desktop app has not been packaged or code-signed yet (`pnpm --filter @opensession/desktop dist`).
 - Disk quotas per sandbox; usage limits and abuse monitoring.
+- During clone/push the short-lived repo token is in that git process's
+  environment, which other processes of the sandbox user could read. It is scoped
+  to one repo and expires within an hour; a separate git helper user would close it.
+- Pulling new commits from GitHub into an existing project (today: the agent can
+  run `git pull` only for public repos).
 
 OpenSession runs [OpenCode](https://opencode.ai) (MIT licensed) inside each
 workspace. It is not affiliated with or endorsed by the OpenCode project.
