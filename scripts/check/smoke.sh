@@ -150,7 +150,7 @@ if ! grep -q '"id"' /tmp/os_body; then
   bad "sandbox log: $(docker logs --tail 25 "$C" 2>&1 | tr '\n' ' ' | tail -c 800)"
   exit 1
 fi
-PTY=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['data']['id'])")
+PTY=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['id'])")
 check "ticket" 200 "$(apiw POST alice p3 "/terminals/$PTY/ticket")"
 TICKET=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['ticket'])")
 python3 -m venv /tmp/os-wsenv >/dev/null && /tmp/os-wsenv/bin/pip install -q "websockets>=13" >/dev/null
