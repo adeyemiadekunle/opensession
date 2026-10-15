@@ -181,6 +181,17 @@ agent's branch. The CLI selects the runtime with `--local` / `--cloud` and gains
 `opensession attach <project>`. Session history stays per runtime at first;
 OpenCode's session export/import can carry it across later.
 
+Built (step 4): `opensession handoff cloud` pushes the folder's branch with the
+user's own git, finds the cloud project for the same GitHub repository (or creates
+it) and calls the new `POST /git/pull`. `opensession handoff local` optionally
+commits the cloud work (`POST /git/commit`), pushes it with the GitHub App, then
+fetches and checks the branch out locally. Both directions fast-forward only and
+refuse to touch uncommitted work on the receiving side; `--commit <message>`
+commits the sending side first. The remote is read from git config rather than
+`git remote get-url`, which applies `insteadOf` rewrites. `run --local/--cloud` and
+`attach [--local]` (a prompt loop in the terminal) complete the CLI. Desktop and web
+buttons are a follow-up.
+
 ## Plan
 
 | Step | Change | Status |

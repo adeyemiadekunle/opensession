@@ -117,7 +117,12 @@ GitHub access uses a GitHub App (`services/gateway/src/opensession/github.py`):
 - clone (first open), push and PR mint an installation token limited to that one
   repository (cached until 5 minutes before expiry) and pass it to git as an
   `http.extraheader` through `GIT_CONFIG_*` env variables of a single `exec`;
-- the branch view comes from OpenCode's `/api/vcs` endpoints inside the sandbox.
+- the branch view comes from OpenCode's `/api/vcs` endpoints inside the sandbox;
+- `POST /git/pull` fetches a branch with the same kind of token and checks it out
+  (fast-forward only, refused while the sandbox has uncommitted changes), and
+  `POST /git/commit` commits the sandbox's changes, with the message passed as an
+  env variable, never in the script. The CLI's `handoff cloud` / `handoff local`
+  combine these with the user's own git on their computer.
 
 The desktop app uses the user's own git and credentials instead.
 
