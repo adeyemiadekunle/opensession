@@ -227,6 +227,13 @@ def create_app(
         app.state.egress = egress or EgressRules.from_env(app.state.users, mgr)
         if app.state.egress.enabled:
             mgr.network_listeners.append(app.state.egress.sync)
+        eg, us = app.state.egress, app.state.users
+        mgr.provider.egress_domains = lambda user: eg.global_domains() + us.list_domains(user)
+        if mgr.provider.enforces_egress and not eg.global_domains():
+            raise RuntimeError(
+                "this sandbox provider applies the egress allowlist itself: set EGRESS_GLOBAL_ALLOWLIST "
+                "(e.g. services/egress/allowlist.txt), or sandboxes cannot reach any model provider"
+            )
         mgr.limits = _cached_limits(app.state.users)
         app.state.http = httpx.AsyncClient(transport=http_transport)
         if github is _FROM_ENV:
@@ -452,12 +459,13 @@ def create_app(
         return {
             "global": eg.global_domains(),
             "user": await asyncio.to_thread(request.app.state.users.list_domains, user),
-            "enforced": eg.enabled,
+            "enforced": eg.enabled or request.app.state.sandboxes.provider.enforces_egress,
         }
 
-    async def after_domain_change(request: Request) -> None:
+    async def after_domain_change(request: Request, user: str) -> None:
         eg: EgressRules = request.app.state.egress
         await eg.sync()
+        await request.app.state.sandboxes.provider.egress_changed(user)
 
     @app.get("/egress/domains")
     async def get_domains(request: Request, user: str = Depends(current_user)):
@@ -472,7 +480,7 @@ def create_app(
             await asyncio.to_thread(request.app.state.users.set_domains, user, body.domains)
         except UserStoreError as e:
             raise HTTPException(400, str(e)) from None
-        await after_domain_change(request)
+        await after_domain_change(request, user)
         return await domains_response(request, user)
 
     @app.post("/egress/domains")
@@ -481,7 +489,7 @@ def create_app(
             await asyncio.to_thread(request.app.state.users.add_domain, user, body.domain)
         except UserStoreError as e:
             raise HTTPException(400, str(e)) from None
-        await after_domain_change(request)
+        await after_domain_change(request, user)
         return await domains_response(request, user)
 
     @app.delete("/egress/domains/{domain}")
@@ -490,7 +498,7 @@ def create_app(
             await asyncio.to_thread(request.app.state.users.remove_domain, user, domain)
         except UserStoreError as e:
             raise HTTPException(400, str(e)) from None
-        await after_domain_change(request)
+        await after_domain_change(request, user)
         return await domains_response(request, user)
 
     # ---- GitHub, projects (workspaces) and git ----------------------------------

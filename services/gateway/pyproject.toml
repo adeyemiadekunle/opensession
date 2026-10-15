@@ -20,6 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# SANDBOX_PROVIDER=e2b (checked against e2b 2.56)
+e2b = ["e2b>=2.56,<3"]
 
 [project.scripts]
 opensession = "opensession.__main__:main"
