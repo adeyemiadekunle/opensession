@@ -12,6 +12,8 @@ An AI coding agent where users bring their own model API key, built on
 | API keys | saved by OpenCode on the user's machine | encrypted in the user's OpenSession account |
 | Sign-in | none needed | Clerk (web), access token (CLI) |
 
+Local mode is only the desktop app and the CLI; the web app always works in the cloud.
+
 ## Repository layout
 
     apps/
@@ -57,8 +59,16 @@ Requirements: Node 22+, pnpm 10 (`npm i -g pnpm`), Python 3.10+, Docker.
    public key) or `CLERK_JWKS_URL`, `CLERK_AUTHORIZED_PARTIES` and `CORS_ORIGINS`
    (your web app origin, `http://localhost:5173` in development).
 
-2. Start the gateway and egress proxy: `docker compose up --build` (gateway on
+2. Set `POSTGRES_PASSWORD` in `.env`, then start the gateway, its Postgres database
+   and the egress proxy: `docker compose up --build` (gateway on
    http://localhost:8787).
+
+   Already have data in the old SQLite file? Copy it into Postgres once:
+
+        docker compose exec gateway python -m opensession migrate-db /data/opensession.db "$DATABASE_URL"
+
+   Without `DATABASE_URL` the gateway uses SQLite (`OPENSESSION_DB`), which is fine
+   for a single process and for tests.
 
 3. Web app: copy `apps/web/.env.example` to `apps/web/.env`, set
    `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_GATEWAY_URL`, then `pnpm dev:web`.
@@ -73,6 +83,16 @@ Windows binary from the OpenCode site; set `OPENCODE_BIN` if it is not on PATH).
     pnpm cli local run "add a README" -C ./my-project
     pnpm cli local serve -C ./my-project
 
+### Desktop installers
+
+`pnpm --filter @opensession/desktop dist` builds an installer for the current OS into
+`apps/desktop/release/` (dmg/zip on macOS, nsis on Windows, AppImage/deb on Linux).
+The **Desktop app** GitHub workflow builds all three: run it from the Actions tab,
+or push a tag `desktop-vX.Y.Z` to attach the installers to a draft release. Builds
+are signed and notarized when the signing secrets are set (see the workflow file);
+otherwise they are unsigned and macOS/Windows warn on first launch. The desktop app
+uses the user's own OpenCode install (`curl -fsSL https://opencode.ai/v2/install | bash`).
+
 ### CLI against the cloud
 
     pnpm cli login                   # opens the web app to authorize the CLI
@@ -85,6 +105,8 @@ Windows binary from the OpenCode site; set `OPENCODE_BIN` if it is not on PATH).
     pnpm cli -p <project-id> git checkout -b feature/pagination
     pnpm cli -p <project-id> git push
     pnpm cli -p <project-id> git pr "Add pagination"
+    pnpm cli -p <project-id> status  # awake or asleep, disk use, which projects are awake
+    pnpm cli projects sleep <project-id>
 
 Build a standalone CLI with `pnpm --filter @opensession/cli build` (`apps/cli/dist/index.js`).
 
@@ -160,6 +182,38 @@ GitHub Apps > New):
   (see `.env.example`) and restart the gateway. Without them the GitHub endpoints
   answer 503 and projects work without repositories.
 
+## Sleep, limits and the terminal (cloud)
+
+**Sleep and resume.** A project's sandbox goes to sleep after `SANDBOX_IDLE_SECONDS`
+(default 30 minutes) without use: the container stops and frees its CPU and
+memory. Its files and OpenCode's session database live on volumes, so opening the
+project again wakes it with every session, message and file as it was. It does not
+sleep while the browser is streaming, a terminal is open, or an agent is still
+working on its own (checked with OpenCode's `/api/session/active`; something stuck
+"busy" sleeps after `SANDBOX_MAX_BUSY_SECONDS`, default 6 hours). Programs started in
+the terminal stop when it sleeps. Put a project to sleep yourself from Projects, or
+`opensession projects sleep <id>`.
+
+**Running projects per user.** `SANDBOX_MAX_PER_USER` projects may be awake at once
+(default 2; `0` = no limit). Opening another one puts the least recently used idle
+one to sleep; if all are busy the gateway answers 429 and the web app offers to
+put one to sleep. `SANDBOX_MAX_RUNNING` still caps the whole server.
+
+**Disk.** With `SANDBOX_DISK_LIMIT_MB` set, each project's disk use (code + session
+data) is measured every few minutes; over the limit, new prompts and commands are
+refused (507) until files are deleted. The terminal and shell keep working so you
+can clean up.
+
+**Per-user overrides.** Platform admins (user ids in `ADMIN_USER_IDS`) can raise or
+lower one user's limits: `PUT /admin/users/<id>/limits {"max_running": 5,
+"disk_mb": 20480}` or `opensession admin limits <id> --max-running 5`; `null` values
+(or `--reset`) go back to the defaults. Users see theirs at `GET /limits`.
+
+**Terminal.** The workspace's Terminal tab is a real shell in the project's sandbox
+(OpenCode's PTY), relayed by the gateway over a WebSocket. The browser gets a
+single-use ticket and never sees the sandbox password; reconnecting replays the
+output it missed.
+
 ## Gateway API (services/gateway)
 
 Every request needs `Authorization: Bearer <token>`: a Clerk session token (web) or
@@ -180,7 +234,11 @@ for local testing only.
     GET  /files, /files/content, /diff
     /sessions/{id}/permissions, /sessions/{id}/forms   approvals and agent questions
     /mcp/{server}                         MCP servers in the user's sandbox
-    POST /workspace/stop, DELETE /workspace
+    GET /workspace                        state without waking it: new | sleeping | running, busy, disk
+    POST /workspace/stop, DELETE /workspace   sleep now; remove (optionally with files)
+    GET /limits, GET/PUT /admin/users/{id}/limits
+    GET/POST /terminals, POST /terminals/{id}/size | ticket, DELETE /terminals/{id}
+    WS  /terminals/{id}/connect?ticket=...[&cursor=N]
     GET/POST /workspaces, DELETE /workspaces/{id}     projects (send X-Workspace: <id> to use one)
     GET /github, /github/connect, /github/repos, /github/callback, DELETE /github/installations/{id}
     GET /git, POST /git/checkout | push | pull-request
@@ -217,20 +275,25 @@ all behaved as expected.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request:
 
-- **Gateway:** `pytest` in `services/gateway`
+- **Gateway:** `pytest` in `services/gateway`, against SQLite and a Postgres service
 - **TypeScript:** `pnpm turbo run typecheck test build` (web, desktop, CLI, packages)
 - **Cloud stack:** `scripts/check/smoke.sh` builds the images and starts the
-  gateway and egress proxy on Docker, then checks sandboxes, isolation, egress,
-  per-user domains and the agent setup. Run it yourself on any Linux/macOS Docker host.
+  gateway, Postgres and egress proxy on Docker, then checks sandboxes, isolation,
+  egress, per-user domains, the agent setup, sleep and resume (sessions kept), the
+  per-user limit and the terminal. Run it yourself on any Linux/macOS Docker host.
+
+The **Desktop app** workflow (`.github/workflows/desktop.yml`) builds the installers.
 
 ## Known gaps
 
-- Postgres instead of SQLite before running more than one gateway instance.
-- Local mode from the web app (driving a user's own computer from the browser)
-  needs a tunnel; see docs/ARCHITECTURE.md.
-- Web terminal (OpenCode PTY WebSocket) is not wired up yet.
-- The desktop app has not been packaged or code-signed yet (`pnpm --filter @opensession/desktop dist`).
-- Disk quotas per sandbox; usage limits and abuse monitoring.
+- One gateway process per Docker host for now. The data is in Postgres, but which
+  sandboxes are in use (leases, last activity) is kept in the process, so two
+  gateways on one host could put each other's sandboxes to sleep.
+- Desktop installers are unsigned until signing certificates are added as secrets,
+  and they need OpenCode installed separately.
+- The disk limit is measured, not enforced by the filesystem: a sandbox can go over
+  it between measurements (memory, CPU and process limits are enforced).
+- Abuse monitoring (unusual egress, mining, spam) and usage metering for billing.
 - During clone/push the short-lived repo token is in that git process's
   environment, which other processes of the sandbox user could read. It is scoped
   to one repo and expires within an hour; a separate git helper user would close it.

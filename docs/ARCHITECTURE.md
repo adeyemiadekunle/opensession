@@ -24,12 +24,16 @@
                                         + that user's own domains → internet
 ```
 
-Both sides use the same TypeScript client interface (`OpenSessionClient` in
+Local mode is the desktop app and the CLI only; the web app is always cloud. Both
+sides use the same TypeScript client interface (`OpenSessionClient` in
 `packages/api-client`) and the same React workspace (`packages/ui`):
 
 - `LocalClient` talks straight to OpenCode V2's HTTP API on this machine.
 - `CloudClient` talks to the gateway, which proxies to the user's sandbox and adds
-  account features (keys, allowed domains, access tokens).
+  account features (keys, allowed domains, access tokens, projects, terminal).
+
+The gateway keeps its data (users' tokens, encrypted keys, projects, limits...) in
+Postgres (`DATABASE_URL`; `db.py` also supports SQLite for development and tests).
 
 ## Sign-in
 
@@ -87,11 +91,29 @@ GitHub access uses a GitHub App (`services/gateway/src/opensession/github.py`):
 
 The desktop app uses the user's own git and credentials instead.
 
-## Later: driving a local computer from the web
+## Sandbox lifecycle: sleep, resume, limits
 
-To let the web app control a user's own machine, the desktop app (or
-`opensession local connect`) would open an outbound WebSocket to the gateway,
-authenticated with an access token, and the gateway would route that workspace's
-requests down it. No inbound ports are needed and code and keys stay on the
-user's machine. In the gateway this becomes a second backend next to the Docker
-`SandboxManager`.
+```
+ new ──first request──▶ running ──idle_seconds, not busy──▶ sleeping
+                          ▲  │                                 │
+                          │  └──user opens a 3rd project──────▶│ (LRU idle one)
+                          └────────────next request────────────┘
+```
+
+- Sleeping = container stopped; the `/workspace` and OpenCode state volumes stay,
+  so sessions resume where they were. Nothing is lost except running processes.
+- "Busy" = a lease (streaming request, open terminal) or OpenCode reporting an
+  active session (`GET /api/session/active`). Busy sandboxes are never put to sleep
+  by the idle timer (up to `max_busy_seconds`) or to make room for another project.
+- Per user: at most `max_per_user` running (default 2); per-user overrides in the
+  `user_limits` table, set by admins. Server-wide: `max_running`.
+- Disk use is measured with `du` every few minutes; over the limit, the gateway
+  refuses prompts and commands (507) but not the terminal/shell.
+
+## Terminal
+
+`/terminals` creates OpenCode PTYs in `/workspace`. The browser asks for a 60-second
+single-use ticket (normal auth), then opens `WS /terminals/<pty>/connect?ticket=`.
+The gateway checks ticket and Origin, holds a lease on the sandbox, opens the
+sandbox's `/api/pty/<pty>/connect` WebSocket with the sandbox's Basic auth and
+relays frames both ways (text output, a binary 0x00+JSON cursor frame, text input).

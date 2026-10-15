@@ -1,7 +1,8 @@
 """
 Per-user records that are not API keys: personal access tokens (for the CLI and
-desktop app) and the user's own egress allowlist. SQLite for now, in the same file
-as the key store; move to Postgres together with the key store.
+desktop app), the user's own egress allowlist, agent setup, GitHub installations,
+projects and per-user limits. Stored in the gateway database (db.py): Postgres when
+DATABASE_URL is set, otherwise SQLite.
 
 Access tokens look like "osk_<random>". Only a SHA-256 hash is stored, so a
 database leak does not reveal usable tokens. The plain token is shown once.
@@ -13,9 +14,10 @@ import hashlib
 import json
 import re
 import secrets
-import sqlite3
 import threading
 import time
+
+from . import db as dbmod
 
 TOKEN_PREFIX = "osk_"
 MAX_TOKENS_PER_USER = 20
@@ -77,48 +79,54 @@ def collapse_domains(domains: list[str]) -> list[str]:
     return out
 
 
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at REAL NOT NULL,
+    last_used_at REAL);
+CREATE INDEX IF NOT EXISTS api_tokens_user ON api_tokens(user_id);
+CREATE TABLE IF NOT EXISTS agent_config (
+    user_id TEXT PRIMARY KEY,
+    config TEXT NOT NULL,
+    updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS github_installations (
+    user_id TEXT NOT NULL,
+    installation_id INTEGER NOT NULL,
+    account TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (user_id, installation_id));
+CREATE TABLE IF NOT EXISTS workspaces (
+    user_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    repo TEXT,
+    branch TEXT,
+    installation_id INTEGER,
+    cloned_at REAL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (user_id, id));
+CREATE TABLE IF NOT EXISTS egress_domains (
+    user_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (user_id, domain));
+
+CREATE TABLE IF NOT EXISTS user_limits (
+    user_id TEXT PRIMARY KEY,
+    max_running INTEGER,
+    disk_mb INTEGER,
+    updated_at REAL NOT NULL);
+"""
+
+
 class UserStore:
-    def __init__(self, path: str = "opensession.db"):
-        self._db = sqlite3.connect(path, check_same_thread=False)
+    def __init__(self, path: "str | dbmod.Database" = "opensession.db"):
+        self._db = dbmod.connect(path)
         self._lock = threading.Lock()
-        with self._lock, self._db:
-            self._db.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS api_tokens (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    token_hash TEXT NOT NULL UNIQUE,
-                    created_at REAL NOT NULL,
-                    last_used_at REAL);
-                CREATE INDEX IF NOT EXISTS api_tokens_user ON api_tokens(user_id);
-                CREATE TABLE IF NOT EXISTS agent_config (
-                    user_id TEXT PRIMARY KEY,
-                    config TEXT NOT NULL,
-                    updated_at REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS github_installations (
-                    user_id TEXT NOT NULL,
-                    installation_id INTEGER NOT NULL,
-                    account TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    PRIMARY KEY (user_id, installation_id));
-                CREATE TABLE IF NOT EXISTS workspaces (
-                    user_id TEXT NOT NULL,
-                    id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    repo TEXT,
-                    branch TEXT,
-                    installation_id INTEGER,
-                    cloned_at REAL,
-                    created_at REAL NOT NULL,
-                    PRIMARY KEY (user_id, id));
-                CREATE TABLE IF NOT EXISTS egress_domains (
-                    user_id TEXT NOT NULL,
-                    domain TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    PRIMARY KEY (user_id, domain));
-                """
-            )
+        self._db.script(SCHEMA)
 
     # ---- access tokens --------------------------------------------------------
 
@@ -295,6 +303,27 @@ class UserStore:
         with self._lock, self._db:
             cur = self._db.execute("DELETE FROM workspaces WHERE user_id=? AND id=?", (user, ws_id))
         return cur.rowcount > 0
+
+    # ---- per-user limits (set by platform admins; None = platform default) ----------
+
+    def get_limits(self, user: str) -> dict:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT max_running, disk_mb FROM user_limits WHERE user_id=?", (user,)
+            ).fetchone()
+        return {"max_running": row[0], "disk_mb": row[1]} if row else {"max_running": None, "disk_mb": None}
+
+    def set_limits(self, user: str, max_running: int | None, disk_mb: int | None) -> dict:
+        with self._lock, self._db:
+            if max_running is None and disk_mb is None:
+                self._db.execute("DELETE FROM user_limits WHERE user_id=?", (user,))
+            else:
+                self._db.execute(
+                    "INSERT INTO user_limits VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET "
+                    "max_running=excluded.max_running, disk_mb=excluded.disk_mb, updated_at=excluded.updated_at",
+                    (user, max_running, disk_mb, time.time()),
+                )
+        return self.get_limits(user)
 
     def close(self) -> None:
         self._db.close()

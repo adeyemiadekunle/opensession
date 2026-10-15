@@ -7,8 +7,8 @@ Encrypted storage for users' model provider API keys (bring your own key).
   "<id>:<base64 32 bytes>". The first entry encrypts new keys; all entries can
   decrypt. To rotate: put a new key first, run `python -m opensession.keystore rewrap`, then
   drop the old key. Generate one with `python -m opensession.keystore genkey`.
-- Storage is SQLite (KEYSTORE_PATH, default opensession.db). Move this table to
-  your main database when you add real users; the encryption code stays the same.
+- Storage is the gateway database (db.py): Postgres when DATABASE_URL is set,
+  otherwise SQLite. Only ciphertext is stored; master keys never are.
 - Plaintext keys are only returned by env_for(), which the gateway uses to inject
   them into the user's own sandbox. Listing shows the last 4 characters only.
 
@@ -23,11 +23,12 @@ import base64
 import os
 import re
 import secrets
-import sqlite3
 import sys
 import threading
 import time
 from dataclasses import dataclass
+
+from . import db as dbmod
 
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -101,44 +102,44 @@ def _parse_master_keys(spec: str) -> list[tuple[str, bytes]]:
     return keys
 
 
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS api_keys (
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    nonce BLOB NOT NULL,
+    ciphertext BLOB NOT NULL,
+    last4 TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (user_id, provider));
+CREATE TABLE IF NOT EXISTS secrets (
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    nonce BLOB NOT NULL,
+    ciphertext BLOB NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (user_id, name));
+"""
+
+
 class KeyStore:
-    def __init__(self, master_keys: str, path: str = "opensession.db"):
+    def __init__(self, master_keys: str, path: "str | dbmod.Database" = "opensession.db"):
         self._keys = _parse_master_keys(master_keys)
         self._current_id = self._keys[0][0]
         self._aead = {kid: AESGCM(raw) for kid, raw in self._keys}
-        self._db = sqlite3.connect(path, check_same_thread=False)
+        self._db = dbmod.connect(path)
         self._lock = threading.Lock()
-        with self._lock, self._db:
-            self._db.execute(
-                """CREATE TABLE IF NOT EXISTS api_keys (
-                    user_id TEXT NOT NULL,
-                    provider TEXT NOT NULL,
-                    key_id TEXT NOT NULL,
-                    nonce BLOB NOT NULL,
-                    ciphertext BLOB NOT NULL,
-                    last4 TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    PRIMARY KEY (user_id, provider))"""
-            )
-            self._db.execute(
-                """CREATE TABLE IF NOT EXISTS secrets (
-                    user_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    key_id TEXT NOT NULL,
-                    nonce BLOB NOT NULL,
-                    ciphertext BLOB NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    PRIMARY KEY (user_id, name))"""
-            )
+        self._db.script(SCHEMA)
 
     @classmethod
     def from_env(cls) -> "KeyStore | None":
         spec = os.environ.get("KEYSTORE_MASTER_KEYS")
         if not spec:
             return None
-        return cls(spec, os.environ.get("KEYSTORE_PATH", "opensession.db"))
+        return cls(spec, dbmod.database_spec())
 
     # ---- crypto -------------------------------------------------------------
 

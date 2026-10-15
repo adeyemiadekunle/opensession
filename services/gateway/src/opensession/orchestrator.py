@@ -29,9 +29,29 @@ Model API keys
   The /workspace volume is kept, so no files are lost. A sandbox that is busy
   (leased) keeps its old env until it is free.
 
+Sleep and resume
+- A sandbox with no requests for idle_seconds goes to sleep: the container is
+  stopped (not removed), freeing CPU and memory. Its two volumes keep the code and
+  OpenCode's session database, so the next request starts it again and every
+  session, message and file is still there.
+- A sandbox is never put to sleep while a request or stream holds it (lease), or
+  while OpenCode reports a session still working (GET /api/session/active), e.g.
+  an agent that keeps going after the browser was closed. A session stuck "busy"
+  for more than max_busy_seconds is put to sleep anyway.
+- Terminal processes (and anything else not saved to disk) end when it sleeps.
+
+Per-user limit
+- A user may run max_per_user sandboxes (projects) at once (default 2, 0 means no
+  limit; per-user overrides come from `limits`). Opening another project puts the
+  user's least recently used idle one to sleep; if all of them are busy, the
+  request fails with SandboxUserLimitError.
+
+Disk
+- Each running sandbox's disk use (/workspace + OpenCode state) is measured every
+  few minutes. The gateway refuses new agent work in a project over its limit
+  (disk_limit_mb, or a per-user override) until files are deleted.
+
 Design notes
-- Containers are stopped (not removed) when idle, so the workspace volume and
-  container survive. They are started again on the next request.
 - Two volumes per sandbox: /workspace (the user's code) and /home/agent/.state
   (OpenCode's session database and config), so both survive a rebuild.
 - Container and volume names are hashes of (user, workspace), so ids can never
@@ -86,6 +106,18 @@ class SandboxStartError(SandboxError):
     """The sandbox did not become ready."""
 
 
+class SandboxUserLimitError(SandboxError):
+    """The user already runs as many busy sandboxes as they may."""
+
+    def __init__(self, limit: int, running: list[str]):
+        super().__init__(
+            f"you can run {limit} project{'s' if limit != 1 else ''} at a time and all of them are busy "
+            f"({', '.join(running)}); wait for one to finish or put one to sleep"
+        )
+        self.limit = limit
+        self.running = running
+
+
 @dataclass
 class SandboxConfig:
     image: str = "opencode-sandbox:latest"
@@ -100,7 +132,11 @@ class SandboxConfig:
     pids_limit: int = 512
     port: int = 4096
     idle_seconds: int = 1800
-    max_running: int = 20
+    max_running: int = 20  # whole server
+    max_per_user: int = 2  # running sandboxes (projects) per user; 0 = no limit
+    max_busy_seconds: int = 6 * 3600  # a "busy" sandbox sleeps anyway after this long idle
+    disk_limit_mb: int = 0  # per sandbox (code + session data); 0 = no limit
+    disk_check_seconds: float = 300.0
     start_timeout: float = 90.0
     auth: str = "basic"  # opencode-ai 1.19 uses Basic; "bearer" kept for other versions
     username: str = "opencode"
@@ -122,6 +158,9 @@ class SandboxConfig:
             port=int(e("SANDBOX_PORT", cls.port)),
             idle_seconds=int(e("SANDBOX_IDLE_SECONDS", cls.idle_seconds)),
             max_running=int(e("SANDBOX_MAX_RUNNING", cls.max_running)),
+            max_per_user=int(e("SANDBOX_MAX_PER_USER", cls.max_per_user)),
+            max_busy_seconds=int(e("SANDBOX_MAX_BUSY_SECONDS", cls.max_busy_seconds)),
+            disk_limit_mb=int(e("SANDBOX_DISK_LIMIT_MB", cls.disk_limit_mb)),
             start_timeout=float(e("SANDBOX_START_TIMEOUT", cls.start_timeout)),
             auth=e("OPENCODE_AUTH", cls.auth),
             username=e("OPENCODE_USERNAME", cls.username),
@@ -137,6 +176,9 @@ class _Entry:
     checked_at: float
     env_digest: str = ""
     leases: int = 0
+    disk_mb: int | None = None
+    disk_checked_at: float = 0.0
+    busy_since: float | None = None
 
 
 class SandboxManager:
@@ -158,6 +200,11 @@ class SandboxManager:
         # Called (no args) after a sandbox network appears or goes away, e.g. to
         # refresh per-user egress rules.
         self.network_listeners: list[Callable[[], Awaitable[None]]] = []
+        # Per-user overrides {"max_running": int|None, "disk_mb": int|None} (blocking;
+        # the gateway reads them from its database). None values mean "use the default".
+        self.limits: Callable[[str], dict] = lambda user: {}
+        self._user_locks: dict[str, asyncio.Lock] = {}
+        self._orphan_busy: dict[str, float] = {}
 
     # ---- identity -----------------------------------------------------------
 
@@ -478,25 +525,9 @@ class SandboxManager:
             already_running = container.status == "running"
 
         if not already_running:
-            running = await asyncio.to_thread(self._running_count)
-            if running >= self.cfg.max_running:
-                raise SandboxCapacityError("no free sandbox capacity, try again later")
-            await asyncio.to_thread(self._ensure_network, net_name, user)
-            if container is None:
-                container = await asyncio.to_thread(
-                    self._create, user, workspace, extra_env, net_name, config_tar
-                )
-            else:
-                try:
-                    await asyncio.to_thread(self._attach, container, net_name, user)
-                    await asyncio.to_thread(container.start)
-                except APIError:
-                    # e.g. the container still points at a network that was removed
-                    # while the gateway was down. Recreate it; the volume is kept.
-                    await asyncio.to_thread(container.remove, force=True)
-                    container = await asyncio.to_thread(
-                        self._create, user, workspace, extra_env, net_name, config_tar
-                    )
+            async with self._user_locks.setdefault(user, asyncio.Lock()):
+                await self._make_room(user, workspace)
+                container = await self._boot(user, workspace, extra_env, net_name, config_tar, container)
         else:
             # Running already (e.g. gateway restarted): make sure we can reach it.
             await asyncio.to_thread(self._ensure_network, net_name, user)
@@ -505,6 +536,170 @@ class SandboxManager:
         entry = await self._wait_ready(container, net_name)
         entry.env_digest = self._label(container, "oc.env")
         return entry
+
+    async def _boot(self, user, workspace, extra_env, net_name, config_tar, container):
+        """Start (or create) a stopped sandbox, within the server-wide capacity."""
+        running = await asyncio.to_thread(self._running_count)
+        if running >= self.cfg.max_running:
+            raise SandboxCapacityError("no free sandbox capacity, try again later")
+        await asyncio.to_thread(self._ensure_network, net_name, user)
+        if container is None:
+            container = await asyncio.to_thread(
+                self._create, user, workspace, extra_env, net_name, config_tar
+            )
+        else:
+            try:
+                await asyncio.to_thread(self._attach, container, net_name, user)
+                await asyncio.to_thread(container.start)
+            except APIError:
+                # e.g. the container still points at a network that was removed
+                # while the gateway was down. Recreate it; the volume is kept.
+                await asyncio.to_thread(container.remove, force=True)
+                container = await asyncio.to_thread(
+                    self._create, user, workspace, extra_env, net_name, config_tar
+                )
+        return container
+
+    # ---- per-user limit, busy check, sleep ----------------------------------------
+
+    def max_for(self, user: str) -> int:
+        try:
+            v = (self.limits(user) or {}).get("max_running")
+        except Exception:
+            v = None
+        return self.cfg.max_per_user if v is None else int(v)
+
+    def disk_limit_for(self, user: str) -> int:
+        try:
+            v = (self.limits(user) or {}).get("disk_mb")
+        except Exception:
+            v = None
+        return self.cfg.disk_limit_mb if v is None else int(v)
+
+    def _user_containers(self, user: str, all: bool = False) -> list[Any]:
+        return [
+            c
+            for c in self._d().containers.list(all=all, filters={"label": [f"{LABEL}=true", f"oc.user={user}"]})
+            if self._label(c, "oc.user") == user
+        ]
+
+    async def _make_room(self, user: str, workspace: str) -> None:
+        """Before starting a sandbox: if the user is at their limit, put their least
+        recently used idle sandbox(es) to sleep, or refuse if all are busy."""
+        limit = await asyncio.to_thread(self.max_for, user)
+        if limit <= 0:
+            return
+        running = await asyncio.to_thread(self._user_containers, user)
+        others = [c for c in running if self._label(c, "oc.workspace") != workspace]
+        need = len(others) - limit + 1
+        if need <= 0:
+            return
+        idle: list[tuple[float, str]] = []
+        for c in others:
+            key = c.name.removeprefix("ocsb-")
+            e = self._entries.get(key)
+            if e is not None and e.leases:
+                continue
+            if await self._busy(key, c):
+                continue
+            idle.append((e.last_used if e else 0.0, key))
+        if len(idle) < need:
+            raise SandboxUserLimitError(limit, sorted(self._label(c, "oc.workspace") for c in others))
+        for _, key in sorted(idle)[:need]:
+            await self._sleep(key)
+
+    async def _busy(self, key: str, container: Any | None = None) -> bool:
+        """True if OpenCode in this sandbox has a session still working."""
+        entry = self._entries.get(key)
+        client, temp = (entry.client, False) if entry else (None, False)
+        if client is None:
+            c = container or await asyncio.to_thread(self._get_container, f"ocsb-{key}")
+            if c is None:
+                return False
+            ip = self._ip(c, self._net_name(key))
+            if not ip:
+                return False
+            password = await asyncio.to_thread(self._resolve_password, c)
+            client, temp = self._client_factory(f"http://{ip}:{self.cfg.port}", password), True
+        try:
+            r = await client.get("/api/session/active", timeout=5.0)
+            if r.status_code != 200:
+                return False
+            data = r.json()
+            data = data.get("data", data) if isinstance(data, dict) else data
+            return bool(data)
+        except (httpx.HTTPError, ValueError):
+            return False  # unreachable: nothing worth keeping awake
+        finally:
+            if temp:
+                await client.aclose()
+
+    async def _sleep(self, key: str) -> None:
+        entry = self._entries.pop(key, None)
+        if entry:
+            await entry.client.aclose()
+        self._orphans.pop(f"ocsb-{key}", None)
+        await self._stop_container(key)
+
+    # ---- status and disk ------------------------------------------------------------
+
+    async def status(self, user: str, workspace: str) -> dict:
+        """State of one sandbox without starting it."""
+        self._check_ids(user, workspace)
+        key = self._key(user, workspace)
+        c = await asyncio.to_thread(self._get_container, f"ocsb-{key}")
+        if c is None:
+            return {"state": "new", "busy": False, "disk_mb": None}
+        await asyncio.to_thread(c.reload)
+        if c.status != "running":
+            return {"state": "sleeping", "busy": False, "disk_mb": None}
+        e = self._entries.get(key)
+        out: dict[str, Any] = {
+            "state": "running",
+            "busy": bool(e and e.leases) or await self._busy(key, c),
+            "disk_mb": e.disk_mb if e else None,
+        }
+        if e:
+            out["idle_seconds"] = int(time.monotonic() - e.last_used)
+            out["sleeps_in"] = max(0, self.cfg.idle_seconds - out["idle_seconds"])
+        return out
+
+    async def user_states(self, user: str) -> dict[str, str]:
+        """{workspace: "running" | "sleeping"} for every sandbox the user has."""
+        cs = await asyncio.to_thread(self._user_containers, user, True)
+        return {self._label(c, "oc.workspace"): ("running" if c.status == "running" else "sleeping") for c in cs}
+
+    def _du(self, container: Any) -> int | None:
+        try:
+            res = container.exec_run(
+                ["du", "-smx", "/workspace", "/home/agent/.state"], user="agent", demux=False
+            )
+            out = res.output.decode() if isinstance(res.output, (bytes, bytearray)) else str(res.output)
+            return sum(int(line.split()[0]) for line in out.splitlines() if line.split() and line.split()[0].isdigit())
+        except Exception:
+            return None
+
+    async def measure_disk(self, user: str, workspace: str, force: bool = False) -> int | None:
+        key = self._key(user, workspace)
+        e = self._entries.get(key)
+        if e is None:
+            return None
+        if not force and time.monotonic() - e.disk_checked_at < self.cfg.disk_check_seconds:
+            return e.disk_mb
+        c = await asyncio.to_thread(self._get_container, f"ocsb-{key}")
+        if c is None:
+            return None
+        e.disk_mb = await asyncio.to_thread(self._du, c)
+        e.disk_checked_at = time.monotonic()
+        return e.disk_mb
+
+    def over_disk(self, user: str, workspace: str) -> tuple[int, int] | None:
+        """(used MB, limit MB) if the sandbox is over its disk limit (last measurement)."""
+        e = self._entries.get(self._key(user, workspace))
+        limit = self.disk_limit_for(user)
+        if e is None or e.disk_mb is None or limit <= 0 or e.disk_mb <= limit:
+            return None
+        return e.disk_mb, limit
 
     async def _wait_ready(self, container: Any, net_name: str) -> _Entry:
         deadline = time.monotonic() + self.cfg.start_timeout
@@ -549,13 +744,34 @@ class SandboxManager:
         config_tar: bytes | None = None,
     ):
         """Hold a sandbox busy (not reaped) for the duration of long requests/streams."""
+        async with self.lease_entry(user, workspace, extra_env, config_tar) as entry:
+            yield entry.client
+
+    @asynccontextmanager
+    async def lease_entry(
+        self,
+        user: str,
+        workspace: str,
+        extra_env: dict[str, str] | None = None,
+        config_tar: bytes | None = None,
+    ):
+        """lease(), yielding the entry (url, password) for non-HTTP connections."""
         entry = await self.ensure(user, workspace, extra_env, config_tar)
         entry.leases += 1
         try:
-            yield entry.client
+            yield entry
         finally:
             entry.leases -= 1
             entry.last_used = time.monotonic()
+
+    def auth_headers(self, entry: _Entry) -> dict[str, str]:
+        """How to authenticate to a sandbox's OpenCode server (e.g. for WebSockets)."""
+        if self.cfg.auth == "bearer":
+            return {"authorization": f"Bearer {entry.password}"}
+        import base64
+
+        raw = base64.b64encode(f"{self.cfg.username}:{entry.password}".encode()).decode()
+        return {"authorization": f"Basic {raw}"}
 
     async def exec(
         self,
@@ -634,17 +850,37 @@ class SandboxManager:
 
         for key, entry in list(self._entries.items()):
             if entry.leases == 0 and now - entry.last_used > self.cfg.idle_seconds:
-                self._entries.pop(key, None)
-                await entry.client.aclose()
-                await self._stop_container(key)
+                if await self._busy(key):
+                    # The agent is still working with nobody watching: stay awake,
+                    # unless it has been "busy" for implausibly long.
+                    entry.busy_since = entry.busy_since or now
+                    if now - entry.busy_since < self.cfg.max_busy_seconds:
+                        continue
+                await self._sleep(key)
                 stopped.append(key)
+            else:
+                entry.busy_since = None
 
         for name, first_seen in list(self._orphans.items()):
             if now - first_seen > self.cfg.idle_seconds:
+                key = name.removeprefix("ocsb-")
+                if await self._busy(key):
+                    since = self._orphan_busy.setdefault(name, now)
+                    if now - since < self.cfg.max_busy_seconds:
+                        continue
+                self._orphan_busy.pop(name, None)
                 self._orphans.pop(name, None)
-                await self._stop_container(name.removeprefix("ocsb-"))
+                await self._stop_container(key)
                 stopped.append(name)
         return stopped
+
+    async def measure_all(self) -> None:
+        for key, e in list(self._entries.items()):
+            if time.monotonic() - e.disk_checked_at >= self.cfg.disk_check_seconds:
+                c = await asyncio.to_thread(self._get_container, f"ocsb-{key}")
+                if c is not None:
+                    e.disk_mb = await asyncio.to_thread(self._du, c)
+                    e.disk_checked_at = time.monotonic()
 
     def _known_names(self) -> list[str]:
         return [f"ocsb-{k}" for k in self._entries]
@@ -659,6 +895,7 @@ class SandboxManager:
             try:
                 await asyncio.to_thread(self.refresh_subnets)
                 await self.reap_idle()
+                await self.measure_all()
             except Exception:  # keep the loop alive; Docker may be briefly unavailable
                 pass
 

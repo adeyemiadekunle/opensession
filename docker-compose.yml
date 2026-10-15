@@ -1,5 +1,5 @@
-# Cloud stack for local testing: the gateway in a container managing sandbox
-# containers through the Docker socket, plus the egress proxy.
+# Cloud stack: the gateway in a container managing sandbox containers through the
+# Docker socket, Postgres for its data, and the egress proxy.
 #   docker build -t opencode-sandbox:latest services/sandbox
 #   docker compose up --build
 services:
@@ -12,8 +12,10 @@ services:
       SANDBOX_EGRESS_PROXY: opensession-egress
       EGRESS_CONF_DIR: /egress-conf
       EGRESS_GLOBAL_ALLOWLIST: /etc/opensession/egress-allowlist.txt
+      # Postgres (below). Set POSTGRES_PASSWORD in .env; to keep using the old SQLite
+      # file instead, remove this line (data stays in /data/opensession.db).
+      DATABASE_URL: postgresql://opensession:${POSTGRES_PASSWORD:-opensession-dev}@db:5432/opensession
       OPENSESSION_DB: /data/opensession.db
-      KEYSTORE_PATH: /data/opensession.db
     ports:
       - "127.0.0.1:${GATEWAY_HOST_PORT:-8787}:8000"
     volumes:
@@ -23,7 +25,26 @@ services:
       - egress-conf:/egress-conf
       - ./services/egress/allowlist.txt:/etc/opensession/egress-allowlist.txt:ro
     depends_on:
-      - egress
+      egress:
+        condition: service_started
+      db:
+        condition: service_healthy
+
+  # The gateway's database. Not published on the host and not on any sandbox network.
+  db:
+    image: postgres:16-alpine
+    container_name: opensession-db
+    environment:
+      POSTGRES_USER: opensession
+      POSTGRES_DB: opensession
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-opensession-dev}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opensession -d opensession"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
   # Allowlist proxy: the only route from sandboxes to the internet.
   egress:
@@ -34,5 +55,6 @@ services:
       - egress-conf:/etc/squid/conf.d
 
 volumes:
+  pg-data:
   gateway-data:
   egress-conf:

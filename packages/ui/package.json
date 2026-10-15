@@ -11,7 +11,9 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
-    "@opensession/api-client": "workspace:*"
+    "@opensession/api-client": "workspace:*",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

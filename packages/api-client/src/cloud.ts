@@ -1,6 +1,10 @@
 import { Http, type HeadersFn, unwrap } from "./http";
 import { parseSSE } from "./sse";
 import type {
+  Limits,
+  TerminalApi,
+  TerminalInfo,
+  WorkspaceStatus,
   GitActions,
   GitInfo,
   GithubRepo,
@@ -245,8 +249,39 @@ export class CloudClient implements OpenSessionClient {
     await this.http.del(`/workspaces/${enc(id)}`, { query: { delete_data: String(deleteData) } });
   }
 
+  /** Put this project's sandbox to sleep now (files and sessions are kept). */
   async stopWorkspace() {
     await this.http.post("/workspace/stop");
+  }
+  /** Sandbox state without waking it. */
+  workspaceStatus(): Promise<WorkspaceStatus> {
+    return this.http.get("/workspace");
+  }
+  limits(): Promise<Limits> {
+    return this.http.get("/limits");
+  }
+
+  // ---- terminal ------------------------------------------------------------------
+
+  terminals(): TerminalApi {
+    return {
+      list: async () => unwrap<TerminalInfo[]>(await this.http.get("/terminals")) ?? [],
+      create: (size) => this.http.post("/terminals", { json: size }),
+      resize: async (id, size) => {
+        await this.http.post(`/terminals/${enc(id)}/size`, { json: size });
+      },
+      close: async (id) => {
+        await this.http.del(`/terminals/${enc(id)}`);
+      },
+      socketUrl: async (id, cursor) => {
+        const { ticket } = await this.http.post(`/terminals/${enc(id)}/ticket`);
+        const url = new URL(`terminals/${enc(id)}/connect`, this.o.gatewayUrl.replace(/\/?$/, "/"));
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        url.searchParams.set("ticket", ticket);
+        if (cursor !== undefined) url.searchParams.set("cursor", String(cursor));
+        return url.toString();
+      },
+    };
   }
 
   // ---- agent setup and secrets ------------------------------------------------------

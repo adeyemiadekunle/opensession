@@ -222,6 +222,43 @@ projects
     console.log("removed");
   });
 
+projects.command("sleep <id>").description("Put a project's sandbox to sleep now (files and sessions are kept)").action(async (id: string) => {
+  await cloud().withWorkspace(id).stopWorkspace();
+  console.log("asleep");
+});
+
+program
+  .command("status")
+  .description("State of the current project's sandbox (does not wake it)")
+  .action(async () => {
+    const c = cloud();
+    const st = await c.workspaceStatus();
+    console.log(`${c.workspace}: ${st.state}${st.busy ? " (agent working)" : ""}`);
+    if (st.sleeps_in !== undefined) console.log(`  goes to sleep in ${Math.ceil(st.sleeps_in / 60)} min if idle`);
+    if (st.disk_mb !== null) console.log(`  disk ${st.disk_mb} MB${st.disk_limit_mb ? ` of ${st.disk_limit_mb} MB` : ""}`);
+    const lim = await c.limits();
+    console.log(`awake: ${lim.running.join(", ") || "none"} (limit ${lim.max_running || "none"})`);
+  });
+
+const admin = program.command("admin").description("Platform admin (your user id must be in ADMIN_USER_IDS)");
+admin
+  .command("limits <user>")
+  .option("--max-running <n>", "projects awake at once (0 = no limit)")
+  .option("--disk-mb <n>", "disk per project in MB (0 = no limit)")
+  .option("--reset", "back to the platform defaults")
+  .action(async (user: string, o) => {
+    const c = cloud();
+    const num = (v?: string) => (v === undefined ? undefined : Number(v));
+    if (o.reset || o.maxRunning !== undefined || o.diskMb !== undefined) {
+      const cur = (await c.http.get(`/admin/users/${encodeURIComponent(user)}/limits`)).override;
+      const body = o.reset
+        ? { max_running: null, disk_mb: null }
+        : { max_running: num(o.maxRunning) ?? cur.max_running, disk_mb: num(o.diskMb) ?? cur.disk_mb };
+      await c.http.put(`/admin/users/${encodeURIComponent(user)}/limits`, { json: body });
+    }
+    console.log(JSON.stringify(await c.http.get(`/admin/users/${encodeURIComponent(user)}/limits`), null, 2));
+  });
+
 const github = program.command("github").description("Connect GitHub so projects can clone, push and open pull requests");
 github.command("status").action(async () => {
   const g = await cloud().github();

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test of the cloud stack on a Linux Docker host (CI runs this).
-# Builds the images, starts gateway + egress proxy, creates sandboxes for two users
-# and checks isolation, egress, per-user domains and the agent setup. Dev auth only.
+# Builds the images, starts gateway + Postgres + egress proxy, creates sandboxes for
+# two users and checks isolation, egress, per-user domains, the agent setup, sleep
+# and resume, the per-user limit and the web terminal. Dev auth only.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -18,6 +19,11 @@ api() { # api METHOD USER PATH [JSON] -> prints HTTP code; body in /tmp/os_body
   curl -sS -o /tmp/os_body -w '%{http_code}' -X "$1" -H "X-User-Id: $2" \
     -H 'content-type: application/json' ${4:+--data "$4"} "$G$3" || echo 000
 }
+apiw() { # apiw METHOD USER WORKSPACE PATH [JSON]
+  curl -sS -o /tmp/os_body -w '%{http_code}' -X "$1" -H "X-User-Id: $2" -H "X-Workspace: $3" \
+    -H 'content-type: application/json' ${5:+--data "$5"} "$G$4" || echo 000
+}
+body_has() { grep -q -- "$1" /tmp/os_body; }
 sandbox_of() { docker ps -q --filter label=oc.managed=true --filter "label=oc.user=$1" | head -n1; }
 probe() { # probe USER CURL_ARGS... -> "http=X connect=Y"
   local c; c=$(sandbox_of "$1"); shift
@@ -41,7 +47,9 @@ cat > .env.smoke <<ENV
 AUTH_MODE=dev
 KEYSTORE_MASTER_KEYS=$KEY
 SANDBOX_IMAGE=opencode-sandbox:latest
-SANDBOX_MAX_RUNNING=5
+SANDBOX_MAX_RUNNING=6
+SANDBOX_MAX_PER_USER=2
+POSTGRES_PASSWORD=smoke-$RANDOM
 GATEWAY_HOST_PORT=$PORT
 ENV
 export OPENSESSION_ENV_FILE=.env.smoke
@@ -89,10 +97,68 @@ CFG=$(docker exec "$(sandbox_of alice)" cat /home/agent/.config/opencode/opencod
 check "secret stored" 200 "$(api PUT alice /secrets/DOCS_TOKEN '{"value":"smoke-value"}')"
 check "literal token in MCP refused" 422 "$(api PUT alice /agent-config '{"mcp":{"x":{"type":"remote","url":"https://x.dev","headers":{"Authorization":"Bearer sk-abcdefghijklmnopqrstuvwx"}}}}')"
 
+echo "== database"
+N=$(docker exec opensession-db psql -U opensession -d opensession -tAc "select count(*) from egress_domains where user_id='alice'" | tr -d '[:space:]')
+check "alice's domains are stored in Postgres" 1 "$N"
+
+echo "== sleep and resume"
+check "create a session" 200 "$(api POST alice /sessions '{"model":{"providerID":"anthropic","id":"claude-sonnet-4-5"}}')"
+SID=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['id'])")
+docker exec "$(sandbox_of alice)" sh -c 'echo kept-across-sleep > /workspace/note.txt'
+check "status while awake" 200 "$(api GET alice /workspace)"
+body_has '"state":"running"' && ok "state running" || bad "status: $(cat /tmp/os_body)"
+check "put to sleep" 204 "$(api POST alice /workspace/stop)"
+check "status while asleep" 200 "$(api GET alice /workspace)"
+body_has '"state":"sleeping"' && ok "state sleeping" || bad "status: $(cat /tmp/os_body)"
+[ -z "$(sandbox_of alice)" ] && ok "container stopped" || bad "alice still running"
+check "next request wakes it" 200 "$(api GET alice /health)"
+check "list sessions" 200 "$(api GET alice /sessions)"
+body_has "$SID" && ok "session kept across sleep" || bad "session $SID missing: $(head -c 300 /tmp/os_body)"
+check "read file" 200 "$(api GET alice '/files/content?path=note.txt')"
+body_has kept-across-sleep && ok "files kept across sleep" || bad "note.txt: $(head -c 200 /tmp/os_body)"
+
+echo "== running projects per user (limit 2)"
+check "alice opens p2" 200 "$(apiw GET alice p2 /health)"
+check "alice opens p3" 200 "$(apiw GET alice p3 /health)"
+check "limits" 200 "$(api GET alice /limits)"
+body_has '"running":\["p2","p3"\]' && ok "least recently used project went to sleep" || bad "limits: $(cat /tmp/os_body)"
+check "default status" 200 "$(api GET alice /workspace)"
+body_has '"state":"sleeping"' && ok "default is asleep" || bad "default: $(cat /tmp/os_body)"
+
+echo "== terminal"
+check "open a terminal" 201 "$(apiw POST alice p3 /terminals '{"cols":100,"rows":30}')"
+PTY=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['id'])")
+check "ticket" 200 "$(apiw POST alice p3 "/terminals/$PTY/ticket")"
+TICKET=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['ticket'])")
+python3 -m venv /tmp/os-wsenv >/dev/null && /tmp/os-wsenv/bin/pip install -q "websockets>=13" >/dev/null
+OUT=$(/tmp/os-wsenv/bin/python - "$G" "$PTY" "$TICKET" <<'PY' || true
+import asyncio, sys
+from websockets.asyncio.client import connect
+g, pty, ticket = sys.argv[1:]
+async def main():
+    async with connect(g.replace("http", "ws", 1) + f"/terminals/{pty}/connect?ticket={ticket}") as ws:
+        await ws.send("echo TERM-$((6*7)) $(pwd) $(whoami)\r")
+        out = ""
+        for _ in range(200):
+            m = await asyncio.wait_for(ws.recv(), 10)
+            if isinstance(m, str):
+                out += m
+            if "TERM-42 " in out and "\r" in out[out.index("TERM-42 "):]:
+                break
+        print(out[out.index("TERM-42 "):].split("\r")[0] if "TERM-42 " in out else "no output: " + out[-200:])
+asyncio.run(main())
+PY
+)
+[[ "$OUT" == "TERM-42 /workspace agent"* ]] && ok "shell in /workspace as agent ($OUT)" || bad "terminal: $OUT"
+REUSE=$(curl -s -o /dev/null -w '%{http_code}' "$G/terminals/$PTY/connect?ticket=$TICKET" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -m 5 || true)
+[[ "$REUSE" != "101" ]] && ok "ticket cannot be reused ($REUSE)" || bad "ticket reused"
+check "close terminal" 204 "$(apiw DELETE alice p3 "/terminals/$PTY")"
+
 echo "== stop and delete"
 check "stop bob" 204 "$(api POST bob /workspace/stop)"
 check "delete alice" 204 "$(api DELETE alice '/workspace?delete_data=true')"
 check "delete bob" 204 "$(api DELETE bob '/workspace?delete_data=true')"
+for w in p2 p3; do check "delete alice $w" 204 "$(apiw DELETE alice $w '/workspace?delete_data=true')"; done
 LEFT=$(docker network ls -q --filter label=oc.managed=true | wc -l)
 check "sandbox networks removed" 0 "$LEFT"
 

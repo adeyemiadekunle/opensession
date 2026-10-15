@@ -19,6 +19,19 @@ jobs:
     defaults:
       run:
         working-directory: services/gateway
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: os
+          POSTGRES_PASSWORD: os
+          POSTGRES_DB: opensession_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U os -d opensession_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://os:os@localhost:5432/opensession_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -8,3 +8,5 @@ export { AgentSetup } from "./AgentSetup";
 export type { SecretsApi } from "./AgentSetup";
 export { GitPanel } from "./GitPanel";
 export { GithubCard, ProjectsPage } from "./Projects";
+export { TerminalPanel } from "./TerminalPanel";
+export { SandboxGate } from "./SandboxGate";

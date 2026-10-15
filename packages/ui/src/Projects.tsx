@@ -51,6 +51,7 @@ export function GithubCard({ client }: { client: CloudClient }) {
 export function ProjectsPage({ client, current, onOpen }: { client: CloudClient; current: string; onOpen: (p: Project) => void }) {
   const projects = useAsync(() => client.listProjects(), [client]);
   const gh = useAsync(() => client.github(), [client]);
+  const limits = useAsync(() => client.limits(), [client]);
   const connected = Boolean(gh.data?.installations.length);
   const repos = useAsync<GithubRepo[]>(() => (connected ? client.githubRepos() : Promise.resolve([])), [client, connected]);
   const [name, setName] = useState("");
@@ -82,13 +83,23 @@ export function ProjectsPage({ client, current, onOpen }: { client: CloudClient;
     <div className="os-settings">
       <section className="os-card">
         <h2>Projects</h2>
-        <p className="os-muted">Each project has its own workspace, files and sessions.</p>
+        <p className="os-muted">
+          Each project has its own workspace, files and sessions. Idle projects go to sleep
+          {limits.data ? ` after ${Math.round(limits.data.idle_timeout_seconds / 60)} minutes` : ""} and wake up as you left
+          them when you open them
+          {limits.data && limits.data.max_running > 0
+            ? `; up to ${limits.data.max_running} can be awake at once.`
+            : "."}
+        </p>
         {projects.error ? <div className="os-error">{projects.error}</div> : null}
         <ul className="os-list">
           {(projects.data ?? []).map((p) => (
             <li key={p.id} className="os-row os-between">
               <span>
                 <strong>{p.name}</strong>{" "}
+                {p.state && p.state !== "new" ? (
+                  <span className={`os-project-state ${p.state}`}>{p.state === "running" ? "awake" : "asleep"}</span>
+                ) : null}{" "}
                 {p.repo ? (
                   <span className="os-path">
                     {p.repo}
@@ -99,6 +110,19 @@ export function ProjectsPage({ client, current, onOpen }: { client: CloudClient;
                 )}
               </span>
               <span className="os-row">
+                {p.state === "running" ? (
+                  <button
+                    onClick={() =>
+                      void client
+                        .withWorkspace(p.id)
+                        .stopWorkspace()
+                        .then(() => Promise.all([projects.reload(), limits.reload()]))
+                        .catch((e) => setErr(errText(e)))
+                    }
+                  >
+                    Sleep
+                  </button>
+                ) : null}
                 <button className={p.id === current ? "os-primary" : undefined} onClick={() => onOpen(p)}>
                   {p.id === current ? "Open (current)" : "Open"}
                 </button>

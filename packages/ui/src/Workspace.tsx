@@ -11,11 +11,13 @@ import {
   type OpenSessionClient,
   type PermissionRequest,
   type Session,
+  type TerminalApi,
 } from "@opensession/api-client";
 import { errText, storageGet, storageSet, useAsync } from "./hooks";
 import { MessageView } from "./Messages";
 import { DiffPanel, FilesPanel } from "./Panels";
 import { GitPanel } from "./GitPanel";
+import { TerminalPanel } from "./TerminalPanel";
 import { Requests } from "./Requests";
 
 const MODEL_KEY = "opensession.model";
@@ -35,12 +37,14 @@ export interface WorkspaceProps {
   agents?: string[];
   /** Commands from the agent setup; shown even before OpenCode has listed them. */
   commands?: { name: string; description?: string | null }[];
+  /** A shell in the cloud sandbox (Terminal tab). */
+  terminal?: TerminalApi;
   /** Branch actions (checkout, push, pull request) for the Git tab. */
   git?: GitActions;
 }
 
 /** Chat with the agent, plus the workspace's files and changes. Works for cloud and local. */
-export function Workspace({ client, noModels, skills = [], agents = [], commands: setupCommands = [], git }: WorkspaceProps) {
+export function Workspace({ client, noModels, skills = [], agents = [], commands: setupCommands = [], git, terminal }: WorkspaceProps) {
   const models = useAsync<Model[]>(() => client.listModels(), [client]);
   const commands = useAsync<CommandInfo[]>(() => client.listCommands().catch(() => []), [client]);
   const agentChoices = useMemo(
@@ -57,7 +61,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<"files" | "changes" | "git">("files");
+  const [tab, setTab] = useState<"files" | "changes" | "git" | "terminal">("files");
   const [refreshKey, setRefreshKey] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -301,7 +305,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
         </div>
       </main>
 
-      <section className="os-side">
+      <section className={tab === "terminal" ? "os-side os-side-wide" : "os-side"}>
         <div className="os-tabs">
           <button className={tab === "files" ? "active" : undefined} onClick={() => setTab("files")}>
             Files
@@ -312,11 +316,18 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
           <button className={tab === "git" ? "active" : undefined} onClick={() => setTab("git")}>
             Git
           </button>
+          {terminal ? (
+            <button className={tab === "terminal" ? "active" : undefined} onClick={() => setTab("terminal")}>
+              Terminal
+            </button>
+          ) : null}
         </div>
         {tab === "files" ? (
           <FilesPanel client={client} refreshKey={refreshKey} />
         ) : tab === "changes" ? (
           <DiffPanel client={client} refreshKey={refreshKey} />
+        ) : tab === "terminal" && terminal ? (
+          <TerminalPanel api={terminal} />
         ) : (
           <GitPanel client={client} actions={git} refreshKey={refreshKey} />
         )}

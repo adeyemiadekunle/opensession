@@ -1,6 +1,6 @@
 import { Show, SignIn, UserButton, useAuth } from "@clerk/react";
 import { CloudClient } from "@opensession/api-client";
-import { AgentSetup, CloudSettings, ProjectsPage, Workspace, useAsync, type SecretsApi } from "@opensession/ui";
+import { AgentSetup, CloudSettings, ProjectsPage, SandboxGate, Workspace, useAsync, type SecretsApi } from "@opensession/ui";
 import { useMemo, useState } from "react";
 import { CliAuthorize } from "./CliAuthorize";
 import { usePath } from "./router";
@@ -50,6 +50,8 @@ function SignedInApp() {
     }
   };
   const projectClient = useMemo(() => client.withWorkspace(project), [client, project]);
+  const gitActions = useMemo(() => projectClient.gitActions(), [projectClient]);
+  const terminal = useMemo(() => projectClient.terminals(), [projectClient]);
   const [projectsVersion, setProjectsVersion] = useState(0);
   const projects = useAsync(() => client.listProjects(), [client, projectsVersion]);
   const [setupVersion, setSetupVersion] = useState(0);
@@ -93,6 +95,7 @@ function SignedInApp() {
               <option key={p.id} value={p.id}>
                 {p.name}
                 {p.repo ? ` (${p.repo})` : ""}
+                {p.state === "running" ? " ●" : p.state === "sleeping" ? " (asleep)" : ""}
               </option>
             ))}
             <option value="__new">+ New project…</option>
@@ -116,10 +119,16 @@ function SignedInApp() {
         ) : path === "/agent" ? (
           <AgentSetup store={store} secrets={secrets} onSaved={() => setSetupVersion((v) => v + 1)} />
         ) : (
+          <SandboxGate
+            key={project}
+            client={projectClient}
+            projectName={(id) => projects.data?.find((p) => p.id === id)?.name ?? id}
+          >
           <Workspace
             key={project}
             client={projectClient}
-            git={projectClient.gitActions()}
+            git={gitActions}
+            terminal={terminal}
             skills={skillIds}
             agents={agentIds}
             commands={setup.data?.config.commands ?? []}
@@ -133,6 +142,7 @@ function SignedInApp() {
               </>
             }
           />
+          </SandboxGate>
         )}
       </div>
     </div>

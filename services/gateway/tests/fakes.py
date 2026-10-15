@@ -8,6 +8,7 @@ import httpx
 from opensession.orchestrator import NotFound, SandboxConfig, SandboxManager
 
 BODIES: list[tuple[str, bytes]] = []  # request bodies seen by the fake sandboxes
+BUSY_HOSTS: set[str] = set()  # sandbox IPs whose OpenCode reports a session still working
 
 
 class FakeContainer:
@@ -101,8 +102,17 @@ class FakeContainers:
             raise NotFound(name)
         return c
 
-    def list(self, filters=None):
-        return [c for c in self.by_name.values() if c.status == "running"]
+    def list(self, all=False, filters=None):
+        labels = (filters or {}).get("label") or []
+        labels = [labels] if isinstance(labels, str) else labels
+        out = []
+        for c in self.by_name.values():
+            if c.removed or (not all and c.status != "running"):
+                continue
+            wanted = (x.split("=", 1) for x in labels)
+            if not [k for k, v in wanted if c.labels.get(k) != v]:
+                out.append(c)
+        return out
 
 
 class FakeVolume:
@@ -195,6 +205,12 @@ def sandbox_transport(seen):
             return httpx.Response(200, json={"data": [{"file": "a.py", "additions": 3, "deletions": 1, "status": "modified"}]})
         if request.url.path == "/api/vcs/branches":
             return httpx.Response(200, json={"data": ["main", "feature-x"]})
+        if request.url.path == "/api/pty" and request.method == "POST":
+            return httpx.Response(200, json={"data": {"id": "pty_abc", "title": "Terminal", "command": "bash", "args": [],
+                                                      "cwd": "/workspace", "status": "running", "pid": 7}})
+        if request.url.path == "/api/session/active":
+            busy = request.url.host in BUSY_HOSTS
+            return httpx.Response(200, json={"data": {"ses_1": {"status": "busy"}} if busy else {}})
         if request.url.path == "/api/health":
             return httpx.Response(200, json={"healthy": True, "host": request.url.host})
         if request.url.path == "/api/session" and request.method == "POST":

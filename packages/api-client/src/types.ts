@@ -110,6 +110,48 @@ export interface Project {
   branch: string | null;
   installation_id?: number | null;
   cloned: boolean;
+  /** "new" (never opened), "sleeping" (stopped; files and sessions kept) or "running". */
+  state?: SandboxState;
+}
+
+export type SandboxState = "new" | "sleeping" | "running";
+
+export interface WorkspaceStatus {
+  state: SandboxState;
+  /** An agent is still working (the sandbox will not go to sleep). */
+  busy: boolean;
+  disk_mb: number | null;
+  disk_limit_mb: number;
+  idle_seconds?: number;
+  sleeps_in?: number;
+  idle_timeout_seconds: number;
+}
+
+export interface Limits {
+  max_running: number;
+  disk_mb: number;
+  idle_timeout_seconds: number;
+  running: string[];
+}
+
+export interface TerminalInfo {
+  id: string;
+  title: string;
+  command: string;
+  cwd: string;
+  status: "running" | "exited";
+  pid: number;
+  exitCode?: number;
+}
+
+/** A shell in the user's cloud sandbox, streamed over a WebSocket. */
+export interface TerminalApi {
+  list(): Promise<TerminalInfo[]>;
+  create(size: { cols: number; rows: number }): Promise<TerminalInfo>;
+  resize(id: string, size: { cols: number; rows: number }): Promise<void>;
+  close(id: string): Promise<void>;
+  /** A ready-to-open wss:// URL (contains a single-use ticket valid for 60 s). */
+  socketUrl(id: string, cursor?: number): Promise<string>;
 }
 
 export interface GithubRepo {

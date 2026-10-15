@@ -38,7 +38,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field, SecretStr
 
@@ -47,6 +47,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import agentconfig
 from .agentconfig import BUILTIN_AGENTS, BUILTIN_TOOLS, AgentConfig
 from .auth import USER_ID_RE, AuthConfig, Authenticator, Principal
+from . import db as dbmod
 from .github import BRANCH_RE, REPO_RE, GitHubApp, GitHubAppConfig, GitHubError, git_auth_env
 from .egress import EgressRules
 from .userstore import UserStore, UserStoreError
@@ -61,6 +62,7 @@ from .keystore import (
 
 from .orchestrator import (
     SandboxCapacityError,
+    SandboxUserLimitError,
     SandboxConfig,
     SandboxError,
     SandboxManager,
@@ -74,6 +76,26 @@ WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 # OpenCode ids have a fixed prefix; validating them keeps callers from smuggling
 # other paths (e.g. "..") into the upstream URL.
 SessionId = Annotated[str, Path(pattern=r"^ses_[A-Za-z0-9]{1,64}$")]
+PtyId = Annotated[str, Path(pattern=r"^pty_[A-Za-z0-9]{1,80}$")]
+TERMINAL_TICKET_SECONDS = 60
+
+
+class TerminalSize(BaseModel):
+    cols: int = Field(ge=2, le=1000)
+    rows: int = Field(ge=2, le=500)
+
+
+class TerminalCreate(BaseModel):
+    cols: int = Field(120, ge=2, le=1000)
+    rows: int = Field(32, ge=2, le=500)
+    title: str | None = Field(None, max_length=100)
+
+
+async def _ws_connect(url: str, headers: dict[str, str]):
+    """Open a WebSocket to a sandbox (replaced in tests)."""
+    from websockets.asyncio.client import connect
+
+    return await connect(url, additional_headers=headers, max_size=None, open_timeout=15)
 PermissionId = Annotated[str, Path(pattern=r"^per_[A-Za-z0-9]{1,64}$")]
 FormId = Annotated[str, Path(pattern=r"^frm_[A-Za-z0-9]{1,64}$")]
 McpName = Annotated[str, Path(pattern=r"^[A-Za-z0-9_.-]{1,64}$")]
@@ -229,7 +251,34 @@ def safe_rel_path(path: str) -> str:
 
 
 def _db_path() -> str:
-    return os.environ.get("OPENSESSION_DB") or os.environ.get("KEYSTORE_PATH", "opensession.db")
+    return dbmod.database_spec()
+
+
+def _cached_limits(users: UserStore, ttl: float = 30.0):
+    """Per-user limit overrides, read from the database at most every `ttl` seconds."""
+    import time
+
+    cache: dict[str, tuple[float, dict]] = {}
+
+    def get(user: str) -> dict:
+        hit = cache.get(user)
+        if hit and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        val = users.get_limits(user)
+        cache[user] = (time.monotonic(), val)
+        return val
+
+    get.cache = cache  # type: ignore[attr-defined]
+    return get
+
+
+def _admins() -> set[str]:
+    return {x.strip() for x in os.environ.get("ADMIN_USER_IDS", "").split(",") if x.strip()}
+
+
+class Limits(BaseModel):
+    max_running: int | None = Field(None, ge=0, le=100, description="running projects at once; 0 = no limit")
+    disk_mb: int | None = Field(None, ge=0, le=10_000_000, description="per project; 0 = no limit")
 
 
 def create_app(
@@ -256,6 +305,7 @@ def create_app(
         app.state.egress = egress or EgressRules.from_env(app.state.users, mgr)
         if app.state.egress.enabled:
             mgr.network_listeners.append(app.state.egress.sync)
+        mgr.limits = _cached_limits(app.state.users)
         app.state.http = httpx.AsyncClient(transport=http_transport)
         if github is _FROM_ENV:
             gh_cfg = GitHubAppConfig.from_env()
@@ -263,6 +313,7 @@ def create_app(
         else:
             app.state.github = github
         app.state.clone_locks = {}
+        app.state.term_tickets = {}
         task = asyncio.create_task(mgr.run_reaper()) if reaper else None
         try:
             if app.state.egress.enabled:
@@ -275,6 +326,7 @@ def create_app(
             await app.state.http.aclose()
 
     app = FastAPI(title="OpenSession gateway", lifespan=lifespan)
+    app.state.ws_connect = _ws_connect
 
     origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
     if origins:  # the web app (Vite dev server, production site) calls from another origin
@@ -342,7 +394,11 @@ def create_app(
         try:
             client = await mgr.client(*ref, env, cfg)
             await prepare_repo(request, ref)
+            if await asyncio.to_thread(mgr.disk_limit_for, ref[0]) > 0:
+                await mgr.measure_disk(*ref)  # cached; re-measured every few minutes
             return client
+        except SandboxUserLimitError as e:
+            raise HTTPException(429, str(e)) from e
         except SandboxCapacityError as e:
             raise HTTPException(503, str(e)) from e
         except SandboxError as e:
@@ -354,6 +410,22 @@ def create_app(
         request: Request, ref: tuple[str, str] = Depends(sandbox_ref)
     ) -> httpx.AsyncClient:
         return await get_client(request, ref)
+
+    async def agent_client(
+        request: Request, ref: tuple[str, str] = Depends(sandbox_ref)
+    ) -> httpx.AsyncClient:
+        """Like oc_client, for requests that make the agent do work: refused while the
+        project is over its disk limit (the terminal and shell still work, to clean up)."""
+        client = await get_client(request, ref)
+        check_disk(request, ref)
+        return client
+
+    def check_disk(request: Request, ref: tuple[str, str]) -> None:
+        over = request.app.state.sandboxes.over_disk(*ref)
+        if over:
+            raise HTTPException(
+                507, f"this project uses {over[0]} MB of its {over[1]} MB disk limit; delete files to continue"
+            )
 
     async def call(client: httpx.AsyncClient, method: str, path: str, **kw) -> httpx.Response:
         try:
@@ -373,9 +445,60 @@ def create_app(
         """Starts the caller's sandbox if needed and returns OpenCode's health."""
         return (await call(client, "GET", "/api/health")).json()
 
+    @app.get("/workspace")
+    async def workspace_status(request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """State of the project's sandbox, without waking it: "new" (never started),
+        "sleeping" (stopped; files and sessions kept) or "running"."""
+        mgr: SandboxManager = request.app.state.sandboxes
+        st = await mgr.status(*ref)
+        st["disk_limit_mb"] = await asyncio.to_thread(mgr.disk_limit_for, ref[0])
+        st["idle_timeout_seconds"] = mgr.cfg.idle_seconds
+        return st
+
     @app.post("/workspace/stop", status_code=204)
     async def workspace_stop(request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """Put the project's sandbox to sleep now. The next request wakes it with
+        every file and session intact."""
         await request.app.state.sandboxes.stop(*ref)
+
+    @app.get("/limits")
+    async def my_limits(request: Request, user: str = Depends(current_user)):
+        mgr: SandboxManager = request.app.state.sandboxes
+        states = await mgr.user_states(user)
+        return {
+            "max_running": await asyncio.to_thread(mgr.max_for, user),
+            "disk_mb": await asyncio.to_thread(mgr.disk_limit_for, user),
+            "idle_timeout_seconds": mgr.cfg.idle_seconds,
+            "running": sorted(w for w, st in states.items() if st == "running"),
+        }
+
+    def require_admin(user: str = Depends(current_user)) -> str:
+        if user not in _admins():
+            raise HTTPException(403, "platform admins only (ADMIN_USER_IDS)")
+        return user
+
+    @app.get("/admin/users/{user_id}/limits")
+    async def admin_get_limits(user_id: str, request: Request, _: str = Depends(require_admin)):
+        if not USER_ID_RE.match(user_id):
+            raise HTTPException(400, "invalid user id")
+        mgr: SandboxManager = request.app.state.sandboxes
+        own = await asyncio.to_thread(request.app.state.users.get_limits, user_id)
+        return {
+            "override": own,
+            "effective": {"max_running": mgr.max_for(user_id), "disk_mb": mgr.disk_limit_for(user_id)},
+            "defaults": {"max_running": mgr.cfg.max_per_user, "disk_mb": mgr.cfg.disk_limit_mb},
+        }
+
+    @app.put("/admin/users/{user_id}/limits")
+    async def admin_set_limits(user_id: str, body: Limits, request: Request, _: str = Depends(require_admin)):
+        """Override a user's limits; send nulls to go back to the platform defaults."""
+        if not USER_ID_RE.match(user_id):
+            raise HTTPException(400, "invalid user id")
+        out = await asyncio.to_thread(request.app.state.users.set_limits, user_id, body.max_running, body.disk_mb)
+        cache = getattr(request.app.state.sandboxes.limits, "cache", None)
+        if cache is not None:
+            cache.pop(user_id, None)
+        return out
 
     @app.delete("/workspace", status_code=204)
     async def workspace_destroy(
@@ -577,6 +700,9 @@ def create_app(
         items = await asyncio.to_thread(request.app.state.users.list_workspaces, user)
         if not any(w["id"] == "default" for w in items):
             items.insert(0, {"id": "default", "name": "Default", "repo": None, "branch": None, "cloned": False})
+        states = await request.app.state.sandboxes.user_states(user)
+        for w in items:
+            w["state"] = states.get(w["id"], "new")
         return items
 
     @app.post("/workspaces", status_code=201)
@@ -829,7 +955,7 @@ def create_app(
 
     @app.post("/sessions/{session_id}/prompt")
     async def send_prompt(
-        session_id: SessionId, body: Prompt, client: httpx.AsyncClient = Depends(oc_client)
+        session_id: SessionId, body: Prompt, client: httpx.AsyncClient = Depends(agent_client)
     ):
         """Queue a prompt and return immediately. Follow progress via /events."""
         r = await call(client, "POST", f"/api/session/{session_id}/prompt", json=prompt_payload(body))
@@ -845,6 +971,7 @@ def create_app(
     ):
         """Send a prompt, wait until the agent is idle, return the newest messages."""
         await get_client(request, ref)  # maps sandbox errors to HTTP errors
+        check_disk(request, ref)
         env = await user_env(request, ref[0])
         async with request.app.state.sandboxes.lease(*ref, env) as client:
             await call(client, "POST", f"/api/session/{session_id}/prompt", json=prompt_payload(body))
@@ -1009,7 +1136,7 @@ def create_app(
 
     @app.post("/sessions/{session_id}/command")
     async def run_command(
-        session_id: SessionId, body: RunCommand, client: httpx.AsyncClient = Depends(oc_client)
+        session_id: SessionId, body: RunCommand, client: httpx.AsyncClient = Depends(agent_client)
     ):
         """Run a slash command (e.g. "review" with arguments "src/auth.ts")."""
         r = await call(
@@ -1034,6 +1161,121 @@ def create_app(
         """Run one command in the user's own sandbox. The command and its output
         appear in the session as a "shell" message."""
         await call(client, "POST", f"/api/session/{session_id}/shell", json={"command": body.command})
+
+    # ---- terminal (OpenCode PTY in the user's sandbox) --------------------------------
+    #
+    # The browser cannot put an Authorization header on a WebSocket, so it first asks
+    # for a single-use ticket (normal auth), then opens
+    #   wss://<gateway>/terminals/<pty>/connect?ticket=...
+    # The gateway checks the ticket and Origin, connects to the sandbox's PTY with the
+    # sandbox password (which the browser never sees) and relays frames both ways.
+    # Frames are OpenCode's: terminal output as text, a binary 0x00+JSON frame with
+    # the output cursor (reconnect with ?cursor= to replay what was missed), input as
+    # text. Resize with POST /terminals/<pty>/size.
+
+    def unwrap(r: httpx.Response):
+        b = r.json()
+        return b.get("data", b) if isinstance(b, dict) else b
+
+    @app.get("/terminals")
+    async def list_terminals(client: httpx.AsyncClient = Depends(oc_client)):
+        return unwrap(await call(client, "GET", "/api/pty"))
+
+    @app.post("/terminals", status_code=201)
+    async def create_terminal(body: TerminalCreate, client: httpx.AsyncClient = Depends(oc_client)):
+        info = unwrap(await call(client, "POST", "/api/pty", json={"cwd": "/workspace", "title": body.title or "Terminal"}))
+        await call(client, "PUT", f"/api/pty/{info['id']}", json={"size": {"cols": body.cols, "rows": body.rows}})
+        return info
+
+    @app.post("/terminals/{pty_id}/size", status_code=204)
+    async def resize_terminal(pty_id: PtyId, body: TerminalSize, client: httpx.AsyncClient = Depends(oc_client)):
+        await call(client, "PUT", f"/api/pty/{pty_id}", json={"size": body.model_dump()})
+
+    @app.delete("/terminals/{pty_id}", status_code=204)
+    async def close_terminal(pty_id: PtyId, client: httpx.AsyncClient = Depends(oc_client)):
+        await call(client, "DELETE", f"/api/pty/{pty_id}")
+
+    @app.post("/terminals/{pty_id}/ticket")
+    async def terminal_ticket(
+        pty_id: PtyId, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)
+    ):
+        """A single-use ticket (valid 60 s) for opening this terminal's WebSocket."""
+        import secrets as _secrets
+        import time as _time
+
+        client = await get_client(request, ref)
+        await call(client, "GET", f"/api/pty/{pty_id}")  # exists in this user's sandbox
+        tickets: dict = request.app.state.term_tickets
+        now = _time.monotonic()
+        for k in [k for k, v in tickets.items() if v[3] < now]:
+            tickets.pop(k, None)
+        ticket = _secrets.token_urlsafe(32)
+        tickets[ticket] = (ref[0], ref[1], pty_id, now + TERMINAL_TICKET_SECONDS)
+        return {"ticket": ticket, "expires_in": TERMINAL_TICKET_SECONDS}
+
+    @app.websocket("/terminals/{pty_id}/connect")
+    async def terminal_socket(websocket: WebSocket, pty_id: str, ticket: str = "", cursor: int | None = None):
+        import time as _time
+
+        mgr: SandboxManager = websocket.app.state.sandboxes
+        host = websocket.client.host if websocket.client else None
+        held = websocket.app.state.term_tickets.pop(ticket, None) if ticket else None
+        origin = websocket.headers.get("origin")
+        if (
+            mgr.is_sandbox_address(host)
+            or held is None
+            or held[2] != pty_id
+            or held[3] < _time.monotonic()
+            or (origin and origins and origin not in origins)
+        ):
+            await websocket.close(code=4403)
+            return
+        user, ws_id = held[0], held[1]
+        await websocket.accept()
+        try:
+            async with mgr.lease_entry(user, ws_id) as entry:  # stays awake while connected
+                url = entry.url.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+                url += f"/api/pty/{pty_id}/connect"
+                if cursor is not None and cursor >= -1:
+                    url += f"?cursor={cursor}"
+                upstream = await websocket.app.state.ws_connect(url, mgr.auth_headers(entry))
+                try:
+                    async def down():
+                        async for msg in upstream:
+                            if isinstance(msg, (bytes, bytearray)):
+                                await websocket.send_bytes(bytes(msg))
+                            else:
+                                await websocket.send_text(msg)
+                            entry.last_used = _time.monotonic()
+
+                    async def up():
+                        while True:
+                            m = await websocket.receive()
+                            if m["type"] == "websocket.disconnect":
+                                return
+                            data = m.get("text") if m.get("text") is not None else m.get("bytes")
+                            if data:
+                                await upstream.send(data)
+                                entry.last_used = _time.monotonic()
+
+                    tasks = [asyncio.create_task(down()), asyncio.create_task(up())]
+                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for t in pending:
+                        t.cancel()
+                    for t in done:
+                        if t.exception() and not isinstance(t.exception(), WebSocketDisconnect):
+                            raise t.exception()  # type: ignore[misc]
+                    code = getattr(upstream, "close_code", None) or 1000
+                finally:
+                    await upstream.close()
+            await websocket.close(code=code if code in (1000, 4404) else 1011)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            try:
+                await websocket.close(code=1011)
+            except Exception:
+                pass
 
     # ---- MCP (per-sandbox, so it only affects the calling user) --------------
 
