@@ -49,7 +49,7 @@ export function SandboxGate({
   if (phase.kind === "ready") return <>{children}</>;
   const name = (id: string) => projectName?.(id) ?? id;
   return (
-    <div className="os-gate">
+    <div className="os-legacy os-gate">
       {phase.kind === "checking" ? <p>Opening {name(client.workspace)}…</p> : null}
       {phase.kind === "waking" ? (
         <p>

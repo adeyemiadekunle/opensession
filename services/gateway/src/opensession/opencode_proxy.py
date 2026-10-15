@@ -129,7 +129,7 @@ def filter_response(segs: list[str], body: dict | list, allow_opencode_provider:
         if segs == ["model"]:
             if m.get("providerID") == "opencode" and not allow_opencode_provider:
                 continue
-            item = {k: m[k] for k in ("id", "providerID", "name", "family", "capabilities") if k in m}
+            item = {k: m[k] for k in ("id", "providerID", "name", "family", "capabilities", "limit") if k in m}
             item["variants"] = [{"id": v["id"]} for v in m.get("variants") or [] if isinstance(v, dict) and "id" in v]
         else:
             item = {k: m[k] for k in ("id", "name", "description", "mode") if k in m}

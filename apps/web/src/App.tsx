@@ -1,6 +1,6 @@
 import { Show, SignIn, UserButton, useAuth } from "@clerk/react";
 import { CloudClient } from "@opensession/api-client";
-import { CloudApp } from "@opensession/ui";
+import { CloudApp, useTheme } from "@opensession/ui";
 import { useMemo } from "react";
 import { CliAuthorize } from "./CliAuthorize";
 import { usePath } from "./router";
@@ -8,10 +8,11 @@ import { usePath } from "./router";
 const GATEWAY_URL = (import.meta.env.VITE_GATEWAY_URL as string | undefined) ?? "http://localhost:8787";
 
 export function App() {
+  useTheme(); // dark/light on <html>, following the OS unless chosen
   return (
     <>
       <Show when="signed-out">
-        <div className="os-signin">
+        <div className="os-legacy os-signin">
           <div className="os-brand">OpenSession</div>
           <SignIn routing="hash" />
         </div>

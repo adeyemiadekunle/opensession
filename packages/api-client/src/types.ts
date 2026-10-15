@@ -12,6 +12,24 @@ export interface Model extends ModelRef {
   name?: string;
   family?: string;
   variants?: string[];
+  /** Token limits, e.g. for the context meter. */
+  limit?: { context: number; output?: number };
+}
+
+/** An MCP server in the workspace and its connection state (GET /api/mcp). */
+export interface McpServerStatus {
+  name: string;
+  /** connected | pending | disabled | failed | needs_auth ... */
+  status: string;
+  error?: string;
+}
+
+/** Token usage of one assistant reply (OpenCode's TokenUsage.Info). */
+export interface TokenUsage {
+  input: number;
+  output: number;
+  reasoning?: number;
+  cache?: { read: number; write: number };
 }
 
 export interface Session {
@@ -242,6 +260,8 @@ export interface OpenSessionClient {
   listPermissions(sessionId: string): Promise<PermissionRequest[]>;
   replyPermission(sessionId: string, requestId: string, reply: PermissionReply, message?: string): Promise<void>;
   listForms(sessionId: string): Promise<FormRequest[]>;
+  /** MCP servers and their connection state (optional). */
+  listMcp?(): Promise<McpServerStatus[]>;
   replyForm(sessionId: string, formId: string, answer: Record<string, unknown>): Promise<void>;
 }
 

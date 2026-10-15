@@ -9,6 +9,7 @@ import type {
   FormRequest,
   LogEvent,
   Message,
+  McpServerStatus,
   Mode,
   Model,
   ModelRef,
@@ -67,7 +68,13 @@ export abstract class OpenCodeClient implements OpenSessionClient {
       name: m.name,
       family: m.family,
       variants: (m.variants ?? []).map((v: any) => v?.id).filter(Boolean),
+      limit: m.limit && typeof m.limit.context === "number" ? { context: m.limit.context, output: m.limit.output } : undefined,
     }));
+  }
+  /** MCP servers and whether they are connected. */
+  async listMcp(): Promise<McpServerStatus[]> {
+    const data = unwrap<any[]>(await this.api.get("/api/mcp")) ?? [];
+    return data.map((s) => ({ name: String(s.name), status: String(s.status?.status ?? s.status ?? "unknown"), error: s.status?.error }));
   }
   async listSessions(): Promise<Session[]> {
     return unwrap<Session[]>(await this.api.get("/api/session")) ?? [];

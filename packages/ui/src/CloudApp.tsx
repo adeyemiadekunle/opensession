@@ -1,11 +1,14 @@
 import type { CiChecks, CloudClient } from "@opensession/api-client";
 import { useMemo, useState, type ReactNode } from "react";
+import { Bot, FolderKanban, MessageSquare, Settings as SettingsIcon } from "lucide-react";
 import { AgentSetup, type SecretsApi } from "./AgentSetup";
 import { useCiWatch } from "./ciWatch";
 import { useAsync } from "./hooks";
 import { ProjectsPage } from "./Projects";
 import { SandboxGate } from "./SandboxGate";
 import { CloudSettings } from "./Settings";
+import { AppShell, type ShellSlots } from "./shell/AppShell";
+import { ThemeToggle } from "./shell/theme";
 import { Workspace } from "./Workspace";
 
 export interface CloudAppProps {
@@ -14,7 +17,7 @@ export interface CloudAppProps {
   /** Current page ("/", "/projects", "/agent", "/settings") and navigation. */
   path: string;
   go: (to: string) => void;
-  /** Extra header content: account button (web), mode switch and sign-out (desktop). */
+  /** Bottom of the sidebar: account button (web), mode switch and sign-out (desktop). */
   headerEnd?: ReactNode;
   /** Called when CI on the open project's branch changes (desktop: OS notification). */
   onCi?: (messages: string[], ci: CiChecks) => void;
@@ -55,50 +58,81 @@ export function CloudApp({ client, path, go, headerEnd, onCi }: CloudAppProps) {
   const setup = useAsync(() => store.get(), [store, setupVersion]);
   const skillIds = setup.data?.config.skills.map((s) => s.id) ?? [];
   const agentIds = setup.data?.config.agents.filter((a) => a.mode !== "subagent").map((a) => a.id) ?? [];
+  const projectName = projects.data?.find((p) => p.id === project)?.name ?? project;
 
-  return (
-    <div className="os-app">
-      <header className="os-header">
-        <span className="os-brand">
-          OpenSession<small>cloud</small>
-        </span>
-        <nav>
-          <button className={path === "/" ? "active" : undefined} onClick={() => go("/")}>
-            Workspace
-          </button>
-          <button className={path === "/projects" ? "active" : undefined} onClick={() => go("/projects")}>
-            Projects
-          </button>
-          <button className={path === "/agent" ? "active" : undefined} onClick={() => go("/agent")}>
-            Agent setup
-          </button>
-          <button className={path === "/settings" ? "active" : undefined} onClick={() => go("/settings")}>
-            Settings
-          </button>
-        </nav>
-        <span className="os-spacer" />
-        <label className="os-project-switch">
-          <span className="os-muted os-small">Project</span>
-          <select
-            value={project}
-            onChange={(e) => {
-              if (e.target.value === "__new") go("/projects");
-              else openProject(e.target.value);
-            }}
-          >
-            {(projects.data ?? [{ id: "default", name: "Default", repo: null, branch: null, cloned: false }]).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.repo ? ` (${p.repo})` : ""}
-                {p.state === "running" ? " ●" : p.state === "sleeping" ? " (asleep)" : ""}
-              </option>
-            ))}
-            <option value="__new">+ New project…</option>
-          </select>
-        </label>
+  const slots: ShellSlots = {
+    header: (
+      <div className="flex flex-col gap-2 px-1 pt-1">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          OpenSession <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground uppercase">cloud</span>
+        </div>
+        <select
+          aria-label="Project"
+          className="h-8 rounded-md border bg-background px-2 text-sm"
+          value={project}
+          onChange={(e) => {
+            if (e.target.value === "__new") go("/projects");
+            else openProject(e.target.value);
+          }}
+        >
+          {(projects.data ?? [{ id: "default", name: "Default", repo: null, branch: null, cloned: false }]).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+              {p.repo ? ` (${p.repo})` : ""}
+              {p.state === "running" ? " ●" : p.state === "sleeping" ? " (asleep)" : ""}
+            </option>
+          ))}
+          <option value="__new">+ New project…</option>
+        </select>
+      </div>
+    ),
+    nav: [
+      { id: "/", label: "Workspace", icon: MessageSquare, active: path === "/", onSelect: () => go("/") },
+      { id: "/projects", label: "Projects", icon: FolderKanban, active: path === "/projects", onSelect: () => go("/projects") },
+      { id: "/agent", label: "Agent setup", icon: Bot, active: path === "/agent", onSelect: () => go("/agent") },
+      { id: "/settings", label: "Settings", icon: SettingsIcon, active: path === "/settings", onSelect: () => go("/settings") },
+    ],
+    footer: (
+      <div className="flex items-center gap-2 px-1">
         {headerEnd}
-      </header>
-      <div className="os-content">
+        <span className="ml-auto">
+          <ThemeToggle />
+        </span>
+      </div>
+    ),
+  };
+
+  if (path === "/") {
+    return (
+      <SandboxGate key={project} client={projectClient} projectName={(id) => projects.data?.find((p) => p.id === id)?.name ?? id}>
+        <Workspace
+          key={project}
+          client={projectClient}
+          git={gitActions}
+          terminal={terminal}
+          skills={skillIds}
+          agents={agentIds}
+          commands={setup.data?.config.commands ?? []}
+          shell={slots}
+          environment={{ kind: "cloud", label: "Cloud", detail: projectName }}
+          noModels={
+            <>
+              Add a model API key in{" "}
+              <button className="underline" onClick={() => go("/settings")}>
+                Settings
+              </button>{" "}
+              to get started.
+            </>
+          }
+        />
+      </SandboxGate>
+    );
+  }
+
+  const title = path === "/settings" ? "Settings" : path === "/projects" ? "Projects" : "Agent setup";
+  return (
+    <AppShell slots={slots} title={title}>
+      <div className="os-legacy h-full overflow-auto">
         {path === "/settings" ? (
           <CloudSettings client={client} />
         ) : path === "/projects" ? (
@@ -111,35 +145,10 @@ export function CloudApp({ client, path, go, headerEnd, onCi }: CloudAppProps) {
               go("/");
             }}
           />
-        ) : path === "/agent" ? (
-          <AgentSetup store={store} secrets={secrets} onSaved={() => setSetupVersion((v) => v + 1)} />
         ) : (
-          <SandboxGate
-            key={project}
-            client={projectClient}
-            projectName={(id) => projects.data?.find((p) => p.id === id)?.name ?? id}
-          >
-            <Workspace
-              key={project}
-              client={projectClient}
-              git={gitActions}
-              terminal={terminal}
-              skills={skillIds}
-              agents={agentIds}
-              commands={setup.data?.config.commands ?? []}
-              noModels={
-                <>
-                  Add a model API key in{" "}
-                  <button className="os-link" onClick={() => go("/settings")}>
-                    Settings
-                  </button>{" "}
-                  to get started.
-                </>
-              }
-            />
-          </SandboxGate>
+          <AgentSetup store={store} secrets={secrets} onSaved={() => setSetupVersion((v) => v + 1)} />
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

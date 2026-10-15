@@ -42,21 +42,22 @@
   --os-add: #6fd39b; --os-del: #ff8a75; --os-user: #1f2742; color-scheme: dark;
 }
 
-* { box-sizing: border-box; }
+/* Element rules apply only inside .os-legacy: screens not yet moved to shadcn are
+   wrapped in it, so these never touch the new UI. */
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--os-bg); color: var(--os-text); font: 14px/1.5 var(--os-sans); }
-button, input, select, textarea { font: inherit; color: inherit; }
-button {
+.os-legacy { font: 14px/1.5 var(--os-sans); }
+.os-legacy :is(button, input, select, textarea) { font: inherit; color: inherit; }
+.os-legacy button {
   border: 1px solid var(--os-border); background: var(--os-panel); border-radius: 8px;
   padding: 6px 12px; cursor: pointer;
 }
-button:hover:not(:disabled) { border-color: var(--os-muted); }
-button:disabled { opacity: 0.5; cursor: default; }
-input, select, textarea {
+.os-legacy button:hover:not(:disabled) { border-color: var(--os-muted); }
+.os-legacy button:disabled { opacity: 0.5; cursor: default; }
+.os-legacy :is(input, select, textarea) {
   border: 1px solid var(--os-border); background: var(--os-panel); border-radius: 8px; padding: 6px 10px; min-width: 0;
 }
-input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
-code { font-family: var(--os-mono); font-size: 0.92em; }
+.os-legacy :is(input:focus, select:focus, textarea:focus, button:focus-visible) { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-legacy code { font-family: var(--os-mono); font-size: 0.92em; }
 
 .os-primary { background: var(--os-accent); border-color: var(--os-accent); color: var(--os-accent-text); }
 .os-danger { color: var(--os-danger); }

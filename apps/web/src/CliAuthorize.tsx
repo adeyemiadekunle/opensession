@@ -32,7 +32,7 @@ export function CliAuthorize({ client }: { client: CloudClient }) {
   };
 
   return (
-    <div className="os-settings">
+    <div className="os-legacy os-settings">
       <div className="os-card">
         <h2>Sign in the OpenSession CLI</h2>
         {!valid ? (
