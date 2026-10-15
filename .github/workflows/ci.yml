@@ -40,7 +40,15 @@ jobs:
           cache: pip
           cache-dependency-path: services/gateway/pyproject.toml
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      - name: pytest
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          pytest -q -rfE 2>&1 | tee pytest.log || status=$?
+          # Failures as annotations, so they show on the run's summary page.
+          grep -E "^(FAILED|ERROR) " pytest.log | head -10 | sed 's/^/::error title=pytest::/' || true
+          exit $status
 
   typescript:
     name: Web, desktop, CLI, packages (TypeScript)
