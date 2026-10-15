@@ -12,7 +12,11 @@ PASS=0
 FAILS=()
 
 ok()   { echo "  ok   $*"; PASS=$((PASS + 1)); }
-bad()  { echo "  FAIL $*"; FAILS+=("$*"); }
+bad()  {
+  echo "  FAIL $*"; FAILS+=("$*")
+  # On GitHub Actions, also as an annotation (visible on the run page and via the API).
+  [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=smoke::$(echo "$*" | tr '\n' ' ' | head -c 900)" || true
+}
 check() { local name=$1 want=$2 got=$3; if [[ "$got" == $want ]]; then ok "$name ($got)"; else bad "$name: wanted $want, got $got"; fi; }
 
 api() { # api METHOD USER PATH [JSON] -> prints HTTP code; body in /tmp/os_body
@@ -38,6 +42,14 @@ cleanup() {
   vols=$(docker volume ls -q | grep -E '^oc(ws|st)-' || true); [ -n "$vols" ] && docker volume rm $vols >/dev/null || true
   rm -f .env.smoke
 }
+on_error() { # a command failed under set -e: say which, with the gateway's last log lines
+  local line=$1
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    echo "::error title=smoke aborted::line $line: $(sed -n "${line}p" "$0" | head -c 300)"
+    echo "::error title=gateway log::$(OPENSESSION_ENV_FILE=.env.smoke docker compose --env-file .env.smoke logs --tail 15 gateway 2>&1 | tr '\n' ' ' | tail -c 900)"
+  fi
+}
+trap 'on_error $LINENO' ERR
 trap cleanup EXIT
 
 echo "== build"
