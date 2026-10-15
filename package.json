@@ -1,0 +1,26 @@
+{
+  "name": "opensession",
+  "private": true,
+  "packageManager": "pnpm@10.34.7",
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "dev:web": "pnpm --filter @opensession/web dev",
+    "dev:desktop": "pnpm --filter @opensession/desktop dev",
+    "cli": "pnpm --filter @opensession/cli exec tsx src/index.ts",
+    "gateway:test": "cd services/gateway && python -m pytest -q"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "turbo": "^2.11.8",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  }
+}

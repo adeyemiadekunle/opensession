@@ -1,0 +1,22 @@
+{
+  "name": "@opensession/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "opensession": "./dist/index.js" },
+  "scripts": {
+    "build": "tsup",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@opensession/api-client": "workspace:*",
+    "@opensession/local-runner": "workspace:*",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15"
+  }
+}

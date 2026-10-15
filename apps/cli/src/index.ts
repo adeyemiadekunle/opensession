@@ -1,0 +1,272 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { Command } from "commander";
+import { ApiError, CloudClient, LocalClient } from "@opensession/api-client";
+import { emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
+import { loadLocalAgentConfig, saveLocalAgentConfig, startLocalServer } from "@opensession/local-runner";
+import { configDir, loadConfig, saveConfig } from "./config";
+import { browserLogin } from "./login";
+import { pickModel, runPrompt } from "./run";
+
+const program = new Command()
+  .name("opensession")
+  .description("OpenSession: an AI coding agent with your own model keys, in the cloud or on this computer.")
+  .version("0.1.0");
+
+function cloud(): CloudClient {
+  const cfg = loadConfig();
+  if (!cfg.token) throw new Error("not signed in: run `opensession login`");
+  return new CloudClient({ gatewayUrl: cfg.gatewayUrl, getToken: () => cfg.token });
+}
+
+async function readSecret(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    const chunks: Buffer[] = [];
+    for await (const c of process.stdin) chunks.push(c as Buffer);
+    return Buffer.concat(chunks).toString().trim();
+  }
+  process.stdout.write(prompt);
+  return new Promise((res) => {
+    const stdin = process.stdin;
+    let value = "";
+    stdin.setRawMode(true);
+    stdin.resume();
+    const onData = (b: Buffer) => {
+      for (const ch of b.toString()) {
+        if (ch === "\r" || ch === "\n") {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.off("data", onData);
+          process.stdout.write("\n");
+          return res(value.trim());
+        }
+        if (ch === "\u0003") process.exit(130);
+        if (ch === "\u007f") value = value.slice(0, -1);
+        else value += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
+// ---- account ---------------------------------------------------------------------
+
+program
+  .command("login")
+  .description("Sign in through your browser (or pass --token)")
+  .option("--token <token>", "use an access token created in Settings")
+  .option("--gateway <url>", "gateway URL")
+  .option("--web <url>", "web app URL")
+  .action(async (o) => {
+    const patch: Record<string, string> = {};
+    if (o.gateway) patch.gatewayUrl = o.gateway;
+    if (o.web) patch.webUrl = o.web;
+    const cfg = { ...loadConfig(), ...patch };
+    const token: string = o.token ?? (await browserLogin(cfg.webUrl, { log: (s) => console.log(s) }));
+    const me = await new CloudClient({ gatewayUrl: cfg.gatewayUrl, getToken: () => token }).me();
+    saveConfig({ ...patch, token });
+    console.log(`Signed in as ${me.user_id}.`);
+  });
+
+program
+  .command("logout")
+  .description("Forget the saved access token")
+  .action(() => {
+    saveConfig({ token: undefined });
+    console.log("Signed out. Revoke the token in Settings > Access tokens if you no longer need it.");
+  });
+
+program
+  .command("whoami")
+  .action(async () => {
+    const me = await cloud().me();
+    console.log(me.user_id);
+  });
+
+// ---- keys ------------------------------------------------------------------------
+
+const keys = program.command("keys").description("Model API keys stored (encrypted) in your cloud account");
+keys.command("list").action(async () => {
+  for (const k of await cloud().listKeys()) console.log(`${k.provider.padEnd(12)} ····${k.last4}`);
+});
+keys
+  .command("set <provider>")
+  .description("Save a key; reads it from a hidden prompt or stdin")
+  .option("--no-validate", "skip the check with the provider")
+  .action(async (provider: string, o) => {
+    const key = await readSecret(`${provider} API key: `);
+    const r = await cloud().setKey(provider, key, o.validate);
+    console.log(`Saved ${r.provider} key ····${r.last4}.`);
+  });
+keys.command("rm <provider>").action(async (provider: string) => {
+  await cloud().deleteKey(provider);
+  console.log(`Removed ${provider} key.`);
+});
+
+// ---- egress ------------------------------------------------------------------------
+
+const egress = program.command("egress").description("Extra internet domains your cloud sandbox may reach");
+egress.command("list").action(async () => {
+  const d = await cloud().egressDomains();
+  console.log(d.user.length ? d.user.join("\n") : "(none of your own)");
+  if (!d.enforced) console.log("Note: egress filtering is not enabled on this server.");
+});
+egress.command("add <domain>").description("e.g. api.example.com or *.example.com").action(async (domain: string) => {
+  console.log((await cloud().addEgressDomain(domain)).user.join("\n"));
+});
+egress.command("rm <domain>").action(async (domain: string) => {
+  const d = await cloud().removeEgressDomain(domain);
+  console.log(d.user.join("\n") || "(none)");
+});
+
+// ---- agent setup (skills, agents, commands, MCP, permissions, ...) -------------------
+
+const agent = program
+  .command("agent")
+  .description("Agent setup: skills, agents, commands, MCP servers, permissions, AGENTS.md, plugins");
+agent
+  .command("pull [file]")
+  .description("Save the current setup as JSON (stdout if no file)")
+  .option("--local", "the setup used on this computer")
+  .action(async (file: string | undefined, o) => {
+    const cfg: AgentConfig = o.local ? loadLocalAgentConfig(configDir()) : (await cloud().getAgentConfig()).config;
+    const text = `${JSON.stringify(cfg, null, 2)}\n`;
+    if (file) writeFileSync(file, text);
+    else process.stdout.write(text);
+  });
+agent
+  .command("push <file>")
+  .description("Replace the setup with a JSON file (see `agent pull`)")
+  .option("--local", "apply to OpenCode on this computer (~/.config/opencode)")
+  .action(async (file: string, o) => {
+    const cfg: AgentConfig = { ...emptyAgentConfig(), ...JSON.parse(readFileSync(file, "utf8")) };
+    if (o.local) {
+      saveLocalAgentConfig(configDir(), cfg);
+      console.log("Applied to OpenCode on this computer.");
+    } else {
+      await cloud().saveAgentConfig(cfg);
+      console.log("Saved. Your cloud sandbox picks it up on its next request.");
+    }
+  });
+
+const secretsCmd = program.command("secrets").description("Encrypted env vars for your cloud sandbox (use as {env:NAME} in MCP settings)");
+secretsCmd.command("list").action(async () => {
+  for (const s of await cloud().listSecrets()) console.log(s.name);
+});
+secretsCmd.command("set <name>").description("Reads the value from a hidden prompt or stdin").action(async (name: string) => {
+  const value = await readSecret(`${name}: `);
+  await cloud().setSecret(name, value);
+  console.log(`Saved ${name}.`);
+});
+secretsCmd.command("rm <name>").action(async (name: string) => {
+  await cloud().deleteSecret(name);
+  console.log(`Removed ${name}.`);
+});
+
+// ---- cloud workspace -------------------------------------------------------------
+
+program
+  .command("models")
+  .option("--local", "list models available to OpenCode on this computer")
+  .option("-C, --dir <folder>", "project folder (local)", ".")
+  .action(async (o) => {
+    const list = o.local
+      ? await withLocal(resolve(o.dir), (c) => c.listModels())
+      : await cloud().listModels();
+    for (const m of list) console.log(`${m.providerID}/${m.id}${m.name ? `  (${m.name})` : ""}`);
+  });
+
+program.command("sessions").action(async () => {
+  for (const s of await cloud().listSessions())
+    console.log(`${s.id}  ${new Date(s.time?.created ?? 0).toLocaleString()}  ${s.title ?? ""}`);
+});
+
+program
+  .command("run <prompt...>")
+  .description('Run one prompt (or "/command args") in your cloud workspace and print the result')
+  .option("-m, --model <provider/model>", "model to use")
+  .option("-a, --agent <id>", "agent, e.g. plan")
+  .option("-s, --session <id>", "continue an existing session")
+  .action(async (words: string[], o) => {
+    const c = cloud();
+    const sessionId =
+      o.session ?? (await c.createSession({ model: await pickModel(c, o.model ?? loadConfig().defaultModel), agent: o.agent })).id;
+    console.error(`session ${sessionId}`);
+    const skills = (await c.getAgentConfig().catch(() => null))?.config.skills.map((s) => s.id) ?? [];
+    await runPrompt(c, sessionId, words.join(" "), (s) => console.log(s), { skills });
+  });
+
+// ---- local mode ---------------------------------------------------------------------
+
+async function withLocal<T>(dir: string, f: (c: LocalClient) => Promise<T>): Promise<T> {
+  const srv = await startLocalServer({ directory: dir });
+  try {
+    return await f(new LocalClient({ baseUrl: srv.url, password: srv.password, directory: dir }));
+  } finally {
+    await srv.stop();
+  }
+}
+
+const local = program.command("local").description("Run OpenCode on this computer (your code and keys stay here)");
+local
+  .command("serve")
+  .description("Start a local OpenCode server for this folder and keep it running")
+  .option("-C, --dir <folder>", "project folder", ".")
+  .action(async (o) => {
+    const dir = resolve(o.dir);
+    const srv = await startLocalServer({ directory: dir });
+    console.log(`OpenCode is running for ${dir}`);
+    console.log(`  URL:      ${srv.url}`);
+    console.log(`  user:     opencode`);
+    console.log(`  password: ${srv.password}`);
+    console.log("Press Ctrl+C to stop.");
+    const stop = () => void srv.stop().then(() => process.exit(0));
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    await new Promise(() => undefined);
+  });
+local
+  .command("run <prompt...>")
+  .description('Run one prompt (or "/command args") with OpenCode on this computer')
+  .option("-m, --model <provider/model>", "model to use")
+  .option("-a, --agent <id>", "agent, e.g. plan")
+  .option("-C, --dir <folder>", "project folder", ".")
+  .action(async (words: string[], o) => {
+    const dir = resolve(o.dir);
+    const skills = loadLocalAgentConfig(configDir()).skills.map((s) => s.id);
+    await withLocal(dir, async (c) => {
+      const model = await pickModel(c, o.model ?? loadConfig().defaultModel);
+      const s = await c.createSession({ model, agent: o.agent });
+      console.error(`${model.providerID}/${model.id} in ${dir}`);
+      await runPrompt(c, s.id, words.join(" "), (x) => console.log(x), { skills });
+    });
+  });
+local
+  .command("key <provider>")
+  .description("Save a model API key in OpenCode on this computer (not uploaded)")
+  .action(async (provider: string) => {
+    const key = await readSecret(`${provider} API key: `);
+    await withLocal(process.cwd(), (c) => c.connectKey(provider, key));
+    console.log(`Saved ${provider} key on this computer.`);
+  });
+
+program
+  .command("config")
+  .description("Show or change settings")
+  .option("--gateway <url>")
+  .option("--web <url>")
+  .option("--model <provider/model>", "default model")
+  .action((o) => {
+    const patch: Record<string, string> = {};
+    if (o.gateway) patch.gatewayUrl = o.gateway;
+    if (o.web) patch.webUrl = o.web;
+    if (o.model) patch.defaultModel = o.model;
+    const cfg = Object.keys(patch).length ? saveConfig(patch) : loadConfig();
+    console.log({ ...cfg, token: cfg.token ? `${cfg.token.slice(0, 8)}…` : undefined });
+  });
+
+program.parseAsync().catch((e: unknown) => {
+  const msg = e instanceof ApiError && e.status === 401 ? "not signed in or token revoked: run `opensession login`" : (e as Error).message;
+  console.error(`error: ${msg}`);
+  process.exit(1);
+});

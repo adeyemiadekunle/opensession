@@ -1,0 +1,27 @@
+# JS / TS
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+.pytest_cache/
+
+# Local config and data
+.env
+.env.local
+*.db
+.trash/
+
+# Check script output
+scripts/check/output.txt
+scripts/check/openapi.json
+scripts/check/e2e-output.txt
+scripts/check/provider-output.txt
+scripts/check/config-output.txt

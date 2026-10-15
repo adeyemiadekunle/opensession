@@ -1,0 +1,38 @@
+# Cloud stack for local testing: the gateway in a container managing sandbox
+# containers through the Docker socket, plus the egress proxy.
+#   docker build -t opencode-sandbox:latest services/sandbox
+#   docker compose up --build
+services:
+  gateway:
+    build: services/gateway
+    container_name: opensession-gateway
+    env_file: ${OPENSESSION_ENV_FILE:-.env}
+    environment:
+      SANDBOX_GATEWAY_CONTAINER: opensession-gateway
+      SANDBOX_EGRESS_PROXY: opensession-egress
+      EGRESS_CONF_DIR: /egress-conf
+      EGRESS_GLOBAL_ALLOWLIST: /etc/opensession/egress-allowlist.txt
+      OPENSESSION_DB: /data/opensession.db
+      KEYSTORE_PATH: /data/opensession.db
+    ports:
+      - "127.0.0.1:${GATEWAY_HOST_PORT:-8787}:8000"
+    volumes:
+      # Full control of Docker: only run this gateway on a machine you trust.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gateway-data:/data
+      - egress-conf:/egress-conf
+      - ./services/egress/allowlist.txt:/etc/opensession/egress-allowlist.txt:ro
+    depends_on:
+      - egress
+
+  # Allowlist proxy: the only route from sandboxes to the internet.
+  egress:
+    build: services/egress
+    container_name: opensession-egress
+    restart: unless-stopped
+    volumes:
+      - egress-conf:/etc/squid/conf.d
+
+volumes:
+  gateway-data:
+  egress-conf:
