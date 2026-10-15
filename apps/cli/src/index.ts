@@ -5,8 +5,10 @@ import { ApiError, CloudClient, LocalClient } from "@opensession/api-client";
 import { emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
 import { loadLocalAgentConfig, saveLocalAgentConfig, startLocalServer } from "@opensession/local-runner";
 import { configDir, loadConfig, saveConfig } from "./config";
+import { handoffToCloud, handoffToLocal, systemGit } from "./handoff";
 import { browserLogin, openBrowser } from "./login";
 import { pickModel, runPrompt } from "./run";
+import type { OpenSessionClient } from "@opensession/api-client";
 
 const program = new Command()
   .name("opensession")
@@ -184,19 +186,100 @@ program.command("sessions").action(async () => {
     console.log(`${s.id}  ${new Date(s.time?.created ?? 0).toLocaleString()}  ${s.title ?? ""}`);
 });
 
+/** Run `f` with the right client: the cloud project, or OpenCode on this computer (--local). */
+async function withRuntime<T>(o: { local?: boolean; dir?: string }, f: (c: OpenSessionClient, skills: string[]) => Promise<T>): Promise<T> {
+  if (o.local) {
+    const skills = loadLocalAgentConfig(configDir()).skills.map((s) => s.id);
+    return withLocal(resolve(o.dir ?? "."), (c) => f(c, skills));
+  }
+  const c = cloud();
+  const skills = (await c.getAgentConfig().catch(() => null))?.config.skills.map((s) => s.id) ?? [];
+  return f(c, skills);
+}
+
+async function openSession(c: OpenSessionClient, o: { session?: string; model?: string; agent?: string }): Promise<string> {
+  if (o.session) return o.session;
+  const model = await pickModel(c, o.model ?? loadConfig().defaultModel);
+  const s = await c.createSession({ model, agent: o.agent });
+  console.error(`session ${s.id}  ${model.providerID}/${model.id}`);
+  return s.id;
+}
+
 program
   .command("run <prompt...>")
-  .description('Run one prompt (or "/command args") in your cloud workspace and print the result')
+  .description('Run one prompt (or "/command args") and print the result: in the cloud project, or here with --local')
   .option("-m, --model <provider/model>", "model to use")
   .option("-a, --agent <id>", "agent, e.g. plan")
   .option("-s, --session <id>", "continue an existing session")
+  .option("--local", "run with OpenCode on this computer instead of the cloud")
+  .option("--cloud", "run in the cloud project (the default)")
+  .option("-C, --dir <folder>", "project folder (with --local)", ".")
   .action(async (words: string[], o) => {
-    const c = cloud();
-    const sessionId =
-      o.session ?? (await c.createSession({ model: await pickModel(c, o.model ?? loadConfig().defaultModel), agent: o.agent })).id;
-    console.error(`session ${sessionId}`);
-    const skills = (await c.getAgentConfig().catch(() => null))?.config.skills.map((s) => s.id) ?? [];
-    await runPrompt(c, sessionId, words.join(" "), (s) => console.log(s), { skills });
+    await withRuntime(o, async (c, skills) => {
+      const sessionId = await openSession(c, o);
+      await runPrompt(c, sessionId, words.join(" "), (s) => console.log(s), { skills });
+    });
+  });
+
+program
+  .command("attach")
+  .description("Chat with the agent from this terminal: in the cloud project (-p), or here with --local")
+  .option("-m, --model <provider/model>", "model to use")
+  .option("-a, --agent <id>", "agent, e.g. plan")
+  .option("-s, --session <id>", "continue an existing session")
+  .option("--local", "use OpenCode on this computer instead of the cloud")
+  .option("-C, --dir <folder>", "project folder (with --local)", ".")
+  .action(async (o) => {
+    const { createInterface } = await import("node:readline/promises");
+    await withRuntime(o, async (c, skills) => {
+      const sessionId = await openSession(c, o);
+      const where = o.local ? resolve(o.dir) : `cloud project ${(c as CloudClient).workspace}`;
+      console.error(`attached to ${where}. Type a prompt or /command; Ctrl+D or :q to leave (the session is kept).`);
+      const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "> " });
+      rl.prompt();
+      for await (const line of rl) {
+        const text = line.trim();
+        if (text === ":q") break;
+        if (text) {
+          try {
+            await runPrompt(c, sessionId, text, (s) => console.log(s), { skills });
+          } catch (e) {
+            console.error(`error: ${(e as Error).message}`);
+          }
+        }
+        rl.prompt();
+      }
+      rl.close();
+      console.error(`left session ${sessionId} (continue with: opensession attach -s ${sessionId}${o.local ? " --local" : ""})`);
+    });
+  });
+
+// ---- moving work between this computer and the cloud --------------------------------
+
+const handoff = program
+  .command("handoff")
+  .description("Move work between this computer and a cloud project, through the GitHub repository");
+handoff
+  .command("cloud")
+  .description("Push this folder's branch and continue it in the cloud project for the same repository")
+  .option("-C, --dir <folder>", "project folder", ".")
+  .option("--commit <message>", "commit local changes first")
+  .action(async (o) => {
+    const project = (program.opts().project as string | undefined) ?? process.env.OPENSESSION_PROJECT;
+    const r = await handoffToCloud(cloud(), systemGit, resolve(o.dir), { project, commit: o.commit, log: (s) => console.error(s) });
+    console.log(`${r.repo}@${r.branch} (${r.head}) is now in cloud project ${r.project}${r.created ? " (new)" : ""}.`);
+    console.log(`Continue with: opensession -p ${r.project} attach`);
+  });
+handoff
+  .command("local")
+  .description("Bring the cloud project's branch to this folder (-p picks the project; default: the one for this repo)")
+  .option("-C, --dir <folder>", "project folder", ".")
+  .option("--commit <message>", "commit the cloud project's changes first")
+  .action(async (o) => {
+    const project = (program.opts().project as string | undefined) ?? process.env.OPENSESSION_PROJECT;
+    const r = await handoffToLocal(cloud(), systemGit, resolve(o.dir), { project, commit: o.commit, log: (s) => console.error(s) });
+    console.log(`On ${r.branch} (${r.head}) from cloud project ${r.project}.`);
+    console.log("Continue with: opensession attach --local");
   });
 
 // ---- projects, GitHub and git (cloud) ------------------------------------------------

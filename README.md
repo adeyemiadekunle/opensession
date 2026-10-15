@@ -80,7 +80,8 @@ Windows binary from the OpenCode site; set `OPENCODE_BIN` if it is not on PATH).
 
     pnpm dev:desktop                 # Electron app: pick a folder and start coding
     pnpm cli local key anthropic     # save a key on this computer
-    pnpm cli local run "add a README" -C ./my-project
+    pnpm cli run --local "add a README" -C ./my-project   # same as `local run`
+    pnpm cli attach --local -C ./my-project              # chat from the terminal
     pnpm cli local serve -C ./my-project
 
 ### Desktop installers
@@ -107,6 +108,22 @@ uses the user's own OpenCode install (`curl -fsSL https://opencode.ai/v2/install
     pnpm cli -p <project-id> git pr "Add pagination"
     pnpm cli -p <project-id> status  # awake or asleep, disk use, which projects are awake
     pnpm cli projects sleep <project-id>
+    pnpm cli -p <project-id> attach  # chat with the cloud agent from the terminal
+
+### Moving work between this computer and the cloud
+
+A project is the same GitHub repository in both places, so work moves as a branch.
+Your own git credentials push from this computer; the GitHub App pushes from the
+cloud. Both directions fast-forward only and refuse to touch uncommitted work.
+
+    # in a clone of you/api, on feature/pagination:
+    pnpm cli handoff cloud --commit "wip"   # push, then continue in the cloud project
+                                            # for you/api (created if there is none)
+    pnpm cli attach                         # ...work with the agent in the cloud...
+    pnpm cli handoff local --commit "agent: pagination"
+                                            # commit + push in the cloud, check it out here
+
+Sessions (chat history) stay where they ran; the code moves.
 
 Build a standalone CLI with `pnpm --filter @opensession/cli build` (`apps/cli/dist/index.js`).
 
@@ -237,6 +254,8 @@ for local testing only.
     GET/POST /workspaces, DELETE /workspaces/{id}     projects (send X-Workspace: <id> to use one)
     GET /github, /github/connect, /github/repos, /github/callback, DELETE /github/installations/{id}
     GET /git, POST /git/checkout | push | pull-request
+    POST /git/pull {branch}               bring a branch from GitHub into the project (fast-forward)
+    POST /git/commit {message}            commit the project's changes (e.g. before a handoff)
 
 ## Security model (cloud)
 
@@ -292,8 +311,9 @@ The **Desktop app** workflow (`.github/workflows/desktop.yml`) builds the instal
 - During clone/push the short-lived repo token is in that git process's
   environment, which other processes of the sandbox user could read. It is scoped
   to one repo and expires within an hour; a separate git helper user would close it.
-- Pulling new commits from GitHub into an existing project (today: the agent can
-  run `git pull` only for public repos).
+- Desktop and web buttons for the handoff (the CLI has `opensession handoff`).
+- Session history does not move with a handoff (OpenCode's session export/import
+  could carry it).
 
 OpenSession runs [OpenCode](https://opencode.ai) (MIT licensed) inside each
 workspace. It is not affiliated with or endorsed by the OpenCode project.

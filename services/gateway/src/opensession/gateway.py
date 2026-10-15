@@ -130,6 +130,14 @@ class Push(BaseModel):
     branch: BranchName = None
 
 
+class GitPull(BaseModel):
+    branch: Annotated[str, AfterValidator(_check_branch)] = Field(min_length=1, max_length=200)
+
+
+class GitCommit(BaseModel):
+    message: str = Field(min_length=1, max_length=5_000)
+
+
 class PullRequest(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     body: str = Field(default="", max_length=60_000)
@@ -701,6 +709,55 @@ def create_app(
         """Push the current branch to GitHub (never force)."""
         ws, target = await push_current(request, ref, body.branch)
         return {"repo": ws["repo"], "branch": target}
+
+    @app.post("/git/pull")
+    async def git_pull(body: GitPull, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """Bring a branch from GitHub into the project, e.g. work pushed from another
+        computer ("continue in cloud"). Fast-forward only, and refused while the
+        project has uncommitted changes, so nothing in the sandbox is overwritten."""
+        await get_client(request, ref)
+        ws = await workspace_record(request, ref)
+        if not ws or not ws.get("repo"):
+            raise HTTPException(409, "this project is not linked to a GitHub repository")
+        gh = require_github(request)
+        try:
+            token = await gh.installation_token(int(ws["installation_id"]), ws["repo"])
+        except GitHubError as e:
+            raise gh_error(e) from None
+        b = body.branch  # BRANCH_RE: no quotes, spaces or $ can reach the script
+        script = (
+            "set -e; cd /workspace; "
+            'if [ -n "$(git status --porcelain)" ]; then '
+            'echo "the cloud project has uncommitted changes: commit or discard them first"; exit 3; fi; '
+            f'git fetch -q origin "+refs/heads/{b}:refs/remotes/origin/{b}"; '
+            f'if git show-ref -q --verify "refs/heads/{b}"; then '
+            f'git checkout -q "{b}"; git merge -q --ff-only "origin/{b}"; '
+            f'else git checkout -q -b "{b}" "origin/{b}"; fi; '
+            f'git branch -q --set-upstream-to="origin/{b}" "{b}"; '
+            "git rev-parse --short HEAD"
+        )
+        code, out = await sandbox_exec(request, ref, f"{{ {script}; }} 2>&1", git_auth_env(token))
+        if code != 0:
+            raise HTTPException(409, out.strip()[-800:] or f"pull failed (exit {code})")
+        return {"repo": ws["repo"], "branch": b, "head": out.strip().splitlines()[-1]}
+
+    @app.post("/git/commit")
+    async def git_commit(body: GitCommit, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """Commit everything changed in the project (the agent's work), e.g. before
+        handing it to another computer. Nothing to commit is not an error."""
+        await get_client(request, ref)
+        script = (
+            "set -e; cd /workspace; git add -A; "
+            "if git diff --cached --quiet; then echo NOTHING; exit 0; fi; "
+            'git commit -q -m "$OPENSESSION_COMMIT_MESSAGE"; git rev-parse --short HEAD'
+        )
+        code, out = await sandbox_exec(
+            request, ref, f"{{ {script}; }} 2>&1", {"OPENSESSION_COMMIT_MESSAGE": body.message}
+        )
+        if code != 0:
+            raise HTTPException(409, out.strip()[-800:] or f"commit failed (exit {code})")
+        last = out.strip().splitlines()[-1] if out.strip() else ""
+        return {"committed": last != "NOTHING", "head": None if last == "NOTHING" else last}
 
     @app.post("/git/pull-request", status_code=201)
     async def git_pull_request(body: PullRequest, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):

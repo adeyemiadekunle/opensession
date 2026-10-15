@@ -86,6 +86,14 @@ export class CloudClient extends OpenCodeClient {
   gitPush(branch?: string): Promise<{ repo: string; branch: string }> {
     return this.http.post("/git/push", { json: branch ? { branch } : {} });
   }
+  /** Bring a branch from GitHub into the project (fast-forward only; refused with uncommitted changes). */
+  gitPull(branch: string): Promise<{ repo: string; branch: string; head: string }> {
+    return this.http.post("/git/pull", { json: { branch } });
+  }
+  /** Commit everything changed in the project; `committed` is false when there was nothing to commit. */
+  gitCommit(message: string): Promise<{ committed: boolean; head: string | null }> {
+    return this.http.post("/git/commit", { json: { message } });
+  }
   pullRequest(o: { title: string; body?: string; base?: string }): Promise<{ number: number; url: string; head: string; base: string }> {
     return this.http.post("/git/pull-request", { json: o });
   }

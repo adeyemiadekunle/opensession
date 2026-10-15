@@ -201,6 +201,45 @@ def test_git_info_checkout_push_and_pull_request():
         assert c.post("/git/push", json={}, headers=A).status_code == 409
 
 
+def test_git_pull_and_commit_for_handoff():
+    c, docker, _, fake, gh = client()
+    with c:
+        connect(c, gh)
+        c.post("/workspaces", json={"name": "app", "repo": "alice-gh/app", "branch": "main"}, headers=A)
+        h = {**A, "X-Workspace": "app"}
+        assert c.get("/p/app/api/health", headers=h).status_code == 200  # cloned on first use
+        (cont,) = [x for x in docker.containers.by_name.values() if x.labels["oc.workspace"] == "app"]
+
+        docker.containers.exec_handler = lambda cmd: (0, b"a1b2c3d\n")
+        r = c.post("/git/pull", json={"branch": "feature/login"}, headers=h)
+        assert r.status_code == 200 and r.json() == {"repo": "alice-gh/app", "branch": "feature/login", "head": "a1b2c3d"}
+        script, env, workdir, user = cont.execs[-1]
+        assert "git status --porcelain" in script[-1]  # refuses to overwrite uncommitted work
+        assert 'git fetch -q origin "+refs/heads/feature/login:refs/remotes/origin/feature/login"' in script[-1]
+        assert "--ff-only" in script[-1] and "ghs_" not in script[-1]
+        assert base64.b64decode(env["GIT_CONFIG_VALUE_0"].split()[-1]).decode() == "x-access-token:ghs_app"
+        assert c.post("/git/pull", json={"branch": "bad..x"}, headers=h).status_code == 422
+        assert c.post("/git/pull", json={"branch": 'x"; rm -rf /'}, headers=h).status_code == 422
+
+        docker.containers.exec_handler = lambda cmd: (3, b"the cloud project has uncommitted changes: commit or discard them first\n")
+        r = c.post("/git/pull", json={"branch": "main"}, headers=h)
+        assert r.status_code == 409 and "uncommitted changes" in r.json()["detail"]
+
+        docker.containers.exec_handler = lambda cmd: (0, b"9f8e7d6\n")
+        r = c.post("/git/commit", json={"message": 'Agent work: "login" $(whoami)'}, headers=h)
+        assert r.json() == {"committed": True, "head": "9f8e7d6"}
+        script, env, _, _ = cont.execs[-1]
+        assert env == {"OPENSESSION_COMMIT_MESSAGE": 'Agent work: "login" $(whoami)'}  # never in the script
+        assert "whoami" not in script[-1]
+        docker.containers.exec_handler = lambda cmd: (0, b"NOTHING\n")
+        assert c.post("/git/commit", json={"message": "x"}, headers=h).json() == {"committed": False, "head": None}
+        docker.containers.exec_handler = lambda cmd: (128, b"fatal: not a git repository\n")
+        assert c.post("/git/commit", json={"message": "x"}, headers=A).status_code == 409
+
+        # pulling needs a project linked to a repository
+        assert c.post("/git/pull", json={"branch": "main"}, headers=A).status_code == 409
+
+
 def test_github_not_configured():
     c, *_ = client(github=False)
     with c:
