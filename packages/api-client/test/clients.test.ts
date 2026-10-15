@@ -22,33 +22,49 @@ const json = (v: unknown, status = 200) =>
   new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
 
 describe("CloudClient", () => {
-  it("sends the bearer token and workspace, and maps routes", async () => {
+  it("speaks OpenCode's API through the project's proxy, and the gateway API for the account", async () => {
     const { f, calls } = mockFetch((c) =>
-      c.url.endsWith("/sessions") && c.method === "POST" ? json({ id: "ses_1" }) : undefined,
+      c.url.endsWith("/api/session") && c.method === "POST" ? json({ data: { id: "ses_1" } }) : undefined,
     );
     const c = new CloudClient({ gatewayUrl: "https://gw.test/", getToken: async () => "tok", workspace: "w1", fetch: f });
     const s = await c.createSession({ model: { providerID: "anthropic", id: "m" } });
     expect(s.id).toBe("ses_1");
-    await c.prompt("ses_1", "hi", "steer");
+    await c.prompt("ses_1", "hi @review", "steer", { skills: ["review"] });
     await c.wait("ses_1");
     await c.shell("ses_1", "ls");
     await c.replyPermission("ses_1", "per_1", "once");
     await c.replyForm("ses_1", "frm_1", { q: "a" });
     await c.listFiles("src");
+    await c.gitInfo();
     await c.setEgressDomains(["example.com"]);
     expect(calls[0]!.headers.authorization).toBe("Bearer tok");
-    expect(calls[0]!.headers["x-workspace"]).toBe("w1");
+    expect(calls[0]!.headers["x-workspace"]).toBeUndefined(); // the project is in the path
+    expect(calls.at(-1)!.headers["x-workspace"]).toBe("w1");
     expect(calls.map((x) => `${x.method} ${x.url.replace("https://gw.test", "")}`)).toEqual([
-      "POST /sessions",
-      "POST /sessions/ses_1/prompt",
-      "POST /sessions/ses_1/wait",
-      "POST /sessions/ses_1/shell",
-      "POST /sessions/ses_1/permissions/per_1/reply",
-      "POST /sessions/ses_1/forms/frm_1/reply",
-      "GET /files?path=src",
+      "POST /p/w1/api/session",
+      "POST /p/w1/api/session/ses_1/prompt",
+      "POST /p/w1/api/session/ses_1/wait",
+      "POST /p/w1/api/session/ses_1/shell",
+      "POST /p/w1/api/session/ses_1/permission/per_1/reply",
+      "POST /p/w1/api/session/ses_1/form/frm_1/reply",
+      "GET /p/w1/api/fs/list?path=src",
+      "GET /git",
       "PUT /egress/domains",
     ]);
-    expect(calls[1]!.body).toEqual({ text: "hi", delivery: "steer" });
+    expect(calls[0]!.body).toEqual({ model: { providerID: "anthropic", id: "m" } }); // the gateway pins /workspace
+    expect(calls[1]!.body).toEqual({
+      text: "hi @review",
+      delivery: "steer",
+      skills: [{ id: "review", mention: { start: 3, end: 10, text: "@review" } }],
+    });
+  });
+
+  it("uses the default project when none is chosen, and switches with withWorkspace", async () => {
+    const { f, calls } = mockFetch();
+    const c = new CloudClient({ gatewayUrl: "https://gw.test", getToken: () => "tok", fetch: f });
+    await c.listSessions();
+    await c.withWorkspace("api").listSessions();
+    expect(calls.map((x) => x.url)).toEqual(["https://gw.test/p/default/api/session", "https://gw.test/p/api/api/session"]);
   });
 
   it("turns HTTP errors into ApiError with the server's detail", async () => {

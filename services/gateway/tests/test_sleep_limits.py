@@ -148,14 +148,14 @@ def test_api_limit_429_status_and_project_states(monkeypatch):
     c, mgr, docker = app_client(monkeypatch, max_per_user=1)
     with c:
         assert c.get("/workspace", headers={**A, "X-Workspace": "a"}).json()["state"] == "new"
-        assert c.get("/health", headers={**A, "X-Workspace": "a"}).status_code == 200
+        assert c.get("/p/a/api/health", headers=A).status_code == 200
         st = c.get("/workspace", headers={**A, "X-Workspace": "a"}).json()
         assert st["state"] == "running" and st["busy"] is False and st["idle_timeout_seconds"] == 1800
         BUSY_HOSTS.add(box(mgr, docker, "alice", "a").ip)
-        r = c.get("/health", headers={**A, "X-Workspace": "b"})
+        r = c.get("/p/b/api/health", headers=A)
         assert r.status_code == 429 and "1 project at a time" in r.json()["detail"]
         BUSY_HOSTS.clear()
-        assert c.get("/health", headers={**A, "X-Workspace": "b"}).status_code == 200
+        assert c.get("/p/b/api/health", headers=A).status_code == 200
         lim = c.get("/limits", headers=A).json()
         assert lim["max_running"] == 1 and lim["running"] == ["b"]
         c.post("/workspaces", json={"name": "a"}, headers=A)
@@ -188,14 +188,14 @@ def test_disk_limit_blocks_agent_work_but_not_cleanup(monkeypatch):
     )
     H = {**A, "X-Workspace": "big"}
     with c:
-        assert c.get("/health", headers=H).status_code == 200
+        assert c.get("/p/big/api/health", headers=H).status_code == 200
         assert c.get("/workspace", headers=H).json()["disk_mb"] == 1520
-        r = c.post("/sessions/ses_1/prompt", json={"text": "hi"}, headers=H)
+        r = c.post("/p/big/api/session/ses_1/prompt", json={"text": "hi"}, headers=H)
         assert r.status_code == 507 and "1520 MB of its 1000 MB" in r.json()["detail"]
-        assert c.post("/sessions/ses_1/shell", json={"command": "rm -rf node_modules"}, headers=H).status_code == 204
+        assert c.post("/p/big/api/session/ses_1/shell", json={"command": "rm -rf node_modules"}, headers=H).status_code == 204
         docker.containers.exec_handler = lambda cmd: (0, b"10\t/workspace\n5\t/home/agent/.state\n")
         asyncio.run(mgr.measure_disk("alice", "big", force=True))
-        assert c.post("/sessions/ses_1/prompt", json={"text": "hi"}, headers=H).status_code == 200
+        assert c.post("/p/big/api/session/ses_1/prompt", json={"text": "hi"}, headers=H).status_code == 200
 
 
 def test_first_disk_measurement_happens_right_after_boot(monkeypatch):

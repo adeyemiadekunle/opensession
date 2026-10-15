@@ -9,6 +9,7 @@ from opensession.orchestrator import NotFound, SandboxConfig, SandboxManager
 
 BODIES: list[tuple[str, bytes]] = []  # request bodies seen by the fake sandboxes
 BUSY_HOSTS: set[str] = set()  # sandbox IPs whose OpenCode reports a session still working
+QUERIES: list[tuple[str, str]] = []  # (raw path, query string) seen by the fake sandboxes
 
 
 class FakeContainer:
@@ -194,8 +195,13 @@ def sandbox_transport(seen):
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append((request.url.host, request.method, request.url.path, request.headers.get("authorization")))
+        QUERIES.append((request.url.raw_path.split(b"?")[0].decode(), request.url.query.decode()))
         if request.content:
             BODIES.append((request.url.path, request.content))
+        if request.url.path == "/api/session/ses_missing":
+            return httpx.Response(404, json={"name": "NotFoundError", "message": "no such session"})
+        if request.url.path == "/api/boom":
+            return httpx.Response(500, text="internal error")
         if request.url.path.endswith("/log"):
             return httpx.Response(200, stream=httpx.ByteStream(b'data: {"type":"log.synced"}\n\n'),
                                   headers={"content-type": "text/event-stream"})

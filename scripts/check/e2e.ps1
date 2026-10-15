@@ -7,6 +7,7 @@ Remove-Item $out -ErrorAction SilentlyContinue
 function Log($m) { $m | Out-File -FilePath $out -Append -Encoding utf8; Write-Host $m }
 function Run($cmd) { Log ">> $cmd"; (cmd /c "$cmd 2>&1") | ForEach-Object { Log $_ } }
 $G = 'http://127.0.0.1:8787'
+$P = '/p/default/api'  # the project's OpenCode API, through the gateway proxy
 function Api($method, $path, $user, $body = $null) {
   $h = @{ 'X-User-Id' = $user }
   try {
@@ -42,27 +43,27 @@ Api PUT '/keys/anthropic?validate=false' 'alice' @{ api_key = 'sk-ant-fake-alice
 Api PUT '/keys/openai?validate=false' 'bob' @{ api_key = 'sk-openai-fake-bob-2222' }
 Api GET '/keys' 'alice'
 Log "== SANDBOXES"
-Api GET '/health' 'alice'
-Api GET '/health' 'bob'
-Api GET '/agents' 'alice'
-$m = Api GET '/models' 'alice'
+Api GET "$P/health" 'alice'
+Api GET "$P/health" 'bob'
+Api GET "$P/agent" 'alice'
+$m = Api GET "$P/model" 'alice'
 $model = $null
-if ($m) { $ms = $m | ConvertFrom-Json; Log ("alice models: " + $ms.Count + " providers: " + (($ms | ForEach-Object { $_.providerID } | Sort-Object -Unique) -join ',')); $model = $ms | Select-Object -First 1 }
-$m2 = Api GET '/models' 'bob'
-if ($m2) { $ms2 = $m2 | ConvertFrom-Json; Log ("bob models: " + $ms2.Count + " providers: " + (($ms2 | ForEach-Object { $_.providerID } | Sort-Object -Unique) -join ',')) }
-Api POST '/sessions' 'alice' @{ agent = 'build' }
+if ($m) { $ms = ($m | ConvertFrom-Json).data; Log ("alice models: " + $ms.Count + " providers: " + (($ms | ForEach-Object { $_.providerID } | Sort-Object -Unique) -join ',')); $model = $ms | Select-Object -First 1 }
+$m2 = Api GET "$P/model" 'bob'
+if ($m2) { $ms2 = ($m2 | ConvertFrom-Json).data; Log ("bob models: " + $ms2.Count + " providers: " + (($ms2 | ForEach-Object { $_.providerID } | Sort-Object -Unique) -join ',')) }
+Api POST "$P/session" 'alice' @{ agent = 'build' }  # refused: a model is required
 $s = $null
-if ($model) { $s = Api POST '/sessions' 'alice' @{ model = @{ providerID = $model.providerID; id = $model.id } } }
-Api GET '/sessions' 'alice'
+if ($model) { $s = Api POST "$P/session" 'alice' @{ model = @{ providerID = $model.providerID; id = $model.id } } }
+Api GET "$P/session" 'alice'
 if ($s) {
-  $sid = ($s | ConvertFrom-Json).id
-  Api POST "/sessions/$sid/shell" 'alice' @{ command = 'echo hello-from-sandbox > hello.txt && git init -q 2>/dev/null; id' }
+  $sid = ($s | ConvertFrom-Json).data.id
+  Api POST "$P/session/$sid/shell" 'alice' @{ command = 'echo hello-from-sandbox > hello.txt && git init -q 2>/dev/null; id' }
   Start-Sleep 2
-  Api GET "/sessions/$sid/messages?limit=5" 'alice'
-  Api GET '/files' 'alice'
-  Api GET '/files/content?path=hello.txt' 'alice'
-  Api GET '/files/content?path=../../etc/passwd' 'alice'
-  Api GET '/diff' 'alice'
+  Api GET "$P/session/$sid/message?limit=5" 'alice'
+  Api GET "$P/fs/list" 'alice'
+  Api GET "$P/fs/read/hello.txt" 'alice'
+  Api GET "$P/fs/read/%2E%2E/%2E%2E/etc/passwd" 'alice'  # refused (400)
+  Api GET "$P/vcs/diff" 'alice'
 }
 Log "== ISOLATION"
 Run "docker ps --filter label=oc.managed=true --format ""{{.Names}} {{.Label \""oc.user\""}} {{.Networks}}"""
@@ -106,11 +107,11 @@ Run "docker logs --tail 40 opensession-egress"
 Log "== KEY CHANGE RECREATES SANDBOX"
 $before = $names['alice']
 Api PUT '/keys/anthropic?validate=false' 'alice' @{ api_key = 'sk-ant-fake-alice-3333' }
-Api GET '/health' 'alice'
+Api GET "$P/health" 'alice'
 $after = (docker ps -q --filter label=oc.managed=true --filter "label=oc.user=alice" | Select-Object -First 1)
 Log "recreated: $($before -ne $after) ($before -> $after)"
 Run "docker exec $after sh -c ""ls /workspace; env | grep ANTHROPIC_API_KEY | cut -c1-30"""
-Api GET '/sessions' 'alice'
+Api GET "$P/session" 'alice'
 Log "(the session list above should still contain the session created earlier: state volume kept)"
 Log "== AGENT SETUP: skills, agents, commands, MCP, permissions, AGENTS.md"
 $setup = @{
@@ -122,25 +123,25 @@ $setup = @{
   instructions = 'Keep answers very short.'
 }
 Api PUT '/agent-config' 'carol' $setup
-Api GET '/health' 'carol'
+Api GET "$P/health" 'carol'
 $C = (docker ps -q --filter label=oc.managed=true --filter "label=oc.user=carol" | Select-Object -First 1)
 Run "docker exec $C sh -c ""cd ~/.config/opencode && find . -type f | sort && cat opencode.json"""
 # skill/command lists and the npx MCP server load in the background: poll for up to 90s
 $t0 = Get-Date
 for ($i = 0; $i -lt 18; $i++) {
-  $cmds = Api GET '/commands' 'carol'
+  $cmds = Api GET "$P/command" 'carol'
   if ($cmds -match '"greet"') { break }
   Start-Sleep 5
 }
 Log ("commands visible after {0:N0}s: {1}" -f ((Get-Date) - $t0).TotalSeconds, ($cmds -match '"greet"'))
-Api GET '/skills' 'carol'
-Api GET '/agents' 'carol'
-Api GET '/mcp' 'carol'
+Api GET "$P/skill" 'carol'
+Api GET "$P/agent" 'carol'
+Api GET "$P/mcp" 'carol'
 Log "-- requests the egress proxy refused so far (host, count)"
 (cmd /c "docker logs opensession-egress 2>&1") | Select-String 'TCP_DENIED' | ForEach-Object { ($_ -split '\s+')[6] } | Group-Object | ForEach-Object { Log ("   {0}  x{1}" -f $_.Name, $_.Count) }
 Log "-- change the setup: the skill and MCP server are removed"
 Api PUT '/agent-config' 'carol' @{ commands = @(@{ name = 'greet'; template = 'Reply with exactly: HELLO $ARGUMENTS' }) }
-Api GET '/health' 'carol'
+Api GET "$P/health" 'carol'
 $C = (docker ps -q --filter label=oc.managed=true --filter "label=oc.user=carol" | Select-Object -First 1)
 Run "docker exec $C sh -c ""cd ~/.config/opencode && find . -type f | sort"""
 Api PUT '/agent-config' 'carol' $setup
@@ -152,20 +153,28 @@ if (-not $realKey) {
 } else {
   Api PUT '/keys/anthropic' 'carol' @{ api_key = $realKey }   # checked with Anthropic; the response shows the last 4 characters only
   $realKey = $null
-  $mm = Api GET '/models' 'carol'
+  $mm = Api GET "$P/model" 'carol'
   $model = $null
-  if ($mm) { $all = $mm | ConvertFrom-Json; $model = ($all | Where-Object { $_.id -match 'haiku' } | Select-Object -First 1); if (-not $model) { $model = $all | Select-Object -First 1 } }
+  if ($mm) { $all = ($mm | ConvertFrom-Json).data; $model = ($all | Where-Object { $_.id -match 'haiku' } | Select-Object -First 1); if (-not $model) { $model = $all | Select-Object -First 1 } }
   if ($model) {
     Log "using model $($model.providerID)/$($model.id)"
-    $s = Api POST '/sessions' 'carol' @{ model = @{ providerID = $model.providerID; id = $model.id } }
-    $sid = ($s | ConvertFrom-Json).id
-    $r = Api POST "/sessions/$sid/run" 'carol' @{ text = 'What is the secret word? Use @secret-word'; skills = @('secret-word') }
+    $s = Api POST "$P/session" 'carol' @{ model = @{ providerID = $model.providerID; id = $model.id } }
+    $sid = ($s | ConvertFrom-Json).data.id
+    # prompt, wait until the agent is idle, then read the newest messages
+    function Ask($body) {
+      Api POST "$P/session/$sid/prompt" 'carol' $body | Out-Null
+      Api POST "$P/session/$sid/wait" 'carol' | Out-Null
+      return Api GET "$P/session/$sid/message?limit=3&order=desc" 'carol'
+    }
+    $text = 'What is the secret word? Use @secret-word'
+    $at = $text.IndexOf('@secret-word')
+    $r = Ask @{ text = $text; skills = @(@{ id = 'secret-word'; mention = @{ start = $at; end = $at + 12; text = '@secret-word' } }) }
     Log ("SKILL_TEST " + $(if ($r -match 'BANANA-42') { 'PASS' } else { 'FAIL' }))
-    Api POST "/sessions/$sid/command" 'carol' @{ command = 'greet'; arguments = 'WORLD' }
-    Api POST "/sessions/$sid/wait" 'carol'
-    $m = Api GET "/sessions/$sid/messages?limit=3&order=desc" 'carol'
+    Api POST "$P/session/$sid/command" 'carol' @{ command = 'greet'; text = 'WORLD' }
+    Api POST "$P/session/$sid/wait" 'carol'
+    $m = Api GET "$P/session/$sid/message?limit=3&order=desc" 'carol'
     Log ("COMMAND_TEST " + $(if ($m -match 'HELLO WORLD') { 'PASS' } else { 'FAIL' }))
-    $r2 = Api POST "/sessions/$sid/run" 'carol' @{ text = 'Use the fs MCP server to list the files in /workspace, then reply with just the file names.' }
+    $r2 = Ask @{ text = 'Use the fs MCP server to list the files in /workspace, then reply with just the file names.' }
     Log ("MCP_TEST " + $(if ($r2 -match 'fs_') { 'PASS (tool used)' } else { 'CHECK OUTPUT' }))
   }
   Api DELETE '/keys/anthropic' 'carol'

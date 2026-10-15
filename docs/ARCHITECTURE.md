@@ -1,5 +1,11 @@
 # OpenSession architecture
 
+> **Direction:** OpenCode is the engine and its HTTP API is the protocol in every
+> runtime. The gateway is becoming a thin control plane with a generic OpenCode
+> proxy, and sandboxes move behind a `SandboxProvider` interface (Docker today,
+> managed microVMs next). See [DESIGN-unified-runtime.md](DESIGN-unified-runtime.md)
+> for the decisions and the step-by-step plan; this file describes what is built.
+
 ## Products and where the agent runs
 
 ```
@@ -28,9 +34,33 @@ Local mode is the desktop app and the CLI only; the web app is always cloud. Bot
 sides use the same TypeScript client interface (`OpenSessionClient` in
 `packages/api-client`) and the same React workspace (`packages/ui`):
 
-- `LocalClient` talks straight to OpenCode V2's HTTP API on this machine.
-- `CloudClient` talks to the gateway, which proxies to the user's sandbox and adds
-  account features (keys, allowed domains, access tokens, projects, terminal).
+- `OpenCodeClient` implements every workspace operation against OpenCode V2's HTTP
+  API (`/api/*`), given a base URL and auth headers.
+- `LocalClient` is an `OpenCodeClient` for the `opencode serve` on this machine
+  (server password, the project folder as session directory).
+- `CloudClient` is an `OpenCodeClient` pointed at the gateway's OpenCode proxy for
+  one project (`<gateway>/p/<project>`, Bearer token), plus the gateway's account
+  API (keys, allowed domains, access tokens, projects, GitHub, terminal tickets).
+
+## Gateway OpenCode proxy
+
+`/p/{project}/api/{path}` forwards any request to the project's sandbox at
+`/api/{path}` with the sandbox's password, so cloud clients speak plain OpenCode V2.
+`services/gateway/src/opensession/opencode_proxy.py` holds the policy:
+
+- **denied:** credential and integration-connect endpoints (keys come from the
+  keystore), debug, migration, persistent-PTY handoff/shutdown, plugin update;
+- **rewritten:** `POST /api/session` always uses `/workspace` and needs a model
+  (unless `ALLOW_OPENCODE_PROVIDER=1`); `GET /api/model` hides the OpenCode provider
+  and returns display fields only;
+- **checked:** agent work (prompt, command, shell, generate...) gets 507 over the
+  project's disk limit;
+- every request holds a lease on the sandbox and the response is streamed, so SSE
+  and long `wait` calls keep it awake and end when the caller disconnects.
+
+WebSockets (terminal) still go through `/terminals/{pty}/ticket` and
+`/terminals/{pty}/connect`. The gateway has no hand-written OpenCode routes any
+more (`/sessions`, `/files`, `/models`, ... were removed before the first release).
 
 The gateway keeps its data (users' tokens, encrypted keys, projects, limits...) in
 Postgres (`DATABASE_URL`; `db.py` also supports SQLite for development and tests).

@@ -173,7 +173,7 @@ def test_agent_config_routes_and_sandbox_rebuild(tmp_path):
     with c:
         r = c.get("/agent-config", headers=h).json()
         assert r["config"]["skills"] == [] and any(t["id"] == "shell" for t in r["builtin_tools"])
-        assert c.get("/health", headers=h).status_code == 200
+        assert c.get("/p/default/api/health", headers=h).status_code == 200
         (first,) = docker.containers.by_name.values()
         assert not getattr(first, "archives", [])  # no setup yet: nothing copied in
 
@@ -183,7 +183,7 @@ def test_agent_config_routes_and_sandbox_rebuild(tmp_path):
         r = c.put("/agent-config", json=FULL, headers=h)
         assert r.status_code == 200, r.text
 
-        assert c.get("/health", headers=h).status_code == 200  # recreated with the setup
+        assert c.get("/p/default/api/health", headers=h).status_code == 200  # recreated with the setup
         cont = docker.containers.by_name[first.name]
         assert cont is not first
         (path, data), = cont.archives
@@ -194,7 +194,7 @@ def test_agent_config_routes_and_sandbox_rebuild(tmp_path):
         assert env["DOCS_TOKEN"] == "tok-xyz" and len(env["OPENSESSION_CONFIG_DIGEST"]) == 16
         assert cont.kwargs["volumes"] == first.kwargs["volumes"]  # files and sessions kept
 
-        assert c.get("/health", headers=h).status_code == 200  # unchanged: no rebuild
+        assert c.get("/p/default/api/health", headers=h).status_code == 200  # unchanged: no rebuild
         assert docker.containers.by_name[first.name] is cont
 
         # literal credentials in MCP headers are refused
@@ -202,21 +202,10 @@ def test_agent_config_routes_and_sandbox_rebuild(tmp_path):
         assert c.put("/agent-config", json=bad, headers=h).status_code == 422
         assert c.put("/agent-config", json={**FULL, "default_agent": "nope"}, headers=h).status_code == 422
 
-        assert c.post("/sessions/ses_abc/command", json={"command": "review", "arguments": "src/a.ts"}, headers=h).status_code == 200
-        assert c.post("/sessions/ses_abc/command", json={"command": "../x"}, headers=h).status_code == 422
-        assert c.post("/sessions/ses_abc/skill", json={"skill": "git-release"}, headers=h).status_code == 204
-        assert c.get("/commands", headers=h).status_code == 200
+        assert c.post("/p/default/api/session/ses_abc/command", json={"command": "review", "text": "src/a.ts"}, headers=h).status_code == 204
+        assert c.post("/p/default/api/session/ses_abc/skill", json={"skill": "git-release"}, headers=h).status_code == 204
+        assert c.get("/p/default/api/command", headers=h).status_code == 200
         assert c.delete("/secrets/DOCS_TOKEN", headers=h).status_code == 204
     calls = {(m, p) for (_, m, p, _) in seen}
     assert ("POST", "/api/session/ses_abc/command") in calls and ("POST", "/api/session/ses_abc/skill") in calls
     assert ("GET", "/api/command") in calls
-
-
-def test_skill_mentions():
-    from opensession.gateway import skill_mentions
-
-    text = "please use @git-release and @unknown, email a@b.com"
-    assert skill_mentions(text, ["git-release"]) == [
-        {"id": "git-release", "mention": {"start": 11, "end": 23, "text": "@git-release"}}
-    ]
-    assert text[11:23] == "@git-release"
