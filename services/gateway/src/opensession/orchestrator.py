@@ -177,7 +177,7 @@ class _Entry:
     env_digest: str = ""
     leases: int = 0
     disk_mb: int | None = None
-    disk_checked_at: float = 0.0
+    disk_checked_at: float | None = None  # monotonic time of the last measurement
     busy_since: float | None = None
 
 
@@ -684,7 +684,7 @@ class SandboxManager:
         e = self._entries.get(key)
         if e is None:
             return None
-        if not force and time.monotonic() - e.disk_checked_at < self.cfg.disk_check_seconds:
+        if not force and e.disk_checked_at is not None and time.monotonic() - e.disk_checked_at < self.cfg.disk_check_seconds:
             return e.disk_mb
         c = await asyncio.to_thread(self._get_container, f"ocsb-{key}")
         if c is None:
@@ -876,7 +876,7 @@ class SandboxManager:
 
     async def measure_all(self) -> None:
         for key, e in list(self._entries.items()):
-            if time.monotonic() - e.disk_checked_at >= self.cfg.disk_check_seconds:
+            if e.disk_checked_at is None or time.monotonic() - e.disk_checked_at >= self.cfg.disk_check_seconds:
                 c = await asyncio.to_thread(self._get_container, f"ocsb-{key}")
                 if c is not None:
                     e.disk_mb = await asyncio.to_thread(self._du, c)

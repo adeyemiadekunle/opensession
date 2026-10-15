@@ -196,3 +196,19 @@ def test_disk_limit_blocks_agent_work_but_not_cleanup(monkeypatch):
         docker.containers.exec_handler = lambda cmd: (0, b"10\t/workspace\n5\t/home/agent/.state\n")
         asyncio.run(mgr.measure_disk("alice", "big", force=True))
         assert c.post("/sessions/ses_1/prompt", json={"text": "hi"}, headers=H).status_code == 200
+
+
+def test_first_disk_measurement_happens_right_after_boot(monkeypatch):
+    """time.monotonic() can be small on a freshly booted host; the first check must still run."""
+    mgr, docker, _, clock = clocked(monkeypatch, disk_limit_mb=100)
+    clock["t"] = 5.0
+    docker.containers.exec_handler = lambda cmd: (0, b"7\t/workspace\n1\t/home/agent/.state\n")
+
+    async def go():
+        await mgr.ensure("alice", "api")
+        assert await mgr.measure_disk("alice", "api") == 8
+        await mgr.ensure("alice", "b")
+        await mgr.measure_all()
+        assert mgr._entries[mgr._key("alice", "b")].disk_mb == 8
+
+    asyncio.run(go())
