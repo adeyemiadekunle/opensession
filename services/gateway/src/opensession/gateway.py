@@ -435,7 +435,7 @@ def create_app(
         if r.status_code >= 400:
             # 401/403/5xx from the sandbox are gateway problems, not the caller's.
             status = 502 if r.status_code in (401, 403) or r.status_code >= 500 else r.status_code
-            raise HTTPException(status, r.text[:500])
+            raise HTTPException(status, r.text[:500] or f"sandbox answered HTTP {r.status_code} for {method} {path}")
         return r
 
     # ---- workspace lifecycle ------------------------------------------------

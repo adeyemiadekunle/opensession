@@ -143,6 +143,12 @@ body_has '"state":"sleeping"' && ok "default is asleep" || bad "default: $(cat /
 
 echo "== terminal"
 check "open a terminal" 201 "$(apiw POST alice p3 /terminals '{"cols":100,"rows":30}')"
+if ! grep -q '"id"' /tmp/os_body; then
+  C=$(docker ps -q --filter label=oc.managed=true --filter label=oc.user=alice --filter label=oc.workspace=p3)
+  bad "terminal diagnostics: $(docker exec "$C" sh -c 'curl -s -w " http=%{http_code}" -u "opencode:$OPENCODE_SERVER_PASSWORD" -H content-type:application/json -d "{\"cwd\":\"/workspace\"}" http://127.0.0.1:4096/api/pty; echo; mount | grep -E " /tmp | /home/agent" ; ls -la /dev/ptmx /dev/pts 2>&1 | head -3' 2>&1 | tr '\n' ' ' | head -c 700)"
+  bad "sandbox log: $(docker logs --tail 25 "$C" 2>&1 | tr '\n' ' ' | tail -c 800)"
+  exit 1
+fi
 PTY=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['id'])")
 check "ticket" 200 "$(apiw POST alice p3 "/terminals/$PTY/ticket")"
 TICKET=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['ticket'])")
