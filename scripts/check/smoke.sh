@@ -76,11 +76,12 @@ for _ in $(seq 1 60); do curl -sf "$G/providers" >/dev/null && break; sleep 2; d
 check "gateway answers" 200 "$(api GET alice /providers)"
 
 echo "== sandboxes"
-check "alice sandbox starts" 200 "$(api GET alice /health)"
-check "bob sandbox starts" 200 "$(api GET bob /health)"
+check "alice sandbox starts" 200 "$(api GET alice /p/default/api/health)"
+check "bob sandbox starts" 200 "$(api GET bob /p/default/api/health)"
 grep -q '"healthy":true' /tmp/os_body && ok "opencode healthy" || bad "opencode health body: $(cat /tmp/os_body)"
-check "unauthenticated request refused" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$G/health")"
-check "path traversal refused" 400 "$(api GET alice '/files/content?path=../../etc/passwd')"
+check "unauthenticated request refused" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$G/p/default/api/health")"
+check "path traversal refused" 400 "$(api GET alice '/p/default/api/fs/read/%2E%2E/%2E%2E/etc/passwd')"
+check "credential endpoint refused" 403 "$(api GET alice /p/default/api/credential/x)"
 
 echo "== isolation and egress"
 BOB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(sandbox_of bob)")
@@ -105,7 +106,7 @@ SETUP='{"skills":[{"id":"secret-word","description":"Use for the secret word","b
  "commands":[{"name":"greet","template":"Reply with HELLO $ARGUMENTS"}],
  "permissions":[{"action":"webfetch","resource":"*","effect":"deny"}],"instructions":"Be brief."}'
 check "save setup" 200 "$(api PUT alice /agent-config "$SETUP")"
-check "sandbox restarts with setup" 200 "$(api GET alice /health)"
+check "sandbox restarts with setup" 200 "$(api GET alice /p/default/api/health)"
 FILES=$(docker exec "$(sandbox_of alice)" sh -c 'cd ~/.config/opencode && find . -type f | sort | tr "\n" " "')
 [[ "$FILES" == *"opensession-skills/secret-word/SKILL.md"* && "$FILES" == *"AGENTS.md"* ]] && ok "config files written" || bad "config files: $FILES"
 CFG=$(docker exec "$(sandbox_of alice)" cat /home/agent/.config/opencode/opencode.json)
@@ -118,8 +119,8 @@ N=$(docker exec opensession-db psql -U opensession -d opensession -tAc "select c
 check "alice's domains are stored in Postgres" 1 "$N"
 
 echo "== sleep and resume"
-check "create a session" 200 "$(api POST alice /sessions '{"model":{"providerID":"anthropic","id":"claude-sonnet-4-5"}}')"
-SID=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['id'])")
+check "create a session" 200 "$(api POST alice /p/default/api/session '{"model":{"providerID":"anthropic","id":"claude-sonnet-4-5"}}')"
+SID=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['data']['id'])")
 docker exec "$(sandbox_of alice)" sh -c 'echo kept-across-sleep > /workspace/note.txt'
 check "status while awake" 200 "$(api GET alice /workspace)"
 body_has '"state":"running"' && ok "state running" || bad "status: $(cat /tmp/os_body)"
@@ -127,15 +128,15 @@ check "put to sleep" 204 "$(api POST alice /workspace/stop)"
 check "status while asleep" 200 "$(api GET alice /workspace)"
 body_has '"state":"sleeping"' && ok "state sleeping" || bad "status: $(cat /tmp/os_body)"
 [ -z "$(sandbox_of alice)" ] && ok "container stopped" || bad "alice still running"
-check "next request wakes it" 200 "$(api GET alice /health)"
-check "list sessions" 200 "$(api GET alice /sessions)"
+check "next request wakes it" 200 "$(api GET alice /p/default/api/health)"
+check "list sessions" 200 "$(api GET alice /p/default/api/session)"
 body_has "$SID" && ok "session kept across sleep" || bad "session $SID missing: $(head -c 300 /tmp/os_body)"
-check "read file" 200 "$(api GET alice '/files/content?path=note.txt')"
+check "read file" 200 "$(api GET alice /p/default/api/fs/read/note.txt)"
 body_has kept-across-sleep && ok "files kept across sleep" || bad "note.txt: $(head -c 200 /tmp/os_body)"
 
 echo "== running projects per user (limit 2)"
-check "alice opens p2" 200 "$(apiw GET alice p2 /health)"
-check "alice opens p3" 200 "$(apiw GET alice p3 /health)"
+check "alice opens p2" 200 "$(api GET alice /p/p2/api/health)"
+check "alice opens p3" 200 "$(api GET alice /p/p3/api/health)"
 check "limits" 200 "$(api GET alice /limits)"
 body_has '"running":\["p2","p3"\]' && ok "least recently used project went to sleep" || bad "limits: $(cat /tmp/os_body)"
 check "default status" 200 "$(api GET alice /workspace)"

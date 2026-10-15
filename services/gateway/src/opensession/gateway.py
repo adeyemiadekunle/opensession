@@ -13,6 +13,12 @@ started on demand by orchestrator.SandboxManager.
 Users can extend the sandbox egress allowlist with their own domains
 (PUT /egress/domains); egress.py turns those into proxy rules for their sandboxes.
 
+The project's OpenCode V2 API is served as-is at /p/{project}/api/... (the generic
+proxy at the end of create_app; policy in opencode_proxy.py), so cloud clients speak
+the same API as a local `opencode serve`. The gateway's own routes are only what
+OpenCode does not have: accounts, keys, egress, projects, GitHub, limits, agent
+setup and terminal tickets.
+
 Because each user has a dedicated OpenCode server, there is no cross-user session
 ownership table: a user can only ever reach their own server. Credentials, MCP
 servers, shell and permissions all live inside the user's own sandbox.
@@ -23,7 +29,7 @@ sandboxes. Changing or deleting a key recreates the sandbox on its next request;
 the /workspace volume is kept. Set KEYSTORE_MASTER_KEYS to enable this (generate
 one with `python -m opensession.keystore genkey`); without it the /keys routes return 503.
 
-Routes target the OpenCode V2 HTTP API and were checked against a real
+Calls into the sandbox target the OpenCode V2 HTTP API and were checked against a real
 `opencode serve` (OpenCode v2.0.0) and its spec (GET /openapi.json in the sandbox,
 saved to scripts/check/openapi.json). The API is experimental: pin the version
 and re-run scripts/check when upgrading.
@@ -32,10 +38,11 @@ and re-run scripts/check when upgrading.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from contextlib import asynccontextmanager
-from typing import Annotated, Literal
+from typing import Annotated
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, WebSocket, WebSocketDisconnect
@@ -45,6 +52,7 @@ from pydantic import AfterValidator, BaseModel, Field, SecretStr
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import agentconfig
+from . import opencode_proxy as ocp
 from .agentconfig import BUILTIN_AGENTS, BUILTIN_TOOLS, AgentConfig
 from .auth import USER_ID_RE, AuthConfig, Authenticator, Principal
 from . import db as dbmod
@@ -68,14 +76,8 @@ from .orchestrator import (
     SandboxManager,
 )
 
-# Container path of the persistent workspace volume.
-WORKSPACE_DIR = "/workspace"
-
 WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
-# OpenCode ids have a fixed prefix; validating them keeps callers from smuggling
-# other paths (e.g. "..") into the upstream URL.
-SessionId = Annotated[str, Path(pattern=r"^ses_[A-Za-z0-9]{1,64}$")]
 PtyId = Annotated[str, Path(pattern=r"^pty_[A-Za-z0-9]{1,80}$")]
 TERMINAL_TICKET_SECONDS = 60
 
@@ -96,66 +98,10 @@ async def _ws_connect(url: str, headers: dict[str, str]):
     from websockets.asyncio.client import connect
 
     return await connect(url, additional_headers=headers, max_size=None, open_timeout=15)
-PermissionId = Annotated[str, Path(pattern=r"^per_[A-Za-z0-9]{1,64}$")]
-FormId = Annotated[str, Path(pattern=r"^frm_[A-Za-z0-9]{1,64}$")]
-McpName = Annotated[str, Path(pattern=r"^[A-Za-z0-9_.-]{1,64}$")]
 
 
 # Request models live at module level so FastAPI can resolve the (postponed)
 # annotations used by the route functions below.
-class ModelRef(BaseModel):
-    providerID: str = Field(min_length=1, max_length=64)  # e.g. "anthropic"
-    id: str = Field(min_length=1, max_length=128)  # e.g. "claude-sonnet-4-5"
-    variant: str | None = None
-
-
-class CreateSession(BaseModel):
-    agent: str | None = None  # e.g. "plan" for the read-only agent
-    model: ModelRef | None = None
-
-
-class Prompt(BaseModel):
-    text: str = Field(min_length=1, max_length=20_000)
-    # "queue" waits for the current turn; "steer" injects into the running turn.
-    delivery: Literal["queue", "steer"] | None = None
-    # Known skill ids; "@id" mentions of these in the text load the skill right away.
-    skills: list[str] = Field(default_factory=list, max_length=200)
-
-
-class SwitchAgent(BaseModel):
-    agent: str = Field(min_length=1, max_length=64)
-
-
-class SwitchModel(BaseModel):
-    model: ModelRef
-
-
-class ShellCommand(BaseModel):
-    command: str = Field(min_length=1, max_length=4_000)
-
-
-class PermissionReply(BaseModel):
-    reply: Literal["once", "always", "reject"]
-    message: str | None = Field(default=None, max_length=2_000)
-
-
-class FormReply(BaseModel):
-    answer: dict  # field id -> value, as defined by the form's fields
-
-
-class McpAdd(BaseModel):
-    config: dict  # local {"type":"local","command":[...]} or remote {"type":"remote","url":...}
-
-
-class RunCommand(BaseModel):
-    command: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$")
-    arguments: str = Field(default="", max_length=20_000)
-
-
-class ActivateSkill(BaseModel):
-    skill: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-
-
 class SecretBody(BaseModel):
     value: SecretStr = Field(min_length=1, max_length=4096)
 
@@ -224,30 +170,6 @@ _SECRETISH = re.compile(
 def _looks_like_secret(value: str) -> bool:
     """Heuristic: credential-shaped literals belong in /secrets, referenced as {env:NAME}."""
     return bool(_SECRETISH.search(value))
-
-
-_MENTION = re.compile(r"(^|\s)@([a-z0-9]+(?:-[a-z0-9]+)*)\b")
-
-
-def skill_mentions(text: str, known: list[str]) -> list[dict]:
-    """'@skill-id' mentions in a prompt, in OpenCode V2's prompt body format."""
-    out = []
-    for m in _MENTION.finditer(text):
-        sid = m.group(2)
-        if sid in known:
-            start = m.start(2) - 1
-            out.append({"id": sid, "mention": {"start": start, "end": start + len(sid) + 1, "text": "@" + sid}})
-    return out
-
-
-def safe_rel_path(path: str) -> str:
-    """A relative path inside the workspace: no absolute paths, no "..", no odd chars."""
-    if len(path) > 1024 or "\x00" in path or "\\" in path or path.startswith("/"):
-        raise HTTPException(400, "path must be relative to the workspace")
-    parts = [x for x in path.split("/") if x not in ("", ".")]
-    if any(x == ".." for x in parts):
-        raise HTTPException(400, "path must be relative to the workspace")
-    return "/".join(parts)
 
 
 def _db_path() -> str:
@@ -411,15 +333,6 @@ def create_app(
     ) -> httpx.AsyncClient:
         return await get_client(request, ref)
 
-    async def agent_client(
-        request: Request, ref: tuple[str, str] = Depends(sandbox_ref)
-    ) -> httpx.AsyncClient:
-        """Like oc_client, for requests that make the agent do work: refused while the
-        project is over its disk limit (the terminal and shell still work, to clean up)."""
-        client = await get_client(request, ref)
-        check_disk(request, ref)
-        return client
-
     def check_disk(request: Request, ref: tuple[str, str]) -> None:
         over = request.app.state.sandboxes.over_disk(*ref)
         if over:
@@ -439,11 +352,6 @@ def create_app(
         return r
 
     # ---- workspace lifecycle ------------------------------------------------
-
-    @app.get("/health")
-    async def health(client: httpx.AsyncClient = Depends(oc_client)):
-        """Starts the caller's sandbox if needed and returns OpenCode's health."""
-        return (await call(client, "GET", "/api/health")).json()
 
     @app.get("/workspace")
     async def workspace_status(request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
@@ -858,11 +766,6 @@ def create_app(
         if not await asyncio.to_thread(require_keystore(request).delete_secret, user, name):
             raise HTTPException(404, "no such secret")
 
-    @app.get("/commands")
-    async def list_commands(client: httpx.AsyncClient = Depends(oc_client)):
-        """Slash commands available in the sandbox (the user's, the repo's, built-in)."""
-        return (await call(client, "GET", "/api/command")).json()
-
     # ---- model API keys (bring your own key) ---------------------------------
 
     def require_keystore(request: Request) -> KeyStore:
@@ -917,250 +820,6 @@ def create_app(
         check_provider(provider)
         if not await asyncio.to_thread(ks.delete, user, provider):
             raise HTTPException(404, "no key stored for this provider")
-
-    # ---- sessions -----------------------------------------------------------
-
-    def body_of(r: httpx.Response):
-        return r.json() if r.content else None
-
-    @app.post("/sessions")
-    async def create_session(body: CreateSession, client: httpx.AsyncClient = Depends(oc_client)):
-        if body.model is None and not ALLOW_OPENCODE_PROVIDER:
-            # OpenCode's default model is its own hosted one, which sandboxes can't reach.
-            raise HTTPException(422, "model is required (pick one from GET /models)")
-        payload: dict = {"location": {"directory": WORKSPACE_DIR}}
-        if body.agent:
-            payload["agent"] = body.agent
-        if body.model:
-            payload["model"] = body.model.model_dump(exclude_none=True)
-        r = await call(client, "POST", "/api/session", json=payload)
-        return r.json()["data"]
-
-    @app.get("/sessions")
-    async def list_sessions(client: httpx.AsyncClient = Depends(oc_client)):
-        return (await call(client, "GET", "/api/session")).json()
-
-    @app.get("/sessions/{session_id}")
-    async def get_session(session_id: SessionId, client: httpx.AsyncClient = Depends(oc_client)):
-        return (await call(client, "GET", f"/api/session/{session_id}")).json()
-
-    def prompt_payload(body: Prompt) -> dict:
-        payload: dict = {"text": body.text}
-        if body.delivery:
-            payload["delivery"] = body.delivery
-        mentions = skill_mentions(body.text, body.skills)
-        if mentions:
-            payload["skills"] = mentions
-        return payload
-
-    @app.post("/sessions/{session_id}/prompt")
-    async def send_prompt(
-        session_id: SessionId, body: Prompt, client: httpx.AsyncClient = Depends(agent_client)
-    ):
-        """Queue a prompt and return immediately. Follow progress via /events."""
-        r = await call(client, "POST", f"/api/session/{session_id}/prompt", json=prompt_payload(body))
-        return body_of(r)
-
-    @app.post("/sessions/{session_id}/run")
-    async def run_prompt(
-        session_id: SessionId,
-        body: Prompt,
-        request: Request,
-        limit: int = 20,
-        ref: tuple[str, str] = Depends(sandbox_ref),
-    ):
-        """Send a prompt, wait until the agent is idle, return the newest messages."""
-        await get_client(request, ref)  # maps sandbox errors to HTTP errors
-        check_disk(request, ref)
-        env = await user_env(request, ref[0])
-        async with request.app.state.sandboxes.lease(*ref, env) as client:
-            await call(client, "POST", f"/api/session/{session_id}/prompt", json=prompt_payload(body))
-            await call(
-                client, "POST", f"/api/session/{session_id}/wait", timeout=httpx.Timeout(600.0)
-            )
-            r = await call(
-                client,
-                "GET",
-                f"/api/session/{session_id}/message",
-                params={"order": "desc", "limit": str(limit)},
-            )
-            return r.json()
-
-    @app.post("/sessions/{session_id}/wait", status_code=204)
-    async def wait_idle(
-        session_id: SessionId, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)
-    ):
-        """Block until the agent has finished its current work (up to 10 minutes)."""
-        await get_client(request, ref)
-        env = await user_env(request, ref[0])
-        async with request.app.state.sandboxes.lease(*ref, env) as client:
-            await call(client, "POST", f"/api/session/{session_id}/wait", timeout=httpx.Timeout(600.0))
-
-    @app.get("/sessions/{session_id}/messages")
-    async def messages(
-        session_id: SessionId,
-        order: Literal["asc", "desc"] = "asc",
-        limit: int = 50,
-        cursor: str | None = None,
-        client: httpx.AsyncClient = Depends(oc_client),
-    ):
-        params = {"limit": str(limit)}
-        if cursor:
-            params["cursor"] = cursor  # the API forbids combining cursor with order
-        else:
-            params["order"] = order
-        return (await call(client, "GET", f"/api/session/{session_id}/message", params=params)).json()
-
-    @app.get("/sessions/{session_id}/events")
-    async def events(
-        session_id: SessionId,
-        request: Request,
-        after: str | None = None,
-        last_event_id: str | None = Header(None),
-        ref: tuple[str, str] = Depends(sandbox_ref),
-    ):
-        """Server-sent events from the session's durable log. Reconnect with
-        ?after=<last seq> (or Last-Event-ID) to resume without missing events."""
-        await get_client(request, ref)
-        env = await user_env(request, ref[0])
-        mgr: SandboxManager = request.app.state.sandboxes
-        params = {"follow": "true"}
-        if after or last_event_id:
-            params["after"] = after or last_event_id
-
-        async def stream():
-            try:
-                async with mgr.lease(*ref, env) as client:  # keeps the sandbox from being reaped
-                    async with client.stream(
-                        "GET",
-                        f"/api/experimental/session/{session_id}/log",
-                        params=params,
-                        timeout=None,
-                    ) as r:
-                        if r.status_code >= 400:
-                            yield f"event: error\ndata: upstream {r.status_code}\n\n".encode()
-                            return
-                        async for chunk in r.aiter_raw():
-                            if await request.is_disconnected():
-                                break
-                            yield chunk
-            except (httpx.HTTPError, SandboxError) as e:
-                yield f"event: error\ndata: {e}\n\n".encode()
-
-        return StreamingResponse(
-            stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
-
-    @app.post("/sessions/{session_id}/interrupt", status_code=204)
-    async def interrupt(session_id: SessionId, client: httpx.AsyncClient = Depends(oc_client)):
-        await call(client, "POST", f"/api/session/{session_id}/interrupt")
-
-    @app.delete("/sessions/{session_id}", status_code=204)
-    async def delete_session(session_id: SessionId, client: httpx.AsyncClient = Depends(oc_client)):
-        await call(client, "DELETE", f"/api/session/{session_id}")
-
-    # ---- workspace files and changes (for the web editor) ----------------------
-
-    @app.get("/files")
-    async def list_files(path: str = "", client: httpx.AsyncClient = Depends(oc_client)):
-        """List a directory inside /workspace (relative path)."""
-        params = {"path": safe_rel_path(path)} if path else None
-        return (await call(client, "GET", "/api/fs/list", params=params)).json()
-
-    @app.get("/files/content")
-    async def read_file(path: str, client: httpx.AsyncClient = Depends(oc_client)):
-        """Raw contents of one file inside /workspace (relative path)."""
-        from fastapi.responses import Response
-
-        r = await call(client, "GET", f"/api/fs/read/{safe_rel_path(path)}")
-        return Response(r.content, media_type=r.headers.get("content-type", "application/octet-stream"))
-
-    @app.get("/diff")
-    async def workspace_diff(
-        mode: Literal["working", "branch", "committed"] = "working",
-        client: httpx.AsyncClient = Depends(oc_client),
-    ):
-        """Git changes in /workspace, with a patch per file (for a diff viewer)."""
-        return (await call(client, "GET", "/api/vcs/diff", params={"mode": mode})).json()
-
-    # ---- agents, models, skills, shell -------------------------------------
-
-    @app.get("/agents")
-    async def list_agents(client: httpx.AsyncClient = Depends(oc_client)):
-        data = (await call(client, "GET", "/api/agent")).json().get("data", [])
-        return [
-            {k: a[k] for k in ("id", "name", "description", "mode") if k in a}
-            for a in data
-            if isinstance(a, dict)
-        ]
-
-    @app.get("/models")
-    async def list_models(client: httpx.AsyncClient = Depends(oc_client)):
-        """Models usable in the caller's sandbox (providers they have keys for).
-        Only whitelisted fields are returned: model entries carry provider settings,
-        which can include API keys."""
-        data = (await call(client, "GET", "/api/model")).json().get("data", [])
-        out = []
-        for m in data:
-            if not isinstance(m, dict):
-                continue
-            if m.get("providerID") == "opencode" and not ALLOW_OPENCODE_PROVIDER:
-                continue
-            item = {k: m[k] for k in ("id", "providerID", "name", "family", "capabilities") if k in m}
-            item["variants"] = [v.get("id") for v in m.get("variants") or [] if isinstance(v, dict)]
-            out.append(item)
-        return out
-
-    @app.get("/skills")
-    async def list_skills(client: httpx.AsyncClient = Depends(oc_client)):
-        return (await call(client, "GET", "/api/skill")).json()
-
-    @app.post("/sessions/{session_id}/agent", status_code=204)
-    async def switch_agent(
-        session_id: SessionId, body: SwitchAgent, client: httpx.AsyncClient = Depends(oc_client)
-    ):
-        await call(client, "POST", f"/api/session/{session_id}/agent", json={"agent": body.agent})
-
-    @app.post("/sessions/{session_id}/model", status_code=204)
-    async def switch_model(
-        session_id: SessionId, body: SwitchModel, client: httpx.AsyncClient = Depends(oc_client)
-    ):
-        await call(
-            client,
-            "POST",
-            f"/api/session/{session_id}/model",
-            json={"model": body.model.model_dump(exclude_none=True)},
-        )
-
-    @app.post("/sessions/{session_id}/command")
-    async def run_command(
-        session_id: SessionId, body: RunCommand, client: httpx.AsyncClient = Depends(agent_client)
-    ):
-        """Run a slash command (e.g. "review" with arguments "src/auth.ts")."""
-        r = await call(
-            client,
-            "POST",
-            f"/api/session/{session_id}/command",
-            json={"command": body.command, "text": body.arguments},
-        )
-        return body_of(r)
-
-    @app.post("/sessions/{session_id}/skill", status_code=204)
-    async def activate_skill(
-        session_id: SessionId, body: ActivateSkill, client: httpx.AsyncClient = Depends(oc_client)
-    ):
-        """Load a skill into the session now (instead of waiting for the model to)."""
-        await call(client, "POST", f"/api/session/{session_id}/skill", json={"skill": body.skill})
-
-    @app.post("/sessions/{session_id}/shell", status_code=204)
-    async def run_shell(
-        session_id: SessionId, body: ShellCommand, client: httpx.AsyncClient = Depends(oc_client)
-    ):
-        """Run one command in the user's own sandbox. The command and its output
-        appear in the session as a "shell" message."""
-        await call(client, "POST", f"/api/session/{session_id}/shell", json={"command": body.command})
 
     # ---- terminal (OpenCode PTY in the user's sandbox) --------------------------------
     #
@@ -1277,73 +936,78 @@ def create_app(
             except Exception:
                 pass
 
-    # ---- MCP (per-sandbox, so it only affects the calling user) --------------
+    # ---- generic OpenCode proxy -------------------------------------------------
+    #
+    # /p/<project>/api/<path> is the project's OpenCode V2 API, so a client pointed at
+    # <gateway>/p/<project> works exactly like one pointed at a local `opencode serve`.
+    # Policy (denied endpoints, session rewrite, model filter, disk) is in
+    # opencode_proxy.py; see docs/DESIGN-unified-runtime.md.
 
-    @app.get("/mcp")
-    async def mcp_list(client: httpx.AsyncClient = Depends(oc_client)):
-        return (await call(client, "GET", "/api/mcp")).json()
+    @app.api_route("/p/{workspace}/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    async def opencode_api(workspace: str, path: str, request: Request, user: str = Depends(current_user)):
+        from contextlib import AsyncExitStack
 
-    @app.put("/mcp/{server}")
-    async def mcp_add(server: McpName, body: McpAdd, client: httpx.AsyncClient = Depends(oc_client)):
-        """Add or replace an MCP server: {"config": {"type": "remote", "url": ...}} or
-        {"config": {"type": "local", "command": [...]}}. Remote servers must be on the
-        egress allowlist to be reachable."""
-        return body_of(await call(client, "PUT", f"/api/mcp/{server}", json={"config": body.config}))
+        from fastapi.responses import JSONResponse, Response
 
-    @app.delete("/mcp/{server}", status_code=204)
-    async def mcp_remove(server: McpName, client: httpx.AsyncClient = Depends(oc_client)):
-        await call(client, "DELETE", f"/api/mcp/{server}")
+        if not WORKSPACE_ID_RE.match(workspace):
+            raise HTTPException(400, "invalid workspace id")
+        ref = (user, workspace)
+        method = request.method
+        try:
+            segs = ocp.clean_path(path)
+            ocp.check(method, segs)
+            body = ocp.rewrite_request(method, segs, await request.body(), ALLOW_OPENCODE_PROVIDER)
+        except ocp.ProxyRefused as e:
+            raise HTTPException(e.status, e.detail) from None
 
-    @app.post("/mcp/{server}/connect")
-    async def mcp_connect(server: McpName, client: httpx.AsyncClient = Depends(oc_client)):
-        return body_of(await call(client, "POST", f"/api/mcp/{server}/connect"))
+        await get_client(request, ref)  # starts the sandbox, clones the repo; maps errors
+        if ocp.is_agent_work(method, segs):
+            check_disk(request, ref)
 
-    @app.post("/mcp/{server}/disconnect")
-    async def mcp_disconnect(server: McpName, client: httpx.AsyncClient = Depends(oc_client)):
-        return body_of(await call(client, "POST", f"/api/mcp/{server}/disconnect"))
+        url = ocp.upstream_path(segs) + (f"?{request.url.query}" if request.url.query else "")
+        headers = {k: v for k in ocp.FORWARD_REQUEST_HEADERS if (v := request.headers.get(k))}
+        stack = AsyncExitStack()
+        try:
+            # The lease keeps the sandbox awake for as long as the response streams.
+            client = await stack.enter_async_context(request.app.state.sandboxes.lease(*ref))
+            upstream = client.build_request(
+                method, url, content=body or None, headers=headers, timeout=httpx.Timeout(30.0, read=None)
+            )
+            r = await client.send(upstream, stream=True)
+            stack.push_async_callback(r.aclose)
+        except (httpx.HTTPError, SandboxError) as e:
+            await stack.aclose()
+            raise HTTPException(502, f"sandbox unreachable: {e}") from e
 
-    # ---- permission requests and forms (questions) from the agent -------------
+        if r.status_code >= 400 or r.status_code in (204, 304) or ocp.filters_response(method, segs):
+            try:
+                content = await r.aread()
+            finally:
+                await stack.aclose()
+            if r.status_code in (401, 403) or r.status_code >= 500:
+                raise HTTPException(502, content.decode("utf-8", "replace")[:500] or f"sandbox answered HTTP {r.status_code}")
+            if r.status_code >= 400 or r.status_code in (204, 304):
+                return Response(content or None, status_code=r.status_code, media_type=r.headers.get("content-type"))
+            try:
+                data = json.loads(content or b"{}")
+            except ValueError:
+                raise HTTPException(502, "sandbox answered with invalid JSON") from None
+            return JSONResponse(ocp.filter_response(segs, data, ALLOW_OPENCODE_PROVIDER))
 
-    @app.get("/sessions/{session_id}/permissions")
-    async def permissions_pending(session_id: SessionId, client: httpx.AsyncClient = Depends(oc_client)):
-        return (await call(client, "GET", f"/api/session/{session_id}/permission")).json()
+        out_headers = {k: v for k in ocp.FORWARD_RESPONSE_HEADERS if (v := r.headers.get(k))}
+        if "text/event-stream" in out_headers.get("content-type", ""):
+            out_headers.update({"cache-control": "no-cache", "x-accel-buffering": "no"})
 
-    @app.post("/sessions/{session_id}/permissions/{request_id}/reply", status_code=204)
-    async def permission_reply(
-        session_id: SessionId,
-        request_id: PermissionId,
-        body: PermissionReply,
-        client: httpx.AsyncClient = Depends(oc_client),
-    ):
-        """Approve ("once" / "always") or deny ("reject") a tool permission request."""
-        await call(
-            client,
-            "POST",
-            f"/api/session/{session_id}/permission/{request_id}/reply",
-            json=body.model_dump(exclude_none=True),
-        )
+        async def stream():
+            try:
+                async for chunk in r.aiter_bytes():
+                    yield chunk
+            except httpx.HTTPError:
+                pass  # sandbox went away mid-stream; the caller sees the stream end
+            finally:
+                await stack.aclose()
 
-    @app.get("/sessions/{session_id}/forms")
-    async def forms_pending(session_id: SessionId, client: httpx.AsyncClient = Depends(oc_client)):
-        """Questions (forms) the agent is waiting on the user to answer."""
-        return (await call(client, "GET", f"/api/session/{session_id}/form")).json()
-
-    @app.post("/sessions/{session_id}/forms/{form_id}/reply", status_code=204)
-    async def form_reply(
-        session_id: SessionId,
-        form_id: FormId,
-        body: FormReply,
-        client: httpx.AsyncClient = Depends(oc_client),
-    ):
-        await call(
-            client, "POST", f"/api/session/{session_id}/form/{form_id}/reply", json={"answer": body.answer}
-        )
-
-    @app.post("/sessions/{session_id}/forms/{form_id}/cancel", status_code=204)
-    async def form_cancel(
-        session_id: SessionId, form_id: FormId, client: httpx.AsyncClient = Depends(oc_client)
-    ):
-        await call(client, "POST", f"/api/session/{session_id}/form/{form_id}/cancel")
+        return StreamingResponse(stream(), status_code=r.status_code, headers=out_headers)
 
     return app
 

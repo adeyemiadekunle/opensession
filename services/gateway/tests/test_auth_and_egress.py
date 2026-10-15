@@ -155,8 +155,8 @@ def test_user_domains_api_and_proxy_rules(tmp_path):
     c, docker, _ = app_client(tmp_path, mode="dev", egress_dir=conf)
     a, b = {"X-User-Id": "alice"}, {"X-User-Id": "bob"}
     with c:
-        assert c.get("/health", headers=a).status_code == 200  # alice's sandbox + network
-        assert c.get("/health", headers=b).status_code == 200
+        assert c.get("/p/default/api/health", headers=a).status_code == 200  # alice's sandbox + network
+        assert c.get("/p/default/api/health", headers=b).status_code == 200
         r = c.put("/egress/domains", json={"domains": ["*.example.com", "https://api.foo.dev/x"]}, headers=a)
         assert r.status_code == 200, r.text
         assert r.json()["user"] == [".example.com", "api.foo.dev"] and r.json()["enforced"] is True

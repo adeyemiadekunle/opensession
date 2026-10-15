@@ -143,7 +143,7 @@ def test_projects_linked_to_repos_clone_on_first_use():
         assert ids == ["default", "my-app"]
 
         h = {**A, "X-Workspace": "my-app"}
-        assert c.get("/health", headers=h).status_code == 200
+        assert c.get("/p/my-app/api/health", headers=h).status_code == 200
         (cont,) = [x for x in docker.containers.by_name.values() if x.labels["oc.workspace"] == "my-app"]
         (cmd, env, workdir, user), = cont.execs
         script = cmd[-1]
@@ -154,7 +154,7 @@ def test_projects_linked_to_repos_clone_on_first_use():
         assert user == "agent" and workdir == "/workspace"
         assert c.get("/workspaces", headers=A).json()[1]["cloned"] is True
 
-        assert c.get("/health", headers=h).status_code == 200
+        assert c.get("/p/my-app/api/health", headers=h).status_code == 200
         assert len(cont.execs) == 1  # cloned once
 
 

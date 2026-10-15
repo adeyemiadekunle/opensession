@@ -226,14 +226,9 @@ for local testing only.
     GET/PUT/DELETE /keys/{provider}       model API keys (encrypted; checked with the provider)
     GET/PUT /agent-config                 skills, agents, commands, MCP, permissions, AGENTS.md, plugins
     GET/PUT/DELETE /secrets/{NAME}        encrypted env vars for the sandbox ({env:NAME} in MCP settings)
-    GET /commands, POST /sessions/{id}/command | skill
-    GET  /models, /agents, /skills
-    POST /sessions, GET /sessions, DELETE /sessions/{id}
-    POST /sessions/{id}/prompt | wait | run | interrupt | shell | model | agent
-    GET  /sessions/{id}/messages, /sessions/{id}/events (SSE)
-    GET  /files, /files/content, /diff
-    /sessions/{id}/permissions, /sessions/{id}/forms   approvals and agent questions
-    /mcp/{server}                         MCP servers in the user's sandbox
+    *    /p/{project}/api/...             the project's OpenCode V2 API (sessions, prompts, events,
+                                          files, diff, models, agents, skills, commands, MCP,
+                                          permissions, forms, ...), proxied to its sandbox
     GET /workspace                        state without waking it: new | sleeping | running, busy, disk
     POST /workspace/stop, DELETE /workspace   sleep now; remove (optionally with files)
     GET /limits, GET/PUT /admin/users/{id}/limits
