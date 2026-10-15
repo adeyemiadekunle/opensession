@@ -106,7 +106,7 @@ name that resolves to an internal address is still blocked.
 
 A project is a row in the gateway's `workspaces` table (name, optional GitHub repo
 and branch, installation id). The web app, CLI (`-p`) and API (`X-Workspace`) pick
-the project; the orchestrator runs one sandbox per (user, project).
+the project; the sandbox manager runs one sandbox per (user, project).
 
 GitHub access uses a GitHub App (`services/gateway/src/opensession/github.py`):
 
@@ -122,6 +122,11 @@ GitHub access uses a GitHub App (`services/gateway/src/opensession/github.py`):
 The desktop app uses the user's own git and credentials instead.
 
 ## Sandbox lifecycle: sleep, resume, limits
+
+`orchestrator.SandboxManager` decides when sandboxes run; a `SandboxProvider`
+(`provider.py`) decides where. The only provider today is `DockerProvider`
+(`docker_provider.py`: containers, per-sandbox networks, volumes), selected with
+`SANDBOX_PROVIDER=docker`. Everything below is provider-independent.
 
 ```
  new ──first request──▶ running ──idle_seconds, not busy──▶ sleeping

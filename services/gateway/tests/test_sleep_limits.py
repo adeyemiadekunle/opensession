@@ -29,7 +29,7 @@ def clocked(monkeypatch, **cfg):
 
 
 def box(mgr, docker, user, ws):
-    return docker.containers.by_name[mgr._names(user, ws)[0]]
+    return docker.containers.by_name[mgr.provider.container_name(mgr._key(user, ws))]
 
 
 def test_sleep_keeps_container_and_volumes_and_resumes(monkeypatch):
