@@ -17,7 +17,11 @@ bad()  {
   # On GitHub Actions, also as an annotation (visible on the run page and via the API).
   [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=smoke::$(echo "$*" | tr '\n' ' ' | head -c 900)" || true
 }
-check() { local name=$1 want=$2 got=$3; if [[ "$got" == $want ]]; then ok "$name ($got)"; else bad "$name: wanted $want, got $got"; fi; }
+check() {
+  local name=$1 want=$2 got=$3
+  if [[ "$got" == $want ]]; then ok "$name ($got)"
+  else bad "$name: wanted $want, got $got $( [ -f /tmp/os_body ] && head -c 400 /tmp/os_body | tr '\n' ' ' )"; fi
+}
 
 api() { # api METHOD USER PATH [JSON] -> prints HTTP code; body in /tmp/os_body
   curl -sS -o /tmp/os_body -w '%{http_code}' -X "$1" -H "X-User-Id: $2" \
