@@ -157,8 +157,9 @@ def test_destroy_removes_container_and_optionally_volume():
 
     async def go():
         await mgr.ensure("alice", "default")
-        name, volume = mgr._names("alice", "default")
-        state = mgr._state_volume(mgr._key("alice", "default"))
+        key = mgr._key("alice", "default")
+        p = mgr.provider
+        name, volume, state = p.container_name(key), p.workspace_volume(key), p.state_volume(key)
         docker.volumes.names.update({volume, state})
         mounts = {v["bind"] for v in docker.containers.by_name[name].kwargs["volumes"].values()}
         assert mounts == {"/workspace", "/home/agent/.state"}

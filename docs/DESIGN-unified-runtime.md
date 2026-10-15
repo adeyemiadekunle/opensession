@@ -1,6 +1,6 @@
 # Design: one engine, swappable runtime
 
-Status: accepted, step 1 done (Oct 2026). Supersedes the "gateway wraps every
+Status: accepted, steps 1-2 done (Oct 2026). Supersedes the "gateway wraps every
 OpenCode route" approach described in the first version of ARCHITECTURE.md.
 
 ## Problem
@@ -19,7 +19,7 @@ cloud). The first implementation got there, but in a way that will not scale:
 2. **Two clients for one API.** `LocalClient` speaks OpenCode's API directly;
    `CloudClient` speaks the gateway's renamed copy of it. Same features, two code
    paths that drift.
-3. **We run our own multi-tenant container host.** `orchestrator.py` (~900 lines)
+3. **We run our own multi-tenant container host.** `orchestrator.py` (~900 lines at the time)
    manages Docker networks, sleep/wake, disk measurement and passwords on a single
    host whose kernel is shared by every user's agent-written code. That is the
    hardest part to make safe and to scale, and it is not what makes the product.
@@ -102,19 +102,29 @@ nothing had been deployed yet, so no older client depends on them.
 
 ### D3. `SandboxProvider` interface (step 2)
 
-The gateway stops talking to Docker directly. It needs only:
+The gateway stops talking to Docker directly. `provider.py` defines what a place
+to run sandboxes must do, keyed by `SandboxRef(user, workspace, key)`:
 
 ```
-ensure(user, project, env, config) -> Endpoint(url, auth_headers)   # create or resume
-pause(user, project)            # sleep: stop compute, keep files + sessions
-destroy(user, project, delete_data)
-exec(user, project, cmd, env)   # git clone/push with short-lived tokens
-status(user, project) -> new | sleeping | running, disk
+start(ref, env, env_digest, config_tar)  # create / recreate on new env / resume
+endpoint(ref) -> Endpoint(url, password) | None
+startup_failure(ref) -> reason | None    # while waiting for the health check
+created_digest(ref), state(ref) -> new | sleeping | running
+list(user?, include_stopped?) -> [SandboxInfo(ref, running)]
+stop(ref)                                # sleep: stop compute, keep files + sessions
+destroy(ref, delete_data)
+exec(ref, cmd, env, workdir)             # git clone/push with short-lived tokens
+disk_mb(ref)                             # default: `du` through exec
+is_sandbox_address(host), refresh()      # optional: provider-owned networking
 ```
 
-`orchestrator.py` becomes `DockerProvider` (kept for self-hosting, CI smoke tests
-and local development). Leases, idle tracking, per-user limits and disk checks move
-up into a provider-independent `SandboxManager`, so every provider gets them.
+All Docker code lives in `docker_provider.py` (kept for self-hosting, CI smoke tests
+and local development). `orchestrator.SandboxManager` keeps what every provider
+shares: health checks and HTTP clients, leases, idle sleep and orphan adoption,
+per-user and server-wide limits, disk checks. `SANDBOX_PROVIDER` picks the provider
+(`docker` today). `tests/test_provider.py` runs the manager against an in-memory
+provider, which is the contract a new provider has to meet. Per-user egress rules
+(Squid) still depend on the Docker provider's networks.
 
 ### D4. Managed microVM provider for production (step 3)
 
@@ -145,7 +155,7 @@ OpenCode's session export/import can carry it across later.
 | Step | Change | Status |
 |---|---|---|
 | 1 | Generic proxy `/p/{project}/api/*` + policy; `OpenCodeClient`; `CloudClient` uses the proxy; old `/sessions...` routes removed | done |
-| 2 | `SandboxProvider` interface; Docker code becomes `DockerProvider` | planned |
+| 2 | `SandboxProvider` interface; Docker code becomes `DockerProvider` | done |
 | 3 | First managed microVM provider, behind a config switch, alongside Docker | planned |
 | 4 | Local <-> cloud handoff via git; CLI `--local/--cloud`, `attach` | planned |
 
