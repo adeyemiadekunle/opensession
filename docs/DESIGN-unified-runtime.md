@@ -1,6 +1,6 @@
 # Design: one engine, swappable runtime
 
-Status: accepted, steps 1-2 done (Oct 2026). Supersedes the "gateway wraps every
+Status: accepted, steps 1-2 done, step 3 built (not yet run live) (Oct 2026). Supersedes the "gateway wraps every
 OpenCode route" approach described in the first version of ARCHITECTURE.md.
 
 ## Problem
@@ -142,6 +142,37 @@ allowlists (could replace the Squid proxy), private networking or authenticated
 port exposure for the OpenCode server, region/data residency, price per vCPU-hour
 while running and per GB stored while paused.
 
+**Chosen: E2B** (Oct 2026, checked against e2b SDK 2.56). Firecracker microVM per
+sandbox; pause keeps filesystem and memory and paused sandboxes are kept until
+killed, billed for storage only; per-sandbox `allow_out`/`deny_out` with domains and
+wildcards, changeable on a running sandbox, so it replaces Squid for this provider;
+templates build from `services/sandbox/Dockerfile` as is. Daytona was the runner-up
+(own-kernel isolation only in its VM class; per-sandbox network policy needs
+account tier 3+); Modal uses gVisor and caps sessions at 24 hours.
+
+`e2b_provider.py` maps the interface onto E2B:
+
+- sandboxes are found by metadata (`oc.user`, `oc.workspace`, `oc.key`), so the
+  gateway stores nothing about them;
+- sleep = `pause`, wake = `connect`; E2B's own timeout (`on_timeout: pause`) is only a
+  safety net that the reaper keeps extending, so if the gateway disappears, idle
+  sandboxes still pause;
+- the gateway starts OpenCode itself (not the template) with the user's env written
+  to `~/.state/opensession.env`; a key change restarts OpenCode in place, nothing is
+  recreated, so files stay put. A resume after E2B's filesystem-only fallback
+  (memory lost) restarts it from that file;
+- the OpenCode password is an HMAC of `SANDBOX_PASSWORD_SECRET` and the sandbox key;
+  OpenCode's port is reached through E2B's public host for it, protected by that
+  password;
+- egress: platform allowlist + the user's domains, everything else denied; changes
+  apply to running sandboxes at once and to paused ones on resume. The gateway
+  refuses to start without `EGRESS_GLOBAL_ALLOWLIST`, since an empty list would
+  block every model provider.
+
+Open before production: a live run with a real account (template build, user
+`agent` inside E2B, latency of the public port), and whether to require E2B's
+traffic access token on the OpenCode port in addition to the password.
+
 ### D5. Local <-> cloud handoff through git (step 4)
 
 A project is a git repository in both runtimes. "Continue in cloud" pushes the
@@ -156,7 +187,7 @@ OpenCode's session export/import can carry it across later.
 |---|---|---|
 | 1 | Generic proxy `/p/{project}/api/*` + policy; `OpenCodeClient`; `CloudClient` uses the proxy; old `/sessions...` routes removed | done |
 | 2 | `SandboxProvider` interface; Docker code becomes `DockerProvider` | done |
-| 3 | First managed microVM provider, behind a config switch, alongside Docker | planned |
+| 3 | First managed microVM provider (E2B), behind `SANDBOX_PROVIDER=e2b`, alongside Docker | built, tested against a fake SDK; live run pending |
 | 4 | Local <-> cloud handoff via git; CLI `--local/--cloud`, `attach` | planned |
 
 Each step ships on its own and keeps today's deployments working.

@@ -8,8 +8,9 @@ starts, stops and removes sandboxes and runs commands in them. Everything about
 *when* to do that (leases, health checks, idle sleep, per-user limits, disk
 limits) lives in orchestrator.SandboxManager, so every provider gets it.
 
-Providers: docker_provider.DockerProvider (containers on one Docker host). A
-managed microVM provider is the next step; select with SANDBOX_PROVIDER.
+Providers, selected with SANDBOX_PROVIDER: docker_provider.DockerProvider
+(containers on one Docker host) and e2b_provider.E2BProvider (Firecracker microVMs
+on E2B).
 """
 
 from __future__ import annotations
@@ -85,6 +86,11 @@ class SandboxConfig:
     mem_limit: str = "2g"
     cpus: float = 1.0
     pids_limit: int = 512
+    # -- e2b provider ---------------------------------------------------------
+    e2b_template: str = "opensession-sandbox"  # built by scripts/e2b/build_template.py
+    e2b_timeout: int = 3600  # E2B pauses a sandbox the gateway stopped extending (safety net)
+    e2b_user: str = "agent"  # the image's non-root user
+    password_secret: str = ""  # derives each sandbox's OpenCode password (providers without a container env store)
     # -- every provider -------------------------------------------------------
     port: int = 4096
     idle_seconds: int = 1800
@@ -112,6 +118,10 @@ class SandboxConfig:
             mem_limit=e("SANDBOX_MEM_LIMIT", cls.mem_limit),
             cpus=float(e("SANDBOX_CPUS", cls.cpus)),
             pids_limit=int(e("SANDBOX_PIDS_LIMIT", cls.pids_limit)),
+            e2b_template=e("E2B_TEMPLATE", cls.e2b_template),
+            e2b_timeout=int(e("E2B_SANDBOX_TIMEOUT", cls.e2b_timeout)),
+            e2b_user=e("E2B_SANDBOX_USER", cls.e2b_user),
+            password_secret=e("SANDBOX_PASSWORD_SECRET", ""),
             port=int(e("SANDBOX_PORT", cls.port)),
             idle_seconds=int(e("SANDBOX_IDLE_SECONDS", cls.idle_seconds)),
             max_running=int(e("SANDBOX_MAX_RUNNING", cls.max_running)),
@@ -132,9 +142,15 @@ class SandboxProvider(ABC):
     # Called (no args) after a sandbox's network appears or goes away, e.g. to refresh
     # per-user egress rules. Only providers with their own networking fire it.
     network_listeners: list[Callable[[], Awaitable[None]]]
+    # True if the provider itself restricts each sandbox to egress_domains(user)
+    # (Docker relies on the separate Squid proxy instead).
+    enforces_egress: bool = False
 
     def __init__(self) -> None:
         self.network_listeners = []
+        # Domains a user's sandboxes may reach: platform allowlist + the user's own
+        # (blocking; set by the gateway). Squid syntax: ".example.com" = and subdomains.
+        self.egress_domains: Callable[[str], list[str]] = lambda user: []
 
     @abstractmethod
     async def start(
@@ -197,6 +213,9 @@ class SandboxProvider(ABC):
     async def refresh(self) -> None:
         """Periodic housekeeping, called by the manager's reaper loop."""
 
+    async def egress_changed(self, user: str) -> None:
+        """The user's allowed domains changed: apply them to their running sandboxes."""
+
 
 def env_digest(env: dict[str, str] | None) -> str:
     """Short digest of a sandbox's injected env; a change recreates the sandbox."""
@@ -216,4 +235,8 @@ def make_provider(cfg: SandboxConfig, docker_client=None) -> SandboxProvider:
         from .docker_provider import DockerProvider
 
         return DockerProvider(cfg, docker_client)
-    raise ValueError(f"unknown SANDBOX_PROVIDER {cfg.provider!r} (available: docker)")
+    if cfg.provider == "e2b":
+        from .e2b_provider import E2BProvider
+
+        return E2BProvider(cfg)
+    raise ValueError(f"unknown SANDBOX_PROVIDER {cfg.provider!r} (available: docker, e2b)")

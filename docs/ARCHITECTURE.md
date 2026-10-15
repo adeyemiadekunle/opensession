@@ -124,9 +124,12 @@ The desktop app uses the user's own git and credentials instead.
 ## Sandbox lifecycle: sleep, resume, limits
 
 `orchestrator.SandboxManager` decides when sandboxes run; a `SandboxProvider`
-(`provider.py`) decides where. The only provider today is `DockerProvider`
+(`provider.py`) decides where. Providers: `DockerProvider`
 (`docker_provider.py`: containers, per-sandbox networks, volumes), selected with
-`SANDBOX_PROVIDER=docker`. Everything below is provider-independent.
+`SANDBOX_PROVIDER=docker`, and `E2BProvider` (`e2b_provider.py`: Firecracker
+microVMs on E2B, sleep = E2B pause, egress through E2B's per-sandbox allowlist
+instead of Squid), selected with `SANDBOX_PROVIDER=e2b`; see the design doc for its
+setup. Everything below is provider-independent.
 
 ```
  new ──first request──▶ running ──idle_seconds, not busy──▶ sleeping
