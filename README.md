@@ -78,7 +78,8 @@ Requirements: Node 22+, pnpm 10 (`npm i -g pnpm`), Python 3.10+, Docker.
 Install OpenCode V2 (`curl -fsSL https://opencode.ai/v2/install | bash`, or the
 Windows binary from the OpenCode site; set `OPENCODE_BIN` if it is not on PATH).
 
-    pnpm dev:desktop                 # Electron app: pick a folder and start coding
+    pnpm dev:desktop                 # Electron app: pick a folder and start coding,
+                                     # or switch to Cloud (sign in with the browser)
     pnpm cli local key anthropic     # save a key on this computer
     pnpm cli run --local "add a README" -C ./my-project   # same as `local run`
     pnpm cli attach --local -C ./my-project              # chat from the terminal
@@ -171,9 +172,28 @@ repository, which is cloned into the sandbox the first time the project opens.
 Projects without a repo start from an empty folder.
 
 **Git tab.** The workspace's Git tab shows the current and default branch, the
-changed files (+/-), and lets you switch or create a branch, push it and open a pull
-request. In the cloud the gateway does this; in the desktop app it runs your own
+changed files (+/-), and lets you switch or create a branch, commit, push and open a
+pull request. In the cloud the gateway does this; in the desktop app it runs your own
 `git` in the open folder (pull requests open GitHub's compare page in your browser).
+
+- **Approval.** Commit, Push and Create pull request first show what will happen (the
+  files to commit; the commits that will go to GitHub, and any uncommitted files that
+  won't) and run only after **Approve**. The agent's own `git commit` / `git push`
+  ask for permission too ("Ask me before the agent commits or pushes" in Agent setup,
+  on by default; the rules are appended last, also to the built-in agents, so a
+  broad "allow shell" rule can't skip them).
+- **CI.** The tab shows the GitHub checks and commit statuses for the current branch
+  and its open pull request, refreshed while it is open. Polling never wakes or keeps
+  a cloud project awake. The desktop app also sends an OS notification when a check
+  fails or all checks finish (local folders: needs a cloud sign-in, since CI is read
+  through the GitHub App).
+
+**Desktop app, cloud mode.** The header switches between *This computer* and *Cloud*.
+Cloud signs in through the browser (like `opensession login`) and shows the same
+projects, sessions and chat history as the web app. The access token stays in the
+desktop's main process, encrypted with the OS keychain; set `OPENSESSION_GATEWAY_URL`
+and `OPENSESSION_WEB_URL` for your server, and add `app://opensession` to the
+gateway's `CORS_ORIGINS` for terminals.
 
 **How GitHub is connected (cloud).** Through a GitHub App, so users choose exactly
 which repositories OpenSession can see:
@@ -194,7 +214,9 @@ GitHub Apps > New):
   authorization (OAuth) during installation**. Setup URL: leave empty.
 - Webhook: off.
 - Repository permissions: **Contents** read & write, **Pull requests** read & write,
-  **Metadata** read.
+  **Checks** read, **Commit statuses** read, **Metadata** read. (Adding Checks and
+  Commit statuses to an existing app: users accept the new permissions on their
+  installation; until then the CI view says so.)
 - Then fill `GITHUB_APP_*`, `GITHUB_STATE_SECRET` and `OPENSESSION_WEB_URL` in `.env`
   (see `.env.example`) and restart the gateway. Without them the GitHub endpoints
   answer 503 and projects work without repositories.

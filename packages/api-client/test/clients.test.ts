@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CloudClient, LocalClient, parseSSE, eventCursor } from "../src";
+import { CloudClient, LocalClient, ciChanges, parseSSE, eventCursor, type CiChecks } from "../src";
 
 type Call = { method: string; url: string; headers: Record<string, string>; body?: unknown };
 
@@ -116,5 +116,23 @@ describe("parseSSE", () => {
       { id: "7", event: "x", data: "hi" },
     ]);
     expect(out.map(eventCursor)).toEqual(["1", "2", "7"]);
+  });
+});
+
+describe("ciChanges", () => {
+  const ci = (state: CiChecks["state"], checks: CiChecks["checks"], sha = "abc"): CiChecks => ({
+    repo: "a/b", ref: "main", sha, state, checks, pull_request: null,
+  });
+  const run = (name: string, status: string, conclusion: string | null = null) => ({ name, status, conclusion, url: null });
+
+  it("reports failed checks and the final result, once", () => {
+    const pending = ci("pending", [run("test", "in_progress"), run("lint", "in_progress")]);
+    const oneFailed = ci("failure", [run("test", "completed", "failure"), run("lint", "in_progress")]);
+    expect(ciChanges(null, pending)).toEqual([]); // first look: nothing changed yet
+    expect(ciChanges(pending, oneFailed)).toEqual(["test: failure", "Checks failed on main"]);
+    expect(ciChanges(oneFailed, oneFailed)).toEqual([]);
+    const passed = ci("success", [run("test", "completed", "success"), run("lint", "completed", "success")]);
+    expect(ciChanges(pending, passed)).toEqual(["All checks passed on main"]); // successes aren't listed one by one
+    expect(ciChanges(pending, { ...passed, sha: "new" })).toEqual([]); // a new commit starts over
   });
 });

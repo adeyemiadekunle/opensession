@@ -141,5 +141,7 @@ export {
   opencodeConfigDir,
   loadLocalAgentConfig,
   saveLocalAgentConfig,
+  ensureLocalAgentDefaults,
   localAgentConfigPath,
 } from "./agentConfig";
+export { browserLogin, openBrowser } from "./login";

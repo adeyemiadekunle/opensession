@@ -15,7 +15,15 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { emptyAgentConfig, type AgentConfig, type AgentDef, type CommandDef, type PermissionRule } from "@opensession/api-client";
+import {
+  BUILTIN_AGENTS,
+  GIT_APPROVAL_RULES,
+  emptyAgentConfig,
+  type AgentConfig,
+  type AgentDef,
+  type CommandDef,
+  type PermissionRule,
+} from "@opensession/api-client";
 
 const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MODEL_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._:/-]+(#[A-Za-z0-9._-]+)?$/;
@@ -73,12 +81,12 @@ export function renderAgentFiles(c: AgentConfig): Record<string, string> {
   return files;
 }
 
-export function agentEntry(a: AgentDef): Record<string, unknown> {
+export function agentEntry(a: AgentDef, guard: PermissionRule[] = []): Record<string, unknown> {
   const d: Record<string, unknown> = { description: a.description, mode: a.mode };
   if (a.body?.trim()) d.system = a.body.trim();
   if (a.model) d.model = a.model;
   if (a.steps) d.steps = a.steps;
-  if (a.permissions?.length) d.permissions = a.permissions;
+  if (a.permissions?.length || guard.length) d.permissions = [...(a.permissions ?? []), ...guard];
   return d;
 }
 
@@ -101,6 +109,8 @@ interface Manifest {
   skillsRef: boolean;
   default_agent?: string | null;
   instructions: boolean;
+  /** Agents (built-in or the user's own) we appended the git approval rules to. */
+  guarded?: string[];
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -158,15 +168,36 @@ export function applyAgentConfig(c: AgentConfig, dir = opencodeConfigDir()): { w
   else if (existing) rmSync(agentsPath, { force: true });
 
   // opencode.json: swap our previous entries for the new ones; keep everything else.
+  const guard = c.git_approval === false ? [] : GIT_APPROVAL_RULES;
+  const ourPerms = [...c.permissions, ...guard];
   const perms: PermissionRule[] = (oc.permissions ?? []).filter((r: PermissionRule) => !prev.permissions.some((p) => same(p, r)));
-  oc.permissions = [...perms, ...c.permissions];
+  oc.permissions = [...perms, ...ourPerms];
   const servers: Record<string, unknown> = { ...(oc.mcp?.servers ?? {}) };
   for (const n of prev.mcp) delete servers[n];
   for (const [n, s] of Object.entries(c.mcp)) servers[n] = stripEmpty(s);
   oc.mcp = { ...(oc.mcp ?? {}), servers };
-  const agents: Record<string, unknown> = { ...(oc.agents ?? {}) };
+  const agents: Record<string, any> = { ...(oc.agents ?? {}) };
   for (const id of prev.agents) delete agents[id];
-  for (const a of c.agents) agents[a.id] = agentEntry(a);
+  for (const id of prev.guarded ?? []) {
+    const e = agents[id];
+    if (!e) continue;
+    const rest = (e.permissions ?? []).filter((r: PermissionRule) => !GIT_APPROVAL_RULES.some((g) => same(g, r)));
+    if (rest.length) e.permissions = rest;
+    else delete e.permissions;
+    if (!Object.keys(e).length) delete agents[id];
+  }
+  for (const a of c.agents) agents[a.id] = agentEntry(a, guard);
+  // Built-in agents (build allows tools by default) load their rules after the global
+  // ones; a same-id entry merges and its rules are appended, so add ours there too.
+  const guarded: string[] = [];
+  if (guard.length) {
+    for (const b of BUILTIN_AGENTS) {
+      if (c.agents.some((a) => a.id === b.id)) continue;
+      const e = (agents[b.id] ??= {});
+      e.permissions = [...(e.permissions ?? []), ...guard];
+      guarded.push(b.id);
+    }
+  }
   oc.agents = agents;
   const commands: Record<string, unknown> = { ...(oc.commands ?? {}) };
   for (const n of prev.commands) delete commands[n];
@@ -189,7 +220,7 @@ export function applyAgentConfig(c: AgentConfig, dir = opencodeConfigDir()): { w
 
   const manifest: Manifest = {
     files: Object.keys(files).sort(),
-    permissions: c.permissions,
+    permissions: ourPerms,
     mcp: Object.keys(c.mcp),
     agents: c.agents.map((a) => a.id),
     commands: c.commands.map((x) => x.name),
@@ -197,6 +228,7 @@ export function applyAgentConfig(c: AgentConfig, dir = opencodeConfigDir()): { w
     skillsRef: c.skills.length > 0,
     default_agent: c.default_agent ?? null,
     instructions: Boolean(ours),
+    guarded,
   };
   writeFileSync(mPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return { written: manifest.files };
@@ -228,6 +260,13 @@ export function loadLocalAgentConfig(opensessionDir: string): AgentConfig {
   const p = localAgentConfigPath(opensessionDir);
   if (!existsSync(p)) return emptyAgentConfig();
   return { ...emptyAgentConfig(), ...JSON.parse(readFileSync(p, "utf8")) };
+}
+
+/** First run of local mode: apply the default setup (git approval on) once, so the
+ *  defaults hold before anyone opens Agent setup. A saved setup is left as it is. */
+export function ensureLocalAgentDefaults(opensessionDir: string, ocDir = opencodeConfigDir()): void {
+  if (existsSync(localAgentConfigPath(opensessionDir))) return;
+  saveLocalAgentConfig(opensessionDir, emptyAgentConfig(), ocDir);
 }
 
 export function saveLocalAgentConfig(opensessionDir: string, c: AgentConfig, ocDir = opencodeConfigDir()): AgentConfig {

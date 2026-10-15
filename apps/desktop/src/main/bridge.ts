@@ -5,7 +5,17 @@ export interface LocalStatus {
   error: string | null;
 }
 
-import type { AgentConfig, AgentConfigResponse } from "@opensession/api-client";
+export interface CloudStatus {
+  signedIn: boolean;
+  /** OpenSession user id once checked with the gateway. */
+  user: string | null;
+  /** The real gateway URL (terminal WebSockets connect there with a one-time ticket). */
+  gatewayUrl: string;
+  webUrl: string;
+}
+
+import type { AgentConfig, AgentConfigResponse, CiChecks, OutgoingChanges } from "@opensession/api-client";
+export type { OutgoingChanges };
 
 export interface DesktopBridge {
   status(): Promise<LocalStatus>;
@@ -20,4 +30,14 @@ export interface DesktopBridge {
   gitPush(): Promise<{ branch: string }>;
   /** Opens GitHub's "compare & pull request" page for the current branch. */
   gitPullRequest(title: string, body: string): Promise<{ url: string }>;
+  gitCommit(message: string): Promise<{ committed: boolean; head: string | null }>;
+  gitOutgoing(): Promise<OutgoingChanges>;
+  /** CI for the open folder's branch, through the cloud account (needs sign-in). */
+  gitChecks(): Promise<CiChecks>;
+  /** Cloud account: browser sign-in; the token stays in the main process. */
+  cloudStatus(): Promise<CloudStatus>;
+  cloudLogin(): Promise<CloudStatus>;
+  cloudLogout(): Promise<CloudStatus>;
+  /** OS notification. */
+  notify(title: string, body: string): Promise<void>;
 }

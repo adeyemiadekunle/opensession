@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 import { ApiError, CloudClient, LocalClient } from "@opensession/api-client";
 import { emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
-import { loadLocalAgentConfig, saveLocalAgentConfig, startLocalServer } from "@opensession/local-runner";
+import { ensureLocalAgentDefaults, loadLocalAgentConfig, saveLocalAgentConfig, startLocalServer } from "@opensession/local-runner";
 import { configDir, loadConfig, saveConfig } from "./config";
 import { handoffToCloud, handoffToLocal, systemGit } from "./handoff";
 import { browserLogin, openBrowser } from "./login";
@@ -388,6 +388,7 @@ gitCmd
 // ---- local mode ---------------------------------------------------------------------
 
 async function withLocal<T>(dir: string, f: (c: LocalClient) => Promise<T>): Promise<T> {
+  ensureLocalAgentDefaults(configDir()); // git approval on from the first run
   const srv = await startLocalServer({ directory: dir });
   try {
     return await f(new LocalClient({ baseUrl: srv.url, password: srv.password, directory: dir }));
@@ -403,6 +404,7 @@ local
   .option("-C, --dir <folder>", "project folder", ".")
   .action(async (o) => {
     const dir = resolve(o.dir);
+    ensureLocalAgentDefaults(configDir());
     const srv = await startLocalServer({ directory: dir });
     console.log(`OpenCode is running for ${dir}`);
     console.log(`  URL:      ${srv.url}`);

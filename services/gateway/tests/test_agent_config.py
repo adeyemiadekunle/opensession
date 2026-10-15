@@ -58,10 +58,20 @@ def test_render_files_matches_opencode_v2_layout():
         "mode": "subagent",
         "system": "You review code. Do not edit.",
         "model": "anthropic/claude-sonnet-4-5#high",
-        "permissions": [{"action": "edit", "resource": "*", "effect": "deny"}],
+        "permissions": [{"action": "edit", "resource": "*", "effect": "deny"}, *agentconfig.GIT_APPROVAL_RULES],
     }
     assert oc["commands"]["review"] == {"template": "Review $ARGUMENTS.", "description": "Review a file", "agent": "reviewer"}
-    assert oc["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}]
+    # The user's rules, then git approval last: OpenCode uses the last matching rule.
+    assert oc["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}, *agentconfig.GIT_APPROVAL_RULES]
+    assert {"action": "shell", "resource": "git push *", "effect": "ask"} in oc["permissions"]
+    allow_all = AgentConfig(permissions=[{"action": "shell", "resource": "*", "effect": "allow"}])
+    assert json.loads(agentconfig.render_files(allow_all)["opencode.json"])["permissions"][-1]["resource"] == "git push *"
+    # Built-in agents (build allows tools by default) get the rules appended as well.
+    assert oc["agents"]["build"] == {"permissions": agentconfig.GIT_APPROVAL_RULES}
+    off = json.loads(agentconfig.render_files(AgentConfig.model_validate({**FULL, "git_approval": False}))["opencode.json"])
+    assert "build" not in off["agents"]
+    assert off["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}]
+    assert off["agents"]["reviewer"]["permissions"] == [{"action": "edit", "resource": "*", "effect": "deny"}]
     assert oc["mcp"]["servers"]["docs"]["oauth"] is False  # header auth in sandboxes
     assert oc["mcp"]["servers"]["fs"]["command"][0] == "npx"
     assert "headers" not in oc["mcp"]["servers"]["fs"]
@@ -135,7 +145,9 @@ def test_entrypoint_applies_bundle_and_removes_old_files(tmp_path):
     apply({"skills": [{"id": "other", "description": "d", "body": "b"}]})
     assert not (cfgdir / "opensession-skills/git-release").exists()
     assert not (cfgdir / "AGENTS.md").exists()
-    assert "agents" not in json.loads((cfgdir / "opencode.json").read_text())
+    agents = json.loads((cfgdir / "opencode.json").read_text())["agents"]
+    assert "reviewer" not in agents  # removed; only the built-ins' git approval rules remain
+    assert set(agents) == {b["id"] for b in agentconfig.BUILTIN_AGENTS}
     assert (cfgdir / "opensession-skills/other/SKILL.md").exists()
     assert (cfgdir / "skills/users-own/SKILL.md").read_text() == "mine"
 
@@ -175,7 +187,9 @@ def test_agent_config_routes_and_sandbox_rebuild(tmp_path):
         assert r["config"]["skills"] == [] and any(t["id"] == "shell" for t in r["builtin_tools"])
         assert c.get("/p/default/api/health", headers=h).status_code == 200
         (first,) = docker.containers.by_name.values()
-        assert not getattr(first, "archives", [])  # no setup yet: nothing copied in
+        (_, data), = first.archives  # no setup saved yet: the defaults (git approval) are applied
+        default_oc = tarfile.open(fileobj=io.BytesIO(data)).extractfile("incoming/opensession-config/opencode.json").read()
+        assert json.loads(default_oc)["permissions"] == agentconfig.GIT_APPROVAL_RULES
 
         assert c.put("/secrets/DOCS_TOKEN", json={"value": "tok-xyz"}, headers=h).status_code == 200
         assert c.get("/secrets", headers=h).json()[0]["name"] == "DOCS_TOKEN"
