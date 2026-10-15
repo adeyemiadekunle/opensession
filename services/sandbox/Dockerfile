@@ -1,11 +1,13 @@
 # Sandbox image: OpenCode V2 server + common toolchains, running as a non-root user.
 #
 # Build (from the repo root):
-#   docker build -t opencode-sandbox:latest --build-arg OPENCODE_VERSION=2.0.0 sandbox/
+#   docker build -t opencode-sandbox:latest services/sandbox
 #
 # OpenCode V2 is installed with its official installer (https://opencode.ai/v2/install),
-# as the agent user. Re-run scripts/check after changing OPENCODE_VERSION: the V2
-# HTTP API is new and still changing.
+# as the agent user, at exactly OPENCODE_VERSION: the build fails rather than install
+# another release, since the V2 HTTP API is still changing. The version is approved in
+# /opencode-version.json and changes only through the update check
+# (docs/OPENCODE-UPDATES.md, scripts/opencode/bump.py).
 
 FROM node:22-bookworm-slim
 
@@ -40,12 +42,13 @@ RUN mkdir -p /home/agent/.state/data /home/agent/.state/config \
 
 ARG OPENCODE_VERSION=2.0.0
 RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/oc-install.sh \
- && (bash /tmp/oc-install.sh --version "${OPENCODE_VERSION}" || bash /tmp/oc-install.sh) \
+ && bash /tmp/oc-install.sh --version "${OPENCODE_VERSION}" \
  && mkdir -p /home/agent/.local/bin \
  && OC="$(command -v opencode || find /home/agent -type f -name opencode -perm -u+x | head -n1)" \
  && test -n "$OC" \
  && ln -sf "$OC" /home/agent/.local/bin/opencode \
- && /home/agent/.local/bin/opencode --version \
+ && got="$(/home/agent/.local/bin/opencode --version | awk 'END { print $NF }')" && got="${got#v}" \
+ && { [ "$got" = "${OPENCODE_VERSION}" ] || { echo "installed OpenCode $got, expected ${OPENCODE_VERSION}" >&2; exit 1; }; } \
  && rm /tmp/oc-install.sh
 ENV PATH=/home/agent/.local/bin:/home/agent/.opencode/bin:$PATH
 

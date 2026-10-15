@@ -91,6 +91,12 @@ gateway, Postgres, egress proxy, sandboxes) on one Ubuntu VPS behind Dokploy's
 HTTPS: `docker-compose.dokploy.yml`, plus `scripts/vps/setup-host.sh` once for
 gVisor and Docker's network pools.
 
+### OpenCode versions
+
+OpenSession uses exactly one tested OpenCode release (`opencode-version.json`);
+newer ones are checked weekly and approved by pull request. See
+[docs/OPENCODE-UPDATES.md](docs/OPENCODE-UPDATES.md).
+
 ### Desktop installers
 
 `pnpm --filter @opensession/desktop dist` builds an installer for the current OS into

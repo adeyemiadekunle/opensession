@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from opensession.e2b_provider import DIGEST_FILE, ENV_FILE, E2BProvider, e2b_domains
 from opensession.egress import EgressRules
 from opensession.gateway import create_app
+from opensession.opencode_version import SUPPORTED_OPENCODE_VERSIONS
 from opensession.orchestrator import SandboxManager
 from opensession.provider import SandboxConfig, SandboxError
 
@@ -135,7 +136,7 @@ def health_transport(seen):
         seen.append((request.url.host, request.headers.get("authorization")))
         if request.url.path == "/api/session/active":
             return httpx.Response(200, json={"data": {}})  # nothing working: idle
-        return httpx.Response(200, json={"healthy": True})
+        return httpx.Response(200, json={"healthy": True, "version": SUPPORTED_OPENCODE_VERSIONS[0]})
 
     return httpx.MockTransport(handler)
 

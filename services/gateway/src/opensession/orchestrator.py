@@ -61,6 +61,7 @@ from .provider import (  # re-exported: the gateway and tests import them from h
     env_digest,
     make_provider,
 )
+from .opencode_version import supported_versions, version_problem
 from .docker_provider import APIError, LABEL, NotFound  # re-exported for tests
 
 __all__ = [
@@ -114,6 +115,8 @@ class SandboxManager:
         # the gateway reads them from its database). None values mean "use the default".
         self.limits: Callable[[str], dict] = lambda user: {}
         self._user_locks: dict[str, asyncio.Lock] = {}
+        # OpenCode versions sandboxes may run (None: any); see opencode_version.py.
+        self.opencode_versions = supported_versions()
 
     # ---- identity -----------------------------------------------------------
 
@@ -247,6 +250,14 @@ class SandboxManager:
                 try:
                     r = await client.get("/api/health", timeout=3.0)
                     if r.status_code == 200:
+                        try:
+                            reported = (r.json() or {}).get("version")
+                        except ValueError:
+                            reported = None
+                        problem = version_problem(reported, self.opencode_versions)
+                        if problem:
+                            await client.aclose()
+                            raise SandboxStartError(problem)
                         now = time.monotonic()
                         return _Entry(client, ep.url, ep.password, now, now, ref=ref)
                     last = f"HTTP {r.status_code} from /api/health"

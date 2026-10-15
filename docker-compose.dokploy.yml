@@ -24,6 +24,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # The image sandbox-image builds, tagged with its OpenCode version.
+      SANDBOX_IMAGE: opencode-sandbox:${OPENCODE_VERSION:-2.0.0}
       SANDBOX_GATEWAY_CONTAINER: self
       SANDBOX_EGRESS_PROXY: compose:egress
       EGRESS_CONF_DIR: /egress-conf
@@ -53,7 +55,7 @@ services:
       context: services/sandbox
       args:
         OPENCODE_VERSION: ${OPENCODE_VERSION:-2.0.0}
-    image: ${SANDBOX_IMAGE:-opencode-sandbox:latest}
+    image: opencode-sandbox:${OPENCODE_VERSION:-2.0.0}
     entrypoint: ["true"]
     restart: "no"
 

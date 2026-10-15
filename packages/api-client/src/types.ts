@@ -338,3 +338,21 @@ export function skillMentions(text: string, known: string[]): { id: string; ment
   }
   return out;
 }
+
+/** OpenCode releases OpenSession is tested with (kept in sync with
+ *  /opencode-version.json by scripts/opencode/bump.py). OpenCode's V2 HTTP API is
+ *  still experimental, so other versions are refused rather than half-working. */
+export const SUPPORTED_OPENCODE_VERSIONS: readonly string[] = ["2.0.0"];
+
+/** Why an OpenCode version may not be used, or null if it may. `allowed` null: any. */
+export function opencodeVersionProblem(reported: string | null | undefined, allowed: readonly string[] | null = SUPPORTED_OPENCODE_VERSIONS): string | null {
+  if (allowed === null) return null;
+  const v = (reported ?? "").trim().replace(/^v/, "");
+  if (!v) return `OpenCode did not report its version; OpenSession works with OpenCode ${allowed.join(", ")}`;
+  if (!allowed.includes(v))
+    return (
+      `OpenCode ${v} is installed, but OpenSession works with OpenCode ${allowed.join(", ")}. ` +
+      `Install it with: curl -fsSL https://opencode.ai/v2/install | bash -s -- --version ${allowed[allowed.length - 1]}`
+    );
+  return null;
+}

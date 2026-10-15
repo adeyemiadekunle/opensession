@@ -5,7 +5,10 @@ import os
 
 import httpx
 
+from opensession.opencode_version import SUPPORTED_OPENCODE_VERSIONS
 from opensession.orchestrator import NotFound, SandboxConfig, SandboxManager
+
+OPENCODE = SUPPORTED_OPENCODE_VERSIONS[0]  # the fake sandboxes run an approved release
 
 BODIES: list[tuple[str, bytes]] = []  # request bodies seen by the fake sandboxes
 BUSY_HOSTS: set[str] = set()  # sandbox IPs whose OpenCode reports a session still working
@@ -224,7 +227,7 @@ def sandbox_transport(seen):
             busy = request.url.host in BUSY_HOSTS
             return httpx.Response(200, json={"data": {"ses_1": {"status": "busy"}} if busy else {}})
         if request.url.path == "/api/health":
-            return httpx.Response(200, json={"healthy": True, "host": request.url.host})
+            return httpx.Response(200, json={"healthy": True, "version": OPENCODE, "host": request.url.host})
         if request.url.path == "/api/session" and request.method == "POST":
             return httpx.Response(200, json={"data": {"id": "ses" + request.url.host.replace(".", "x")}})
         if request.url.path.endswith("/prompt"):

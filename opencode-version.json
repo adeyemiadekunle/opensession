@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "supported": [
+    "2.0.0"
+  ],
+  "note": "The OpenCode release OpenSession is tested with. Change it only with scripts/opencode/bump.py, after the update check passes (.github/workflows/opencode-update.yml)."
+}
