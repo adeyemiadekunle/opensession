@@ -5,6 +5,7 @@ import { ChecksView } from "./Checks";
 import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { cn } from "./lib/utils";
+import { EDITOR_DEFAULTS, PREF, usePref, type EditorPrefs } from "./prefs";
 
 interface DiffLine {
   kind: "add" | "del" | "ctx" | "hunk" | "meta";
@@ -104,6 +105,7 @@ export function ReviewView({
   const [result, setResult] = useState<{ text: string; url?: string | null } | null>(null);
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
   const [layout, setLayout] = useState<"unified" | "split">("unified");
+  const [editor] = usePref<EditorPrefs>(PREF.editor, EDITOR_DEFAULTS);
 
   const files = diff.data ?? [];
   const included = files.filter((f) => !excluded.has(f.file));
@@ -264,7 +266,7 @@ export function ReviewView({
                   ))}
                 </span>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto py-2 font-mono text-[12.5px] leading-[1.75]">
+              <div className="min-h-0 flex-1 overflow-auto py-2 font-mono leading-[1.75]" style={{ fontSize: editor.fontSize + 0.5 }}>
                 {layout === "split"
                   ? splitRows(lines).map((r, i) =>
                       r.full ? (

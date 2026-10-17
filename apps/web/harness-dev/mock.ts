@@ -74,6 +74,29 @@ const handlers: Record<string, unknown> = {
     /* no live events in the harness */
   },
   createSession: async () => ({ id: "s-new", title: "" }),
+  // account and settings
+  me: async () => ({ user_id: "user_adeyemi", via: "clerk" }),
+  providers: async () => [
+    { id: "anthropic", env_var: "ANTHROPIC_API_KEY" },
+    { id: "openai", env_var: "OPENAI_API_KEY" },
+  ],
+  listKeys: async () => [{ provider: "anthropic", last4: "x9Qa", updated_at: now / 1000 - 86400 }],
+  egressDomains: async () => ({ global: ["github.com", "registry.npmjs.org", "pypi.org"], user: ["api.stripe.com"], enforced: true }),
+  listTokens: async () => [{ id: "t1", name: "work laptop", created_at: now / 1000 - 864000, last_used_at: now / 1000 - 3600 }],
+  github: async () => ({ configured: true, installations: [{ installation_id: 1, account: "adeyemiadekunle" }] }),
+  githubRepos: async () => [],
+  limits: async () => ({ max_running: 10, disk_mb: 2048, idle_timeout_seconds: 1800, running: ["opensession"] }),
+  workspaceStatus: async () => ({ state: "running", busy: false, disk_mb: 1860, disk_limit_mb: 2048, sleeps_in: 1500, idle_timeout_seconds: 1800 }),
+  stopWorkspace: async () => undefined,
+  connectKey: async () => undefined,
+  agentConfigStore: () => {
+    let config: Record<string, unknown> = { git_approval: true, agents: [], skills: [], commands: [] };
+    return {
+      scope: "cloud",
+      get: async () => ({ config }),
+      save: async (c: Record<string, unknown>) => ((config = c), { config }),
+    };
+  },
   setModel: reply,
   setAgent: reply,
   prompt: reply,

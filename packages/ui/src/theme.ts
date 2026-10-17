@@ -1,6 +1,9 @@
 import { storageGet, storageSet } from "./hooks";
+import { PREF, readPref } from "./prefs";
 
 export type Theme = "light" | "dark" | "system";
+export type Accent = "blue" | "clay" | "teal" | "amber";
+export type CodeFont = "jetbrains" | "system";
 
 const THEME_KEY = "opensession.theme";
 
@@ -22,7 +25,20 @@ function applyTheme(t: Theme) {
   else root.dataset.theme = t;
 }
 
-/** Call once before the first render so the saved theme shows without a flash. */
+/** Accent color and code font, from the saved preferences (styles.css maps the attributes). */
+export function applyAppearance() {
+  const root = globalThis.document?.documentElement;
+  if (!root) return;
+  const accent = readPref<Accent>(PREF.accent, "blue");
+  if (accent === "blue") delete root.dataset.accent;
+  else root.dataset.accent = accent;
+  const font = readPref<CodeFont>(PREF.codeFont, "jetbrains");
+  if (font === "jetbrains") delete root.dataset.codeFont;
+  else root.dataset.codeFont = font;
+}
+
+/** Call once before the first render so the saved look shows without a flash. */
 export function initTheme() {
   applyTheme(getTheme());
+  applyAppearance();
 }

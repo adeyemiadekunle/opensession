@@ -28,6 +28,8 @@ export interface CloudAppProps {
   account?: CloudAccount;
   /** Sidebar sections after the cloud sessions (desktop: This computer). */
   sectionsAfter?: SidebarSection[];
+  /** Desktop app (shows its own preferences in Settings). */
+  desktop?: boolean;
   /** Called when CI on the open project's branch changes (desktop: OS notification). */
   onCi?: (messages: string[], ci: CiChecks) => void;
 }
@@ -38,7 +40,7 @@ const PROJECT_KEY = "opensession.project";
  *  The same component runs in the web app and in the desktop app's cloud mode, so
  *  both show the same projects and sessions. The workspace fills the window (design);
  *  projects are in its sidebar and the other pages are in the account menu. */
-export function CloudApp({ client, path, go, account, sectionsAfter, onCi }: CloudAppProps) {
+export function CloudApp({ client, path, go, account, sectionsAfter, desktop, onCi }: CloudAppProps) {
   const store = useMemo(() => client.agentConfigStore(), [client]);
   const secrets = useMemo<SecretsApi>(
     () => ({ list: () => client.listSecrets(), set: (n, v) => client.setSecret(n, v), remove: (n) => client.deleteSecret(n) }),
@@ -118,7 +120,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, onCi }: Clo
     ...(account?.items ?? []),
   ];
 
-  if (path === "/settings") return <CloudSettings client={client} onBack={back} />;
+  if (path === "/settings") return <CloudSettings client={client} project={projectClient} onBack={back} desktop={desktop} />;
   if (path === "/projects" || path === "/agent") {
     return (
       <div className="flex h-full min-h-0 flex-col bg-background">
