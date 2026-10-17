@@ -164,6 +164,7 @@
   .os-add { color: var(--os-add); }
   .os-del { color: var(--os-del); }
 
+  .os-settings { max-width: 760px; margin: 0 auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 16px; }
   .os-card { background: var(--os-panel); border: 1px solid var(--os-border); border-radius: var(--os-radius); padding: 16px 18px; }
   .os-card h2 { margin: 0 0 4px; font-size: 16px; }
   .os-card p { margin: 0 0 10px; }
