@@ -76,7 +76,11 @@ createRoot(document.getElementById("root")!).render(
         git={gitActions}
         moveToCloud={moveToCloud}
         terminal={terminal}
-        preview={localPreview("harness.preview")}
+        preview={
+          // ?live: the Browser card on a real Chromium through services/sandbox/browser-view.mjs
+          // (run it locally with OPENSESSION_BROWSER_VIEW_NO_AUTH=1).
+          q.has("live") ? { ...localPreview("harness.preview"), live: { socketUrl: async () => "ws://127.0.0.1:9223/cdp" } } : localPreview("harness.preview")
+        }
         allowDomain={async () => undefined}
         projectName="opensession"
         sessionsTitle="This computer"

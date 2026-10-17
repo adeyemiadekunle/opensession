@@ -192,6 +192,15 @@ export class CloudClient extends OpenCodeClient {
   workspaceStatus(): Promise<WorkspaceStatus> {
     return this.http.get("/workspace");
   }
+  /** WebSocket URL (single-use ticket, 60 s) to the DevTools Protocol of this project's sandbox browser. */
+  async browserSocketUrl(): Promise<string> {
+    const { ticket } = await this.http.post("/browser/ticket");
+    const base = this.o.socketBaseUrl ?? this.o.gatewayUrl;
+    const url = new URL("browser/connect", base.replace(/\/?$/, "/"));
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("ticket", ticket);
+    return url.toString();
+  }
   /** A URL that shows a port of this project's sandbox (its dev server) in the Browser card; valid for an hour. */
   preview(port: number): Promise<{ url: string; port: number; expires_in: number }> {
     return this.http.post("/preview", { json: { port } });

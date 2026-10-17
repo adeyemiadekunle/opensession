@@ -84,6 +84,16 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         const { url } = await projectClient.preview(p.port);
         return url + p.path.replace(/^\//, "");
       },
+      live: {
+        socketUrl: () => projectClient.browserSocketUrl(),
+        // A sandbox localhost page opens through a preview link; other sites open as they are.
+        openOutside: async (url) => {
+          const u = new URL(url);
+          if (!/^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(u.hostname)) return /^https?:$/.test(u.protocol) ? url : null;
+          const { url: base } = await projectClient.preview(Number(u.port || 80));
+          return base + `${u.pathname}${u.search}`.replace(/^\//, "");
+        },
+      },
     }),
     [projectClient, project],
   );

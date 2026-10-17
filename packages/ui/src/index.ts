@@ -12,6 +12,8 @@ export { GithubCard, ProjectsPage } from "./Projects";
 export { TerminalPanel } from "./TerminalPanel";
 export { BrowserPanel, localPreview, parsePortTarget } from "./BrowserPanel";
 export type { PreviewApi } from "./BrowserPanel";
+export { LiveBrowser, addressToUrl } from "./LiveBrowser";
+export type { LiveBrowserApi } from "./LiveBrowser";
 export { SandboxGate } from "./SandboxGate";
 export { CloudApp } from "./CloudApp";
 export { CloudSessions } from "./CloudSessions";

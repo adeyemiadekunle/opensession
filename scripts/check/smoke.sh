@@ -117,6 +117,9 @@ NET=$(docker exec "$(sandbox_of alice)" sh -c 'printf "%s\n" "{\"jsonrpc\":\"2.0
 [[ "$NET" == *request_access* ]] && ok "network tool answers" || bad "network tool: $NET"
 BROWSER=$(docker exec "$(sandbox_of alice)" sh -c 'opensession-browser </dev/null >/dev/null 2>&1; curl -fs http://127.0.0.1:9222/json/version' || true)
 [[ "$BROWSER" == *Chrome* ]] && ok "Chromium starts in the sandbox" || bad "browser: $BROWSER $(docker exec "$(sandbox_of alice)" tail -c 600 /home/agent/.cache/browser.log 2>&1)"
+VIEW=$(docker exec "$(sandbox_of alice)" sh -c 'a=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9223/health); b=$(curl -s -o /dev/null -w "%{http_code}" -u "opencode:$OPENCODE_SERVER_PASSWORD" http://127.0.0.1:9223/health); echo "$a $b"')
+[[ "$VIEW" == "401 200" ]] && ok "browser view needs the sandbox password ($VIEW)" || bad "browser view: $VIEW $(docker exec "$(sandbox_of alice)" tail -c 400 /home/agent/.cache/browser-view.log 2>&1)"
+check "browser view ticket" 200 "$(api POST alice /browser/ticket)"
 check "secret stored" 200 "$(api PUT alice /secrets/DOCS_TOKEN '{"value":"smoke-value"}')"
 check "literal token in MCP refused" 422 "$(api PUT alice /agent-config '{"mcp":{"x":{"type":"remote","url":"https://x.dev","headers":{"Authorization":"Bearer sk-abcdefghijklmnopqrstuvwx"}}}}')"
 

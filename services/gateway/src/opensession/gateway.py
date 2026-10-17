@@ -82,6 +82,9 @@ WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 PtyId = Annotated[str, Path(pattern=r"^pty_[A-Za-z0-9]{1,80}$")]
 TERMINAL_TICKET_SECONDS = 60
+# Browser live view: the sandbox's browser-view server (services/sandbox/browser-view.mjs).
+BROWSER_VIEW_PORT = 9223
+BROWSER_TICKET = "browser"
 
 
 class PreviewCreate(BaseModel):
@@ -1053,30 +1056,73 @@ def create_app(
 
     @app.websocket("/terminals/{pty_id}/connect")
     async def terminal_socket(websocket: WebSocket, pty_id: str, ticket: str = "", cursor: int | None = None):
+        held = websocket.app.state.term_tickets.pop(ticket, None) if ticket else None
+        if not await socket_allowed(websocket, held) or held[2] != pty_id:
+            await websocket.close(code=4403)
+            return
+        path = f"/api/pty/{pty_id}/connect" + (f"?cursor={cursor}" if cursor is not None and cursor >= -1 else "")
+        await relay_socket(websocket, held[0], held[1], lambda entry, mgr: sandbox_ws_url(entry.url) + path)
+
+    # ---- browser live view ------------------------------------------------------------
+    #
+    # The Browser card's connection to the sandbox's Chromium (DevTools Protocol), through
+    # the sandbox's browser-view server (services/sandbox/browser-view.mjs), which checks
+    # the sandbox password. Same ticket scheme as terminals.
+
+    @app.post("/browser/ticket")
+    async def browser_ticket(request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        """A single-use ticket (valid 60 s) for opening the browser's live-view WebSocket."""
+        import secrets as _secrets
+        import time as _time
+
+        await get_client(request, ref)  # wakes the sandbox
+        tickets: dict = request.app.state.term_tickets
+        now = _time.monotonic()
+        for k in [k for k, v in tickets.items() if v[3] < now]:
+            tickets.pop(k, None)
+        ticket = _secrets.token_urlsafe(32)
+        tickets[ticket] = (ref[0], ref[1], BROWSER_TICKET, now + TERMINAL_TICKET_SECONDS)
+        return {"ticket": ticket, "expires_in": TERMINAL_TICKET_SECONDS}
+
+    @app.websocket("/browser/connect")
+    async def browser_socket(websocket: WebSocket, ticket: str = ""):
+        held = websocket.app.state.term_tickets.pop(ticket, None) if ticket else None
+        if not await socket_allowed(websocket, held) or held[2] != BROWSER_TICKET:
+            await websocket.close(code=4403)
+            return
+
+        def url(entry, mgr: SandboxManager) -> str:
+            return sandbox_ws_url(pv.port_url(entry.url, mgr.cfg.port, BROWSER_VIEW_PORT)) + "/cdp"
+
+        await relay_socket(websocket, held[0], held[1], url)
+
+    def sandbox_ws_url(http_url: str) -> str:
+        return http_url.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+
+    async def socket_allowed(websocket: WebSocket, held) -> bool:
+        """A ticket was issued, is unexpired, and the socket comes from an allowed origin."""
         import time as _time
 
         mgr: SandboxManager = websocket.app.state.sandboxes
         host = websocket.client.host if websocket.client else None
-        held = websocket.app.state.term_tickets.pop(ticket, None) if ticket else None
         origin = websocket.headers.get("origin")
-        if (
+        return not (
             mgr.is_sandbox_address(host)
             or held is None
-            or held[2] != pty_id
             or held[3] < _time.monotonic()
             or (origin and origins and origin not in origins)
-        ):
-            await websocket.close(code=4403)
-            return
-        user, ws_id = held[0], held[1]
+        )
+
+    async def relay_socket(websocket: WebSocket, user: str, ws_id: str, upstream_url) -> None:
+        """Relays frames both ways between the app and a WebSocket in the user's sandbox,
+        keeping the sandbox awake while connected."""
+        import time as _time
+
+        mgr: SandboxManager = websocket.app.state.sandboxes
         await websocket.accept()
         try:
             async with mgr.lease_entry(user, ws_id) as entry:  # stays awake while connected
-                url = entry.url.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
-                url += f"/api/pty/{pty_id}/connect"
-                if cursor is not None and cursor >= -1:
-                    url += f"?cursor={cursor}"
-                upstream = await websocket.app.state.ws_connect(url, mgr.auth_headers(entry))
+                upstream = await websocket.app.state.ws_connect(upstream_url(entry, mgr), mgr.auth_headers(entry))
                 try:
                     async def down():
                         async for msg in upstream:
