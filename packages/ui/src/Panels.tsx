@@ -1,13 +1,28 @@
 import { useMemo, useRef, useState } from "react";
 import type { DiffFile, FileEntry, OpenSessionClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
+import { Button } from "./components/ui/button";
 import { NamedIcon } from "./icons";
 import { EDITOR_DEFAULTS, PREF, usePref, type EditorPrefs } from "./prefs";
 import { cn } from "./lib/utils";
 
 /** Files card (design): its own header (tree toggle, open-file tabs, filter, close), the folder
  *  tree on the left and the open file with line numbers on the right. */
-export function FilesPanel({ client, refreshKey, onClose }: { client: OpenSessionClient; refreshKey: number; onClose?: () => void }) {
+export function FilesPanel({
+  client,
+  refreshKey,
+  onClose,
+  onExpand,
+  onDock,
+}: {
+  client: OpenSessionClient;
+  refreshKey: number;
+  onClose?: () => void;
+  /** Opens the card in full screen (design: stacked dock). */
+  onExpand?: () => void;
+  /** In full screen: puts it back in the dock. */
+  onDock?: () => void;
+}) {
   const [dir, setDir] = useState("");
   const [filter, setFilter] = useState("");
   const [tabs, setTabs] = useState<{ path: string; text: string }[]>([]);
@@ -102,6 +117,16 @@ export function FilesPanel({ client, refreshKey, onClose }: { client: OpenSessio
         >
           <NamedIcon name="search" className="size-[13px]" />
         </button>
+        {onExpand ? (
+          <button className={iconBtn} aria-label="Open files in full screen" title="Open in full screen" onClick={onExpand}>
+            <NamedIcon name="expand" className="size-[13px]" />
+          </button>
+        ) : null}
+        {onDock ? (
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px]" onClick={onDock}>
+            Dock right
+          </Button>
+        ) : null}
         {onClose ? (
           <button className={iconBtn} aria-label="Close files panel" onClick={onClose}>
             <NamedIcon name="close" className="size-[14px]" />

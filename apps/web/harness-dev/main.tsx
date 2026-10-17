@@ -9,6 +9,11 @@ if (q.has("dark")) document.documentElement.dataset.theme = "dark";
 if (q.has("light")) document.documentElement.dataset.theme = "light";
 const noop = () => undefined;
 const moveToCloud = q.has("move") ? async () => undefined : undefined;
+// ?term: a terminal whose socket never connects, to lay out the Terminal card.
+const term = { id: "pty_1", title: "bash", command: "bash", cwd: "/workspace", status: "running" as const, pid: 1 };
+const terminal = q.has("term")
+  ? { list: async () => [term], create: async () => term, resize: async () => undefined, close: async () => undefined, socketUrl: async () => "ws://127.0.0.1:9/" }
+  : undefined;
 
 const projects: SidebarSection = {
   id: "projects",
@@ -68,6 +73,7 @@ createRoot(document.getElementById("root")!).render(
         commands={[]}
         git={gitActions}
         moveToCloud={moveToCloud}
+        terminal={terminal}
         projectName="opensession"
         sessionsTitle="This computer"
         sectionsBefore={[projects]}

@@ -483,13 +483,17 @@ export function Workspace({
     if (active) await client.setAgent(active, a).catch((e) => setErr(errText(e)));
   };
 
-  const togglePanel = (id: DockPanelId) =>
+  // A dock card opened in full screen takes the conversation's place until it is docked again.
+  const [full, setFull] = useState<DockPanelId | null>(null);
+  const togglePanel = (id: DockPanelId) => {
+    if (full === id) setFull(null);
     setDock((d) => {
       const open = d.stack.includes(id);
       const heights = { ...d.heights };
       delete heights[id];
       return { ...d, heights, stack: open ? d.stack.filter((x) => x !== id) : [...d.stack, id] };
     });
+  };
 
   const providers = [...new Set(modelList.map((m) => m.providerID))];
   const slash = text.startsWith("/") && !text.includes(" ") ? text.slice(1).toLowerCase() : null;
@@ -533,7 +537,24 @@ export function Workspace({
   }, [messages, chosen]);
   const togglable = (["terminal", "changes", "git", "files"] as DockPanelId[]).filter((id) => id !== "terminal" || terminal);
   // The terminal can be unavailable (no sandbox terminal), so hide its card rather than drop it from state.
-  const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => id !== "terminal" || terminal) };
+  const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => (id !== "terminal" || terminal) && id !== full) };
+
+  const panelBody = (id: DockPanelId, isFull = false) =>
+    id === "files" ? (
+      <FilesPanel
+        client={client}
+        refreshKey={refreshKey}
+        onClose={() => togglePanel("files")}
+        onExpand={isFull ? undefined : () => setFull("files")}
+        onDock={isFull ? () => setFull(null) : undefined}
+      />
+    ) : id === "changes" ? (
+      <DiffPanel client={client} refreshKey={refreshKey} />
+    ) : id === "terminal" && terminal ? (
+      <TerminalPanel api={terminal} />
+    ) : (
+      <GitPanel client={client} actions={git} refreshKey={refreshKey} />
+    );
 
   const toggleButton = (id: DockPanelId, pressed: boolean, onClick: () => void) => (
     <Button
@@ -688,7 +709,35 @@ export function Workspace({
           </aside>
         ) : null}
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {full ? (
+          <section
+            aria-label={`${DOCK_TITLES[full]}, full screen`}
+            className={cn(
+              "m-2.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-sidebar",
+              full === "terminal" && "bg-code",
+            )}
+          >
+            {full === "files" ? null : (
+              <header className="flex h-[42px] shrink-0 items-center gap-2 border-b border-border pl-3.5 pr-1.5 text-[13.5px] font-semibold">
+                <span className="min-w-0 flex-1 truncate">{DOCK_TITLES[full]}</span>
+                <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={() => setFull(null)}>
+                  Dock right
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-[26px] text-base text-faint"
+                  aria-label={`Close ${DOCK_TITLES[full]} panel`}
+                  onClick={() => togglePanel(full)}
+                >
+                  ×
+                </Button>
+              </header>
+            )}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{panelBody(full, true)}</div>
+          </section>
+        ) : null}
+        <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")}>
           {conn.lost && active ? (
             <div role="alert" className="mx-10 mt-3 flex max-w-[640px] items-center gap-3 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
               <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
@@ -837,19 +886,20 @@ export function Workspace({
                 >
                   <NamedIcon name="expand" className="size-[13px]" />
                 </Button>
-              ) : null
-            }
-            renderBody={(id) =>
-              id === "files" ? (
-                <FilesPanel client={client} refreshKey={refreshKey} onClose={() => togglePanel("files")} />
-              ) : id === "changes" ? (
-                <DiffPanel client={client} refreshKey={refreshKey} />
-              ) : id === "terminal" && terminal ? (
-                <TerminalPanel api={terminal} />
               ) : (
-                <GitPanel client={client} actions={git} refreshKey={refreshKey} />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-[26px] text-faint"
+                  aria-label={`Open ${DOCK_TITLES[id].toLowerCase()} in full screen`}
+                  title="Open in full screen"
+                  onClick={() => setFull(id)}
+                >
+                  <NamedIcon name="expand" className="size-[13px]" />
+                </Button>
               )
             }
+            renderBody={(id) => panelBody(id)}
           />
         ) : null}
       </div>
