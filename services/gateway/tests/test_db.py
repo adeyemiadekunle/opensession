@@ -8,6 +8,7 @@ import pytest
 from opensession import db as dbmod
 from opensession.__main__ import TABLES, migrate
 from opensession.keystore import KeyStore, SCHEMA as KEY_SCHEMA
+from opensession.modelproxy import UsageStore, SCHEMA as MODEL_SCHEMA
 from opensession.userstore import UserStore, SCHEMA as USER_SCHEMA
 
 MASTER = "k1:" + "A" * 43 + "="
@@ -18,6 +19,7 @@ def _clean(spec: str) -> None:
     d = dbmod.Database(spec)
     d.script(USER_SCHEMA)
     d.script(KEY_SCHEMA)
+    d.script(MODEL_SCHEMA)
     with d:
         for t in TABLES:
             d.execute(f"DELETE FROM {t}")
@@ -74,6 +76,21 @@ def test_keystore_bytes_roundtrip(spec):
     ks.put_secret("u1", "DB_PASSWORD", "hunter2")
     assert ks.secrets_env_for("u1") == {"DB_PASSWORD": "hunter2"}
     ks.close()
+
+
+def test_model_usage_roundtrip(spec):
+    u = UsageStore(spec)
+    u.add("u1", "2026-10-17", 1, 100, 10)
+    u.add("u1", "2026-10-17", 1, 50, 5)  # adds up
+    u.add("u2", "2026-10-17", 1, 1000, 1)
+    assert u.day("u1", "2026-10-17") == {"requests": 2, "input_tokens": 150, "output_tokens": 15}
+    assert u.day("u1", "2026-10-18") == {"requests": 0, "input_tokens": 0, "output_tokens": 0}
+    assert [r["user"] for r in u.top("2026-10-17")] == ["u2", "u1"]
+    assert u.get_limit("u1") is None
+    u.set_limit("u1", 10**10)  # beyond 32 bits
+    assert u.get_limit("u1") == 10**10
+    u.set_limit("u1", None)
+    assert u.get_limit("u1") is None
 
 
 def test_migrate_sqlite_to_other(spec, tmp_path):
