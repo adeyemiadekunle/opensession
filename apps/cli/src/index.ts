@@ -10,10 +10,13 @@ import { browserLogin, openBrowser } from "./login";
 import { pickModel, runPrompt } from "./run";
 import type { OpenSessionClient } from "@opensession/api-client";
 
+// Set by tsup.config.ts (package.json version, or OPENSESSION_VERSION for a release).
+declare const __CLI_VERSION__: string;
+
 const program = new Command()
   .name("opensession")
   .description("OpenSession: an AI coding agent with your own model keys, in the cloud or on this computer.")
-  .version("0.1.0")
+  .version(typeof __CLI_VERSION__ === "string" ? __CLI_VERSION__ : "0.0.0-dev")
   .option("-p, --project <id>", "cloud project to use (default: $OPENSESSION_PROJECT or your default workspace)");
 
 function cloud(): CloudClient {

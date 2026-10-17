@@ -1,0 +1,155 @@
+name: Release
+
+# Builds the desktop app (macOS dmg/zip, Windows installer, Linux AppImage/deb) and the
+# CLI (one file, opensession.mjs).
+# - Run it by hand (Actions > Release > Run workflow) to get them as build artifacts.
+# - Push a tag like v0.2.0 to publish a GitHub Release with all of them, under stable
+#   names (OpenSession-mac-arm64.dmg, OpenSession-win-x64.exe, ...), so
+#   https://github.com/<owner>/<repo>/releases/latest/download/<file> is always the
+#   newest: the web app's Download page and the CLI install scripts use those links.
+#   The tag sets the version. With the NPM_TOKEN secret, the CLI is also published to
+#   npm as opensession-cli.
+# Needs the repository variables OPENSESSION_WEB_URL and OPENSESSION_GATEWAY_URL: the
+# servers the apps talk to are compiled in (scripts/build-desktop.mjs).
+# Code signing is used only when the secrets exist; without them the builds are
+# unsigned (macOS Gatekeeper and Windows SmartScreen warn on first launch):
+#   macOS:   MAC_CSC_LINK (base64 .p12 "Developer ID Application"), MAC_CSC_KEY_PASSWORD,
+#            APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID (notarization)
+#   Windows: WIN_CSC_LINK (base64 .pfx), WIN_CSC_KEY_PASSWORD
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release and upload to it
+  id-token: write # npm provenance
+
+env:
+  OPENSESSION_WEB_URL: ${{ vars.OPENSESSION_WEB_URL }}
+  OPENSESSION_GATEWAY_URL: ${{ vars.OPENSESSION_GATEWAY_URL }}
+
+jobs:
+  # One job creates the release, so the builds below only upload to it.
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check settings
+        run: |
+          if [[ -z "$OPENSESSION_WEB_URL" || -z "$OPENSESSION_GATEWAY_URL" ]]; then
+            echo "::error::Set the OPENSESSION_WEB_URL and OPENSESSION_GATEWAY_URL repository variables (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
+      - name: Create the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "OpenSession $GITHUB_REF_NAME" --generate-notes
+
+  desktop:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Build and package
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" && -n "$MAC_CSC_LINK" ]]; then
+            export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+          elif [[ "$RUNNER_OS" == "Windows" && -n "$WIN_CSC_LINK" ]]; then
+            export CSC_LINK="$WIN_CSC_LINK" CSC_KEY_PASSWORD="$WIN_CSC_KEY_PASSWORD"
+          fi
+          args=()
+          [[ "$GITHUB_REF" == refs/tags/v* ]] && args+=(--version "${GITHUB_REF_NAME#v}")
+          node scripts/build-desktop.mjs "${args[@]}"
+
+      - name: Upload to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(apps/desktop/release/OpenSession-*.{dmg,zip,exe,AppImage,deb})
+          [[ ${#files[@]} -gt 0 ]] || { echo "::error::no installers were built"; exit 1; }
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensession-desktop-${{ runner.os }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  cli:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Build
+        run: |
+          version=$(node -p 'require("./apps/cli/package.json").version')
+          [[ "$GITHUB_REF" == refs/tags/v* ]] && version="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          pnpm install --frozen-lockfile
+          pnpm turbo run build --filter=@opensession/cli^...
+          OPENSESSION_VERSION="$version" pnpm --filter @opensession/cli build
+          mkdir -p out
+          cp apps/cli/dist/index.js out/opensession.mjs
+          cp apps/web/public/install.sh apps/web/public/install.ps1 out/
+          node out/opensession.mjs --version
+
+      - name: Upload to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" out/opensession.mjs out/install.sh out/install.ps1 --clobber
+
+      - name: Publish to npm (opensession-cli)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
+            echo "::notice::No NPM_TOKEN secret: the CLI is not published to npm (the install scripts still work)."
+            exit 0
+          fi
+          node scripts/pack-cli.mjs "$VERSION" out/npm
+          cd out/npm && npm publish --access public --provenance
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opensession-cli
+          path: out/
+          retention-days: 14

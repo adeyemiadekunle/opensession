@@ -121,6 +121,7 @@ console.log(`OpenSession desktop ${version} for ${process.platform}`);
 console.log(`  web app:  ${web}`);
 console.log(`  gateway:  ${gateway}`);
 
+const started = Date.now();
 const env = { ...process.env, OPENSESSION_WEB_URL: web, OPENSESSION_GATEWAY_URL: gateway };
 run("pnpm", ["install", "--frozen-lockfile"], { cwd: root, env });
 // Workspace packages first (cached by turbo), then the app itself, always fresh so the
@@ -145,8 +146,9 @@ if (args.flags.has("publish") && !process.env.GH_TOKEN) fail("--publish needs GH
 run("pnpm", ["exec", "electron-builder", ...builderArgs], { cwd: desktop, env: builderEnv });
 
 const out = join(desktop, "release");
+// Installers this build wrote (names are stable, e.g. OpenSession-linux-x86_64.AppImage).
 const files = existsSync(out)
-  ? readdirSync(out).filter((f) => /\.(dmg|zip|exe|AppImage|deb)$/.test(f) && f.includes(version))
+  ? readdirSync(out).filter((f) => /\.(dmg|zip|exe|AppImage|deb)$/.test(f) && statSync(join(out, f)).mtimeMs >= started)
   : [];
 console.log("\nDone.");
 if (args.flags.has("dir")) console.log(`Unpacked app in ${out}`);

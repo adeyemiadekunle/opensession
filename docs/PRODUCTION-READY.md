@@ -96,8 +96,32 @@ Build it with the same two addresses (it has them compiled in):
 pnpm desktop:build --web https://app.yourdomain.com --gateway https://api.yourdomain.com
 ```
 
-Or let the **Desktop app** GitHub workflow build macOS, Windows and Linux: set the
-repository variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL` first.
+Or let the **Release** GitHub workflow build macOS, Windows and Linux: set the
+repository variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL`
+(Settings > Secrets and variables > Actions > Variables), then push a version tag:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+That publishes a GitHub Release with the installers and the CLI. Your users then get
+them from **`https://app.yourdomain.com/download`**: it offers the installer for
+their computer and shows how to install the CLI. Add an `NPM_TOKEN` secret (an npm
+automation token) to also publish the CLI to npm as `opensession-cli`.
+
+## CLI
+
+Users install it from your web app (Node.js 20+; the build has your addresses):
+
+```bash
+curl -fsSL https://app.yourdomain.com/install.sh | sh        # macOS, Linux
+irm https://app.yourdomain.com/install.ps1 | iex             # Windows PowerShell
+```
+
+or from npm (`npm install -g opensession-cli`, then
+`opensession config --gateway https://api.yourdomain.com --web https://app.yourdomain.com`),
+and sign in with `opensession login`. The install scripts download the CLI from the
+latest release, so publish one (above) first.
 
 ## Go-live checklist
 
@@ -114,6 +138,8 @@ repository variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL` first.
 - [ ] Volume backups of `pg-data` are on in Dokploy (users, tokens, encrypted keys,
       projects).
 - [ ] `KEYSTORE_MASTER_KEYS` is saved somewhere outside the server.
+- [ ] A release is published (push a `v*` tag), so `/download` and the CLI install
+      scripts have something to download.
 - [ ] Optional: Prometheus scrapes `https://api.yourdomain.com/admin/metrics` with an
       admin's access token.
 

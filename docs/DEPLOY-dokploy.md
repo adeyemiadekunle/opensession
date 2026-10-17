@@ -179,9 +179,12 @@ pnpm desktop:build --web https://app.example.com --gateway https://api.example.c
 # or: pnpm desktop:build --env .env   (reads OPENSESSION_WEB_URL / VITE_GATEWAY_URL)
 ```
 
-Or let the **Desktop app** GitHub workflow build all three: set the repository
-variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL` first. See
-`scripts/build-desktop.mjs` for signing.
+Or let the **Release** GitHub workflow build all three and the CLI: set the
+repository variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL`, then push a
+`v*` tag. Users download them from `https://app.example.com/download`, and install
+the CLI with `curl -fsSL https://app.example.com/install.sh | sh` (Windows:
+`irm https://app.example.com/install.ps1 | iex`) or `npm install -g opensession-cli`.
+See `scripts/build-desktop.mjs` for signing.
 
 ## Day to day
 

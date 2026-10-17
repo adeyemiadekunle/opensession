@@ -9,9 +9,15 @@ export interface Config {
   defaultModel?: string; // "provider/model"
 }
 
+// Release builds compile in the deployment's addresses (tsup.config.ts, from
+// OPENSESSION_GATEWAY_URL / OPENSESSION_WEB_URL at build time); from source they're
+// localhost. `opensession config` and the same variables at run time override them.
+declare const __DEFAULT_GATEWAY_URL__: string;
+declare const __DEFAULT_WEB_URL__: string;
+
 export const DEFAULTS: Config = {
-  gatewayUrl: "http://localhost:8787",
-  webUrl: "http://localhost:5173",
+  gatewayUrl: typeof __DEFAULT_GATEWAY_URL__ === "string" ? __DEFAULT_GATEWAY_URL__ : "http://localhost:8787",
+  webUrl: typeof __DEFAULT_WEB_URL__ === "string" ? __DEFAULT_WEB_URL__ : "http://localhost:5173",
 };
 
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {

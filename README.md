@@ -92,15 +92,41 @@ gateway, Postgres, egress proxy, sandboxes) on one Ubuntu VPS behind Dokploy's
 HTTPS: `docker-compose.dokploy.yml`, plus `scripts/vps/setup-host.sh` once for
 gVisor and Docker's network pools.
 
-### Desktop installers
+### Releases: desktop installers and the CLI
 
-`pnpm --filter @opensession/desktop dist` builds an installer for the current OS into
-`apps/desktop/release/` (dmg/zip on macOS, nsis on Windows, AppImage/deb on Linux).
-The **Desktop app** GitHub workflow builds all three: run it from the Actions tab,
-or push a tag `desktop-vX.Y.Z` to attach the installers to a draft release. Builds
-are signed and notarized when the signing secrets are set (see the workflow file);
-otherwise they are unsigned and macOS/Windows warn on first launch. The desktop app
-uses the user's own OpenCode install (`curl -fsSL https://opencode.ai/v2/install | bash`).
+Push a version tag to publish everything as one GitHub Release:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The **Release** workflow (`.github/workflows/release.yml`) builds the desktop app on
+macOS, Windows and Linux and the CLI, and attaches them under stable names
+(`OpenSession-mac-arm64.dmg`, `OpenSession-win-x64.exe`,
+`OpenSession-linux-x86_64.AppImage`, `opensession.mjs`, the install scripts, ...), so
+`https://github.com/<owner>/<repo>/releases/latest/download/<file>` is always the
+newest. The web app's **Download** page (`/download`, public, also in the account
+menu) links to them. With an `NPM_TOKEN` secret the CLI is also published to npm as
+`opensession-cli`. It needs the repository variables `OPENSESSION_WEB_URL` and
+`OPENSESSION_GATEWAY_URL` (compiled into both apps). Builds are signed and notarized
+when the signing secrets are set (see the workflow file); otherwise macOS and Windows
+warn on first launch. Build locally with `pnpm desktop:build` (see
+`scripts/build-desktop.mjs`). Local mode needs OpenCode on the user's computer
+(`curl -fsSL https://opencode.ai/v2/install | bash`).
+
+### Install the CLI
+
+From your deployment (the build has its addresses; needs Node.js 20+):
+
+    curl -fsSL https://app.yourdomain.com/install.sh | sh        # macOS, Linux
+    irm https://app.yourdomain.com/install.ps1 | iex             # Windows PowerShell
+
+Or from npm, then point it at your servers:
+
+    npm install -g opensession-cli
+    opensession config --gateway https://api.yourdomain.com --web https://app.yourdomain.com
+
+From a checkout, `pnpm cli ...` runs it from source.
 
 ### CLI against the cloud
 
@@ -325,7 +351,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request:
   egress, per-user domains, the agent setup, sleep and resume (sessions kept), the
   per-user limit and the terminal. Run it yourself on any Linux/macOS Docker host.
 
-The **Desktop app** workflow (`.github/workflows/desktop.yml`) builds the installers.
+The **Release** workflow (`.github/workflows/release.yml`) builds the desktop
+installers and the CLI, and publishes them on a `v*` tag.
 
 ## Known gaps
 
