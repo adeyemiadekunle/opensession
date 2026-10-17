@@ -1,15 +1,17 @@
 import type { CiChecks, CloudClient } from "@opensession/api-client";
 import { useEffect, useMemo, useState } from "react";
 import { AgentSetup, type SecretsApi } from "./AgentSetup";
+import { parsePortTarget, type PreviewApi } from "./BrowserPanel";
 import { ProfilePages } from "./AccountPages";
 import { useCiWatch } from "./ciWatch";
-import { useAsync } from "./hooks";
+import { storageSet, useAsync } from "./hooks";
 import { PageHeader } from "./PageHeader";
 import { ProjectsPage } from "./Projects";
 import { SandboxGate } from "./SandboxGate";
+import { CloudSessions } from "./CloudSessions";
 import { CloudSettings } from "./Settings";
 import type { AccountMenuItem, SidebarSection } from "./Sidebar";
-import { Workspace, type WorkspaceNotice } from "./Workspace";
+import { OPEN_SESSION_KEY, Workspace, type WorkspaceNotice } from "./Workspace";
 
 /** Who is signed in, for the profile footer (web: Clerk; desktop: the access token's user). */
 export interface CloudAccount {
@@ -26,7 +28,7 @@ export interface CloudAccount {
 export interface CloudAppProps {
   /** Signed-in client (web: Clerk session; desktop: access token added by the main process). */
   client: CloudClient;
-  /** Current page ("/", "/projects", "/agent", "/settings") and navigation. */
+  /** Current page ("/", "/sessions", "/projects", "/agent", "/settings") and navigation. */
   path: string;
   go: (to: string) => void;
   account?: CloudAccount;
@@ -70,6 +72,21 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
   const gitActions = useMemo(() => projectClient.gitActions(), [projectClient]);
   useCiWatch(onCi ? gitActions.checks : undefined, (m, ci) => onCi?.(m, ci));
   const terminal = useMemo(() => projectClient.terminals(), [projectClient]);
+  // Browser card: a port of the project's sandbox, through a short-lived gateway link.
+  const preview = useMemo<PreviewApi>(
+    () => ({
+      storageKey: `opensession.preview.${project}`,
+      placeholder: "Port of the dev server, e.g. 5173",
+      hint: "Start the dev server in this project's sandbox (for example from the Terminal) listening on 0.0.0.0, then enter its port.",
+      open: async (target) => {
+        const p = parsePortTarget(target);
+        if (!p) throw new Error("Enter the port the dev server listens on in the sandbox, such as 5173.");
+        const { url } = await projectClient.preview(p.port);
+        return url + p.path.replace(/^\//, "");
+      },
+    }),
+    [projectClient, project],
+  );
   const [projectsVersion, setProjectsVersion] = useState(0);
   const projects = useAsync(() => client.listProjects(), [client, projectsVersion]);
   const [setupVersion, setSetupVersion] = useState(0);
@@ -118,6 +135,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
       : undefined;
 
   const menu: AccountMenuItem[] = [
+    { id: "sessions", label: "Cloud sessions", onSelect: () => go("/sessions") },
     { id: "profile", label: "Profile", onSelect: () => go("/profile") },
     { id: "usage", label: "Usage and limits", onSelect: () => go("/usage") },
     { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => go("/settings") },
@@ -126,6 +144,21 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
     ...(account?.items ?? []),
   ];
 
+  if (path === "/sessions") {
+    return (
+      <CloudSessions
+        client={client}
+        project={project}
+        go={go}
+        accountName={account?.name}
+        open={(id, session) => {
+          if (session) storageSet(OPEN_SESSION_KEY, session);
+          openProject(id);
+          go("/");
+        }}
+      />
+    );
+  }
   if (path === "/settings") return <CloudSettings client={client} project={projectClient} onBack={back} desktop={desktop} />;
   if (path === "/profile" || path === "/usage") {
     return (
@@ -167,6 +200,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         client={projectClient}
         git={gitActions}
         terminal={terminal}
+        preview={preview}
         skills={skillIds}
         agents={agentIds}
         commands={setup.data?.config.commands ?? []}

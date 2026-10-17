@@ -18,6 +18,7 @@ import { MessageView } from "./Messages";
 import { DiffPanel, FilesPanel } from "./Panels";
 import { GitPanel } from "./GitPanel";
 import { TerminalPanel } from "./TerminalPanel";
+import { BrowserPanel, type PreviewApi } from "./BrowserPanel";
 import { Requests } from "./Requests";
 import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
 import { Button } from "./components/ui/button";
@@ -85,6 +86,8 @@ export interface WorkspaceProps {
   commands?: { name: string; description?: string | null }[];
   /** A shell in the cloud sandbox (Terminal panel). */
   terminal?: TerminalApi;
+  /** What the Browser panel can show (the project's dev server). */
+  preview?: PreviewApi;
   /** Branch actions (checkout, push, pull request) for the Git panel. */
   git?: GitActions;
   /** Desktop only: continue a session, or start a new one, in the cloud. */
@@ -112,6 +115,7 @@ export function Workspace({
   commands: setupCommands = [],
   git,
   terminal,
+  preview,
   moveToCloud,
   projectName,
   sessionsTitle = "Sessions",
@@ -164,6 +168,9 @@ export function Workspace({
   });
   const [sidebarOpen, setSidebarOpen] = useState(() => storageGet(SIDEBAR_KEY) !== "hidden");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Live event stream: "lost" with seconds until the next try, so the banner can count down.
+  const [conn, setConn] = useState<{ lost: boolean; retryIn: number }>({ lost: false, retryIn: 0 });
+  const retryNow = useRef<(() => void) | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const modelList = models.data ?? [];
@@ -240,6 +247,7 @@ export function Workspace({
       ]);
       setMessages(m);
       setLoadingMessages(false);
+      setConn((c) => (c.lost ? { lost: false, retryIn: 0 } : c));
       setPerms(p);
       setForms(f);
       const last = m[m.length - 1];
@@ -266,22 +274,50 @@ export function Workspace({
         setRefreshKey((k) => k + 1);
       }, 250);
     };
+    // Reconnects with backoff (2 s doubling to 30 s); the banner counts down and offers Retry now.
+    const pause = (seconds: number) =>
+      new Promise<void>((resolve) => {
+        let left = seconds;
+        setConn({ lost: true, retryIn: left });
+        const tick = setInterval(() => {
+          left -= 1;
+          if (left <= 0 || ctl.signal.aborted) done();
+          else setConn({ lost: true, retryIn: left });
+        }, 1000);
+        const done = () => {
+          clearInterval(tick);
+          retryNow.current = null;
+          resolve();
+        };
+        retryNow.current = done;
+        ctl.signal.addEventListener("abort", done, { once: true });
+      });
     (async () => {
+      let backoff = 2;
       while (!ctl.signal.aborted) {
+        let failed = false;
         try {
           for await (const ev of client.events(active, { after: cursor, signal: ctl.signal })) {
             cursor = eventCursor(ev) ?? cursor;
+            backoff = 2;
+            setConn((c) => (c.lost ? { lost: false, retryIn: 0 } : c));
             kick();
           }
         } catch {
-          /* reconnect below */
+          failed = true;
         }
-        if (!ctl.signal.aborted) await new Promise((r) => setTimeout(r, 2000));
+        if (ctl.signal.aborted) break;
+        if (failed) {
+          await pause(backoff);
+          backoff = Math.min(backoff * 2, 30);
+          void refresh();
+        } else await new Promise((r) => setTimeout(r, 2000));
       }
     })();
     return () => {
       ctl.abort();
       clearTimeout(timer);
+      setConn({ lost: false, retryIn: 0 });
     };
   }, [client, active, refresh]);
 
@@ -391,6 +427,36 @@ export function Workspace({
     }
   };
 
+  /** Continue a turn the usage limit stopped, without sending the original prompt again. */
+  const resume = async () => {
+    if (!active) return;
+    try {
+      setErr(null);
+      setBusy(true);
+      await client.prompt(active, "Continue where you left off.", undefined, { skills });
+      void refresh();
+    } catch (e) {
+      setErr(errText(e));
+      setBusy(false);
+    }
+  };
+  const lastAssistant = [...messages].reverse().find((m) => m.type === "assistant")?.id;
+
+  /** Send the last thing the user typed again (after a failed step). */
+  const retryLast = async () => {
+    const last = [...messages].reverse().find((m) => m.type === "user" && m.text);
+    if (!active || !last?.text) return;
+    try {
+      setErr(null);
+      setBusy(true);
+      await client.prompt(active, last.text, undefined, { skills });
+      void refresh();
+    } catch (e) {
+      setErr(errText(e));
+      setBusy(false);
+    }
+  };
+
   const pickModel = async (key: string) => {
     setModel(key);
     storageSet(MODEL_KEY, key);
@@ -421,13 +487,19 @@ export function Workspace({
     if (active) await client.setAgent(active, a).catch((e) => setErr(errText(e)));
   };
 
-  const togglePanel = (id: DockPanelId) =>
+  /** Panels this workspace can show: the terminal and browser need their backends. */
+  const available = (id: DockPanelId) => (id !== "terminal" || Boolean(terminal)) && (id !== "browser" || Boolean(preview));
+  // A dock card opened in full screen takes the conversation's place until it is docked again.
+  const [full, setFull] = useState<DockPanelId | null>(null);
+  const togglePanel = (id: DockPanelId) => {
+    if (full === id) setFull(null);
     setDock((d) => {
       const open = d.stack.includes(id);
       const heights = { ...d.heights };
       delete heights[id];
       return { ...d, heights, stack: open ? d.stack.filter((x) => x !== id) : [...d.stack, id] };
     });
+  };
 
   const providers = [...new Set(modelList.map((m) => m.providerID))];
   const slash = text.startsWith("/") && !text.includes(" ") ? text.slice(1).toLowerCase() : null;
@@ -448,8 +520,8 @@ export function Workspace({
       run: () => setActive(s.id),
     })),
     { id: "new", group: "Actions", label: "New session", run: openNew },
-    ...(["changes", "git", "files", "terminal"] as DockPanelId[])
-      .filter((id) => id !== "terminal" || terminal)
+    ...(["changes", "git", "files", "terminal", "browser"] as DockPanelId[])
+      .filter(available)
       .map((id) => ({
         id: `toggle-${id}`,
         group: "Actions",
@@ -469,9 +541,28 @@ export function Workspace({
     }
     return null;
   }, [messages, chosen]);
-  const togglable = (["terminal", "changes", "git", "files"] as DockPanelId[]).filter((id) => id !== "terminal" || terminal);
-  // The terminal can be unavailable (no sandbox terminal), so hide its card rather than drop it from state.
-  const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => id !== "terminal" || terminal) };
+  const togglable = (["terminal", "changes", "git", "files", "browser"] as DockPanelId[]).filter(available);
+  // The terminal and browser can be unavailable, so hide their cards rather than drop them from state.
+  const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => available(id) && id !== full) };
+
+  const panelBody = (id: DockPanelId, isFull = false) =>
+    id === "files" ? (
+      <FilesPanel
+        client={client}
+        refreshKey={refreshKey}
+        onClose={() => togglePanel("files")}
+        onExpand={isFull ? undefined : () => setFull("files")}
+        onDock={isFull ? () => setFull(null) : undefined}
+      />
+    ) : id === "changes" ? (
+      <DiffPanel client={client} refreshKey={refreshKey} />
+    ) : id === "terminal" && terminal ? (
+      <TerminalPanel api={terminal} />
+    ) : id === "browser" && preview ? (
+      <BrowserPanel preview={preview} />
+    ) : (
+      <GitPanel client={client} actions={git} refreshKey={refreshKey} />
+    );
 
   const toggleButton = (id: DockPanelId, pressed: boolean, onClick: () => void) => (
     <Button
@@ -626,7 +717,49 @@ export function Workspace({
           </aside>
         ) : null}
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {full ? (
+          <section
+            aria-label={`${DOCK_TITLES[full]}, full screen`}
+            className={cn(
+              "m-2.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-sidebar",
+              full === "terminal" && "bg-code",
+            )}
+          >
+            {full === "files" ? null : (
+              <header className="flex h-[42px] shrink-0 items-center gap-2 border-b border-border pl-3.5 pr-1.5 text-[13.5px] font-semibold">
+                <span className="min-w-0 flex-1 truncate">{DOCK_TITLES[full]}</span>
+                <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={() => setFull(null)}>
+                  Dock right
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-[26px] text-base text-faint"
+                  aria-label={`Close ${DOCK_TITLES[full]} panel`}
+                  onClick={() => togglePanel(full)}
+                >
+                  ×
+                </Button>
+              </header>
+            )}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{panelBody(full, true)}</div>
+          </section>
+        ) : null}
+        <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")}>
+          {conn.lost && active ? (
+            <div role="alert" className="mx-10 mt-3 flex max-w-[640px] items-center gap-3 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
+              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
+              <span className="min-w-0 flex-1">
+                <strong className="font-semibold text-destructive">Lost connection to the agent.</strong>{" "}
+                <span className="text-muted-foreground">
+                  Retrying in {conn.retryIn} s. The session keeps its history and the agent keeps working.
+                </span>
+              </span>
+              <Button size="sm" variant="outline" onClick={() => retryNow.current?.()}>
+                Retry now
+              </Button>
+            </div>
+          ) : null}
           <div
             ref={listRef}
             className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-10 pr-7 pt-7 [&>*]:max-w-[640px]"
@@ -654,7 +787,12 @@ export function Workspace({
               </div>
             ) : null}
             {messages.map((m) => (
-              <MessageView key={m.id} m={m} />
+              <MessageView
+                key={m.id}
+                m={m}
+                onRetry={busy ? undefined : () => void retryLast()}
+                onResume={m.id === lastAssistant && !busy ? () => void resume() : undefined}
+              />
             ))}
             {notice ? (
               <div
@@ -756,19 +894,20 @@ export function Workspace({
                 >
                   <NamedIcon name="expand" className="size-[13px]" />
                 </Button>
-              ) : null
-            }
-            renderBody={(id) =>
-              id === "files" ? (
-                <FilesPanel client={client} refreshKey={refreshKey} onClose={() => togglePanel("files")} />
-              ) : id === "changes" ? (
-                <DiffPanel client={client} refreshKey={refreshKey} />
-              ) : id === "terminal" && terminal ? (
-                <TerminalPanel api={terminal} />
               ) : (
-                <GitPanel client={client} actions={git} refreshKey={refreshKey} />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-[26px] text-faint"
+                  aria-label={`Open ${DOCK_TITLES[id].toLowerCase()} in full screen`}
+                  title="Open in full screen"
+                  onClick={() => setFull(id)}
+                >
+                  <NamedIcon name="expand" className="size-[13px]" />
+                </Button>
               )
             }
+            renderBody={(id) => panelBody(id)}
           />
         ) : null}
       </div>
@@ -924,7 +1063,7 @@ export function Workspace({
 }
 
 /** "3 min ago" style label for the session list. */
-function relativeTime(ms: number | undefined): string {
+export function relativeTime(ms: number | undefined): string {
   if (!ms) return "";
   const min = Math.round((Date.now() - ms) / 60000);
   if (min < 1) return "just now";

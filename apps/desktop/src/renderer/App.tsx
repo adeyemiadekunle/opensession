@@ -9,6 +9,7 @@ import {
   OPEN_SESSION_KEY,
   PageHeader,
   Workspace,
+  localPreview,
   readPref,
   useAsync,
   useCiWatch,
@@ -320,6 +321,7 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
   if (page === "settings") return <LocalSettings client={client} store={store} onBack={back} onSaved={() => setGen((g) => g + 1)} />;
 
   const name = basename(st.folder);
+  const preview = localPreview(`opensession.preview.local.${st.folder}`);
   const projects: SidebarSection = {
     id: "projects",
     title: "Projects",
@@ -346,6 +348,7 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       client={client}
       git={git}
       moveToCloud={signedIn ? moveToCloud : undefined}
+      preview={preview}
       skills={setup.data?.config.skills.map((s) => s.id) ?? []}
       agents={setup.data?.config.agents.filter((a) => a.mode !== "subagent").map((a) => a.id) ?? []}
       commands={setup.data?.config.commands ?? []}

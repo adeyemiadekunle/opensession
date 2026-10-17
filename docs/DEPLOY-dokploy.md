@@ -79,6 +79,9 @@ Paste and fill in (generate the secrets with the commands in the comments):
 VITE_GATEWAY_URL=https://api.example.com
 OPENSESSION_WEB_URL=https://app.example.com
 CORS_ORIGINS=https://app.example.com,app://opensession
+# Browser card previews on their own origin: point *.preview.example.com (DNS and
+# TLS) at the gateway too. Leave empty to serve previews under the API domain.
+PREVIEW_DOMAIN=preview.example.com
 
 # --- Sign-in (Clerk) -------------------------------------------------------------
 AUTH_MODE=clerk

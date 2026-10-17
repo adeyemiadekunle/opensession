@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { CloudSettings, LocalSettings, ProfilePages, ReviewView, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
+import { CloudSessions, CloudSettings, LocalSettings, localPreview, ProfilePages, ReviewView, SandboxGate, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
 import "@opensession/ui/styles.css";
 import { gitActions, mock } from "./mock";
 
@@ -9,6 +9,11 @@ if (q.has("dark")) document.documentElement.dataset.theme = "dark";
 if (q.has("light")) document.documentElement.dataset.theme = "light";
 const noop = () => undefined;
 const moveToCloud = q.has("move") ? async () => undefined : undefined;
+// ?term: a terminal whose socket never connects, to lay out the Terminal card.
+const term = { id: "pty_1", title: "bash", command: "bash", cwd: "/workspace", status: "running" as const, pid: 1 };
+const terminal = q.has("term")
+  ? { list: async () => [term], create: async () => term, resize: async () => undefined, close: async () => undefined, socketUrl: async () => "ws://127.0.0.1:9/" }
+  : undefined;
 
 const projects: SidebarSection = {
   id: "projects",
@@ -42,7 +47,13 @@ const account: Account = {
 
 createRoot(document.getElementById("root")!).render(
   <div style={{ height: "100vh", position: "relative" }}>
-    {q.get("account") ? (
+    {q.has("sessions") ? (
+      <CloudSessions client={mock} project="default" open={noop} go={noop} accountName="Adeyemi Adekunle" />
+    ) : q.get("gate") ? (
+      <SandboxGate client={mock} projectName={() => "opensession"}>
+        <div />
+      </SandboxGate>
+    ) : q.get("account") ? (
       <ProfilePages
         client={mock}
         account={{ name: "Adeyemi Adekunle", email: "adeyemi@example.com", onManage: noop, onSignOut: noop }}
@@ -64,6 +75,8 @@ createRoot(document.getElementById("root")!).render(
         commands={[]}
         git={gitActions}
         moveToCloud={moveToCloud}
+        terminal={terminal}
+        preview={localPreview("harness.preview")}
         projectName="opensession"
         sessionsTitle="This computer"
         sectionsBefore={[projects]}

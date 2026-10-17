@@ -1,13 +1,28 @@
 import { useMemo, useRef, useState } from "react";
 import type { DiffFile, FileEntry, OpenSessionClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
+import { Button } from "./components/ui/button";
 import { NamedIcon } from "./icons";
 import { EDITOR_DEFAULTS, PREF, usePref, type EditorPrefs } from "./prefs";
 import { cn } from "./lib/utils";
 
 /** Files card (design): its own header (tree toggle, open-file tabs, filter, close), the folder
  *  tree on the left and the open file with line numbers on the right. */
-export function FilesPanel({ client, refreshKey, onClose }: { client: OpenSessionClient; refreshKey: number; onClose?: () => void }) {
+export function FilesPanel({
+  client,
+  refreshKey,
+  onClose,
+  onExpand,
+  onDock,
+}: {
+  client: OpenSessionClient;
+  refreshKey: number;
+  onClose?: () => void;
+  /** Opens the card in full screen (design: stacked dock). */
+  onExpand?: () => void;
+  /** In full screen: puts it back in the dock. */
+  onDock?: () => void;
+}) {
   const [dir, setDir] = useState("");
   const [filter, setFilter] = useState("");
   const [tabs, setTabs] = useState<{ path: string; text: string }[]>([]);
@@ -102,6 +117,16 @@ export function FilesPanel({ client, refreshKey, onClose }: { client: OpenSessio
         >
           <NamedIcon name="search" className="size-[13px]" />
         </button>
+        {onExpand ? (
+          <button className={iconBtn} aria-label="Open files in full screen" title="Open in full screen" onClick={onExpand}>
+            <NamedIcon name="expand" className="size-[13px]" />
+          </button>
+        ) : null}
+        {onDock ? (
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px]" onClick={onDock}>
+            Dock right
+          </Button>
+        ) : null}
         {onClose ? (
           <button className={iconBtn} aria-label="Close files panel" onClick={onClose}>
             <NamedIcon name="close" className="size-[14px]" />
@@ -149,6 +174,13 @@ export function FilesPanel({ client, refreshKey, onClose }: { client: OpenSessio
                 );
               })}
               {list.data && entries.length === 0 ? <li className="px-1.5 text-muted-foreground">Empty folder</li> : null}
+              {list.loading && !list.data
+                ? [110, 126, 100, 118, 90].map((w, i) => (
+                    <li key={i} role={i ? undefined : "status"} aria-label={i ? undefined : "Loading files"} className="flex h-6 items-center px-1.5">
+                      <span className="h-2.5 animate-pulse rounded bg-sunken motion-reduce:animate-none" style={{ width: w }} />
+                    </li>
+                  ))
+                : null}
             </ul>
             {list.error || err ? <div className="os-error text-xs">{list.error ?? err}</div> : null}
           </aside>
@@ -184,7 +216,22 @@ export function DiffPanel({ client, refreshKey }: { client: OpenSessionClient; r
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {diff.error ? <div className="os-error px-3">{diff.error}</div> : null}
-      {diff.data && files.length === 0 ? <div className="px-3 py-2 text-muted-foreground">No changes (needs a git repo).</div> : null}
+      {diff.data && files.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+          <span className="font-semibold">No changes yet</span>
+          <span className="max-w-[280px] text-[13px] text-faint">When the agent edits a file, the diff appears here for you to review before you commit.</span>
+        </div>
+      ) : null}
+      {diff.loading && !diff.data ? (
+        <div role="status" aria-label="Loading changes" className="flex flex-col gap-3 p-3.5">
+          {[150, 120, 170].map((w, i) => (
+            <div key={i} className="flex items-center gap-2.5">
+              <span className="h-2.5 animate-pulse rounded bg-sunken motion-reduce:animate-none" style={{ width: w }} />
+              <span className="ml-auto h-2.5 w-10 animate-pulse rounded bg-sunken motion-reduce:animate-none" />
+            </div>
+          ))}
+        </div>
+      ) : null}
       <ul className="m-0 flex list-none flex-col gap-0.5 p-2 text-[13px]">
         {files.map((d) => (
           <li key={d.file}>
