@@ -19,6 +19,10 @@ import { DiffPanel, FilesPanel } from "./Panels";
 import { GitPanel } from "./GitPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { Requests } from "./Requests";
+import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
+import { Button } from "./components/ui/button";
+import { Select } from "./components/ui/select";
+import { cn } from "./lib/utils";
 
 const MODEL_KEY = "opensession.model";
 const AGENT_KEY = "opensession.agent";
@@ -26,6 +30,34 @@ const AGENT_KEY = "opensession.agent";
 function modelKey(m: ModelRef) {
   return `${m.providerID}/${m.id}`;
 }
+
+function Icon({ children }: { children: ReactNode }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
+/** Toolbar toggles for the dock, in design order. */
+const TOGGLE_ICONS: Record<DockPanelId, ReactNode> = {
+  terminal: <Icon><path d="M4 7l5 5-5 5M12 18h8" /></Icon>,
+  changes: (
+    <Icon>
+      <circle cx="6" cy="6" r="2.2" />
+      <circle cx="6" cy="18" r="2.2" />
+      <circle cx="18" cy="12" r="2.2" />
+      <path d="M6 8v8M8 6h4a6 6 0 0 1 6 6" />
+    </Icon>
+  ),
+  git: (
+    <Icon>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v6M12 15v6" />
+    </Icon>
+  ),
+  files: <Icon><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></Icon>,
+};
 
 export interface WorkspaceProps {
   client: OpenSessionClient;
@@ -37,9 +69,9 @@ export interface WorkspaceProps {
   agents?: string[];
   /** Commands from the agent setup; shown even before OpenCode has listed them. */
   commands?: { name: string; description?: string | null }[];
-  /** A shell in the cloud sandbox (Terminal tab). */
+  /** A shell in the cloud sandbox (Terminal panel). */
   terminal?: TerminalApi;
-  /** Branch actions (checkout, push, pull request) for the Git tab. */
+  /** Branch actions (checkout, push, pull request) for the Git panel. */
   git?: GitActions;
 }
 
@@ -61,7 +93,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<"files" | "changes" | "git" | "terminal">("files");
+  const [dock, setDock] = useState<DockState>(loadDock);
   const [refreshKey, setRefreshKey] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -79,6 +111,10 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   useEffect(() => {
     if (!active && sessionList[0]) setActive(sessionList[0].id);
   }, [active, sessionList]);
+
+  useEffect(() => {
+    storageSet(DOCK_KEY, JSON.stringify(dock));
+  }, [dock]);
 
   const refresh = useCallback(async () => {
     if (!active) return;
@@ -195,6 +231,14 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
     if (active) await client.setAgent(active, a).catch((e) => setErr(errText(e)));
   };
 
+  const togglePanel = (id: DockPanelId) =>
+    setDock((d) => {
+      const open = d.stack.includes(id);
+      const heights = { ...d.heights };
+      delete heights[id];
+      return { ...d, heights, stack: open ? d.stack.filter((x) => x !== id) : [...d.stack, id] };
+    });
+
   const providers = [...new Set(modelList.map((m) => m.providerID))];
   const slash = text.startsWith("/") && !text.includes(" ") ? text.slice(1).toLowerCase() : null;
   const allCommands: CommandInfo[] = [
@@ -204,58 +248,77 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const commandHints = slash !== null ? allCommands.filter((c) => c.name.toLowerCase().startsWith(slash)).slice(0, 8) : [];
   const at = /(^|\s)@([a-z0-9-]*)$/.exec(text);
   const skillHints = at ? skills.filter((s) => s.startsWith(at[2]!)).slice(0, 8) : [];
+  const activeTitle = sessionList.find((s) => s.id === active)?.title || (active ? "Session" : "New session");
+  const togglable = (["terminal", "changes", "git", "files"] as DockPanelId[]).filter((id) => id !== "terminal" || terminal);
+  // The terminal can be unavailable (no sandbox terminal), so hide its card rather than drop it from state.
+  const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => id !== "terminal" || terminal) };
 
   return (
-    <div className="os-workspace">
-      <aside className="os-sidebar">
-        <label className="os-field">
-          <span>Model</span>
-          <select value={chosen ? modelKey(chosen) : ""} onChange={(e) => pickModel(e.target.value)}>
-            {providers.map((p) => (
-              <optgroup key={p} label={p}>
-                {modelList
-                  .filter((m) => m.providerID === p)
-                  .map((m) => (
-                    <option key={modelKey(m)} value={modelKey(m)}>
-                      {m.name ?? m.id}
-                    </option>
-                  ))}
-              </optgroup>
+    <div className="flex h-full min-h-0 bg-background max-[1000px]:flex-col">
+      <aside className="flex w-[248px] shrink-0 flex-col gap-4 overflow-auto border-r border-border bg-sidebar px-2.5 py-3.5 max-[1000px]:max-h-[220px] max-[1000px]:w-auto max-[1000px]:border-b max-[1000px]:border-r-0">
+        <Button variant="ghost" className="h-8 justify-start px-2 text-sm text-foreground" disabled={!chosen} onClick={newSession}>
+          <Icon><path d="M12 5v14M5 12h14" /></Icon>
+          New session
+        </Button>
+        <section className="flex flex-col gap-0.5">
+          <div className="flex h-[26px] items-center px-2 text-xs font-medium text-faint">Sessions</div>
+          <ul className="flex flex-col gap-0.5">
+            {sessionList.map((s) => (
+              <li
+                key={s.id}
+                className={cn("group flex items-center rounded-md hover:bg-sunken", s.id === active && "bg-sunken")}
+              >
+                <button
+                  className="h-[30px] min-w-0 flex-1 truncate border-0 bg-transparent px-2 text-left text-foreground"
+                  onClick={() => setActive(s.id)}
+                >
+                  {s.title || new Date(s.time?.created ?? 0).toLocaleString()}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "size-6 text-muted-foreground focus-visible:opacity-100",
+                    s.id === active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                  )}
+                  title="Delete session"
+                  aria-label="Delete session"
+                  onClick={() => remove(s.id)}
+                >
+                  ×
+                </Button>
+              </li>
             ))}
-          </select>
-        </label>
-        <label className="os-field">
-          <span>Agent</span>
-          <select value={agent} onChange={(e) => pickAgent(e.target.value)}>
-            {agentChoices.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </label>
+          </ul>
+        </section>
         {models.data && !modelList.length ? <div className="os-hint">{noModels ?? "No models available."}</div> : null}
         {models.error ? <div className="os-error">{models.error}</div> : null}
-        <button className="os-primary" disabled={!chosen} onClick={newSession}>
-          New session
-        </button>
-        <ul className="os-sessions">
-          {sessionList.map((s) => (
-            <li key={s.id} className={s.id === active ? "active" : undefined}>
-              <button className="os-session" onClick={() => setActive(s.id)}>
-                {s.title || new Date(s.time?.created ?? 0).toLocaleString()}
-              </button>
-              <button className="os-icon" title="Delete session" onClick={() => remove(s.id)}>
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
       </aside>
 
-      <main className="os-chat">
-        <div className="os-messages" ref={listRef}>
-          {!active ? <div className="os-empty">Start a session, then describe what you want to build.</div> : null}
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-sidebar pl-3.5 pr-2.5">
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{activeTitle}</span>
+          {togglable.map((id) => (
+            <Button
+              key={id}
+              variant="ghost"
+              size="icon"
+              title={DOCK_TITLES[id]}
+              aria-label={DOCK_TITLES[id]}
+              aria-pressed={dock.stack.includes(id)}
+              className="aria-pressed:bg-muted aria-pressed:text-primary"
+              onClick={() => togglePanel(id)}
+            >
+              {TOGGLE_ICONS[id]}
+            </Button>
+          ))}
+        </div>
+
+        <div
+          ref={listRef}
+          className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-10 pr-7 pt-7 [&>*]:max-w-[640px]"
+        >
+          {!active ? <div className="m-auto text-muted-foreground">Start a session, then describe what you want to build.</div> : null}
           {messages.map((m) => (
             <MessageView key={m.id} m={m} />
           ))}
@@ -263,75 +326,98 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
         {active ? (
           <Requests client={client} sessionId={active} permissions={perms} forms={forms} onDone={refresh} />
         ) : null}
-        {err ? <div className="os-error">{err}</div> : null}
+        {err ? <div className="os-error px-10">{err}</div> : null}
         {commandHints.length || skillHints.length ? (
           <ul className="os-suggest os-requests">
             {commandHints.map((c) => (
               <li key={c.name}>
-                <button title={c.description} onClick={() => setText(`/${c.name} `)}>
+                <Button size="sm" variant="outline" title={c.description} onClick={() => setText(`/${c.name} `)}>
                   /{c.name}
-                </button>
+                </Button>
               </li>
             ))}
             {skillHints.map((sk) => (
               <li key={sk}>
-                <button onClick={() => setText(text.replace(/@[a-z0-9-]*$/, `@${sk} `))}>@{sk}</button>
+                <Button size="sm" variant="outline" onClick={() => setText(text.replace(/@[a-z0-9-]*$/, `@${sk} `))}>
+                  @{sk}
+                </Button>
               </li>
             ))}
           </ul>
         ) : null}
-        <div className="os-composer">
-          <textarea
-            value={text}
-            placeholder={busy ? "Steer the agent…" : "Ask the agent…  /command  @skill  !shell"}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-          />
-          <div className="os-col">
-            <button className="os-primary" onClick={send} disabled={!text.trim()}>
-              Send
-            </button>
-            {busy && active ? (
-              <button onClick={() => client.interrupt(active).then(refresh).catch((e) => setErr(errText(e)))}>
-                Stop
-              </button>
-            ) : null}
+
+        <div className="shrink-0 pb-4 pl-10 pr-7">
+          <div className="flex max-w-[640px] flex-col gap-2.5 rounded-lg border border-input bg-card px-3.5 pb-2.5 pt-3 focus-within:border-muted-foreground">
+            <textarea
+              className="min-h-11 max-h-60 w-full resize-none border-0 bg-transparent p-0 text-foreground outline-none"
+              value={text}
+              placeholder={busy ? "Steer the agent…" : "Ask the agent…  /command  @skill  !shell"}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <div className="flex items-center gap-1.5">
+              <Select variant="ghost" aria-label="Agent" value={agent} onChange={(e) => pickAgent(e.target.value)}>
+                {agentChoices.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                variant="ghost"
+                aria-label="Model"
+                value={chosen ? modelKey(chosen) : ""}
+                onChange={(e) => pickModel(e.target.value)}
+              >
+                {providers.map((p) => (
+                  <optgroup key={p} label={p}>
+                    {modelList
+                      .filter((m) => m.providerID === p)
+                      .map((m) => (
+                        <option key={modelKey(m)} value={modelKey(m)}>
+                          {m.name ?? m.id}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </Select>
+              <span className="flex-1" />
+              {busy && active ? (
+                <Button size="sm" variant="outline" onClick={() => client.interrupt(active).then(refresh).catch((e) => setErr(errText(e)))}>
+                  Stop
+                </Button>
+              ) : null}
+              <Button size="sm" variant="default" onClick={send} disabled={!text.trim()}>
+                Send
+              </Button>
+            </div>
           </div>
         </div>
       </main>
 
-      <section className={tab === "terminal" ? "os-side os-side-wide" : "os-side"}>
-        <div className="os-tabs">
-          <button className={tab === "files" ? "active" : undefined} onClick={() => setTab("files")}>
-            Files
-          </button>
-          <button className={tab === "changes" ? "active" : undefined} onClick={() => setTab("changes")}>
-            Changes
-          </button>
-          <button className={tab === "git" ? "active" : undefined} onClick={() => setTab("git")}>
-            Git
-          </button>
-          {terminal ? (
-            <button className={tab === "terminal" ? "active" : undefined} onClick={() => setTab("terminal")}>
-              Terminal
-            </button>
-          ) : null}
-        </div>
-        {tab === "files" ? (
-          <FilesPanel client={client} refreshKey={refreshKey} />
-        ) : tab === "changes" ? (
-          <DiffPanel client={client} refreshKey={refreshKey} />
-        ) : tab === "terminal" && terminal ? (
-          <TerminalPanel api={terminal} />
-        ) : (
-          <GitPanel client={client} actions={git} refreshKey={refreshKey} />
-        )}
-      </section>
+      {shownDock.stack.length > 0 ? (
+        <Dock
+          state={shownDock}
+          onChange={setDock}
+          onClose={togglePanel}
+          renderBody={(id) =>
+            id === "files" ? (
+              <FilesPanel client={client} refreshKey={refreshKey} />
+            ) : id === "changes" ? (
+              <DiffPanel client={client} refreshKey={refreshKey} />
+            ) : id === "terminal" && terminal ? (
+              <TerminalPanel api={terminal} />
+            ) : (
+              <GitPanel client={client} actions={git} refreshKey={refreshKey} />
+            )
+          }
+        />
+      ) : null}
     </div>
   );
 }
