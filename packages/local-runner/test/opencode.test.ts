@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ensureOpencode, findOpencode, installOpencode, managedOpencodePath, opencodeTarget } from "../src";
+import { ensureOpencode, findOpencode, installOpencode, managedOpencodePath, opencodeTarget, opencodeVersion } from "../src";
 
 /** A tarball laid out like @opencode/cli-<target>, and a fetch that serves it as the registry. */
 function fakeRegistry(binary: string, opts: { binName?: string; corrupt?: boolean } = {}) {
@@ -75,5 +75,17 @@ describe("ensureOpencode", () => {
 describe("opencodeTarget", () => {
   it("names a published OpenCode build", () => {
     expect(opencodeTarget()).toMatch(/^(darwin|linux|windows)-(x64|arm64)(-baseline)?(-musl)?$/);
+  });
+});
+
+describe("opencodeVersion", () => {
+  it("comes from OPENCODE_VERSION, with a fallback", () => {
+    expect(opencodeVersion({})).toMatch(/^\d+\.\d+\.\d+/);
+    expect(opencodeVersion({ OPENCODE_VERSION: "v2.0.5" })).toBe("2.0.5");
+    expect(managedOpencodePath(undefined, { OPENSESSION_DATA_DIR: "/d", OPENCODE_VERSION: "2.0.5" })).toContain(join("opencode", "2.0.5"));
+  });
+
+  it("refuses something that isn't a version", () => {
+    expect(() => opencodeVersion({ OPENCODE_VERSION: "../../evil" })).toThrow(/OPENCODE_VERSION/);
   });
 });

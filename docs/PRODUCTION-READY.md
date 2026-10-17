@@ -98,7 +98,9 @@ pnpm desktop:build --web https://app.yourdomain.com --gateway https://api.yourdo
 
 Or let the **Release** GitHub workflow build macOS, Windows and Linux: set the
 repository variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL`
-(Settings > Secrets and variables > Actions > Variables), then push a version tag:
+(Settings > Secrets and variables > Actions > Variables), and `OPENCODE_VERSION` if
+you changed it in Dokploy (the apps then install the same OpenCode for local mode;
+default 2.0.0), then push a version tag:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0

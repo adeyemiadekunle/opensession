@@ -15,5 +15,7 @@ export default defineConfig({
   define: {
     __DEFAULT_WEB_URL__: JSON.stringify(process.env.OPENSESSION_WEB_URL || "http://localhost:5173"),
     __DEFAULT_GATEWAY_URL__: JSON.stringify(process.env.OPENSESSION_GATEWAY_URL || "http://localhost:8787"),
+    // The OpenCode version local mode installs (OPENCODE_VERSION at run time still wins).
+    ...(process.env.OPENCODE_VERSION ? { __OPENCODE_VERSION__: JSON.stringify(process.env.OPENCODE_VERSION.trim().replace(/^v/, "")) } : {}),
   },
 });

@@ -9,7 +9,7 @@ import {
   findOpencode,
   loadLocalAgentConfig,
   managedOpencodePath,
-  OPENCODE_VERSION,
+  opencodeVersion,
   saveLocalAgentConfig,
   startLocalServer,
   type InstallProgress,
@@ -414,7 +414,7 @@ const LOCAL_KEY_HINT = "no models available: add an API key with `opensession lo
 function downloadProgress(): (p: InstallProgress) => void {
   let shown = false;
   return ({ received, total }) => {
-    if (!shown) console.error(`Downloading OpenCode ${OPENCODE_VERSION} (first run only)...`);
+    if (!shown) console.error(`Downloading OpenCode ${opencodeVersion()} (first run only)...`);
     shown = true;
     const mb = (n: number) => (n / 1e6).toFixed(0);
     const done = total > 0 && received >= total;

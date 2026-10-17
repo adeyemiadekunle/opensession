@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { installOpencode, managedOpencodePath, OPENCODE_VERSION, type InstallProgress } from "./opencode";
+import { installOpencode, managedOpencodePath, opencodeVersion, type InstallProgress } from "./opencode";
 
 export const INSTALL_HINT =
   "OpenCode is not installed yet. Run `opensession opencode install` (or restart the desktop app)\n" +
@@ -48,7 +48,7 @@ export interface StartOptions {
  */
 export function findOpencode(env: NodeJS.ProcessEnv = process.env): string | null {
   if (env.OPENCODE_BIN && existsSync(env.OPENCODE_BIN)) return env.OPENCODE_BIN;
-  const managed = managedOpencodePath(OPENCODE_VERSION, env);
+  const managed = managedOpencodePath(undefined, env);
   if (existsSync(managed)) return managed;
   const win = platform() === "win32";
   const which = spawnSync(win ? "where" : "sh", win ? ["opencode"] : ["-c", "command -v opencode"], {
@@ -74,13 +74,13 @@ export function findOpencode(env: NodeJS.ProcessEnv = process.env): string | nul
 export async function ensureOpencode(o: { onProgress?: (p: InstallProgress) => void; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
   const env = o.env ?? process.env;
   if (env.OPENCODE_BIN && existsSync(env.OPENCODE_BIN)) return env.OPENCODE_BIN;
-  const managed = managedOpencodePath(OPENCODE_VERSION, env);
+  const managed = managedOpencodePath(undefined, env);
   if (existsSync(managed)) return managed;
   // One download at a time; later callers wait for it (and see its progress).
   let job = downloads.get(managed);
   if (!job) {
     const listeners = new Set<(p: InstallProgress) => void>();
-    const promise = installOpencode({ dest: managed, onProgress: (p) => listeners.forEach((l) => l(p)) }).finally(() => downloads.delete(managed));
+    const promise = installOpencode({ version: opencodeVersion(env), dest: managed, onProgress: (p) => listeners.forEach((l) => l(p)) }).finally(() => downloads.delete(managed));
     job = { promise, listeners };
     downloads.set(managed, job);
   }
@@ -171,7 +171,7 @@ export async function startLocalServer(o: StartOptions): Promise<LocalServer> {
   throw new Error(`opencode did not become ready in time (${last}):\n${tail.join("\n")}`);
 }
 
-export { dataDir, installOpencode, managedOpencodePath, opencodeTarget, OPENCODE_VERSION, type InstallProgress } from "./opencode";
+export { dataDir, installOpencode, managedOpencodePath, opencodeTarget, opencodeVersion, type InstallProgress } from "./opencode";
 
 export {
   applyAgentConfig,

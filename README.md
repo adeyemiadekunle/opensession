@@ -79,9 +79,10 @@ Local mode runs OpenCode V2, which OpenSession downloads by itself the first tim
 (only the build for this computer, about 100 MB, from OpenCode's npm release, checked
 against its sha512) into `~/.local/share/opensession/opencode/<version>/`
 (`%LOCALAPPDATA%\opensession\opencode\` on Windows). The desktop app and the CLI share
-it. The version is pinned to the sandbox image's (`OPENCODE_VERSION` in
-`packages/local-runner/src/opencode.ts` and `services/sandbox/Dockerfile`); set
-`OPENCODE_BIN` to use another OpenCode.
+it. The version comes from `OPENCODE_VERSION`: at run time, else the value the app was
+built with (the Release workflow's repository variable `OPENCODE_VERSION`), else
+2.0.0. Use the same version as the server's sandbox image (Dokploy's
+`OPENCODE_VERSION`). Set `OPENCODE_BIN` to use another OpenCode altogether.
 
     pnpm dev:desktop                 # Electron app: pick a folder and start coding,
                                      # or switch to Cloud (sign in with the browser)
@@ -113,7 +114,8 @@ macOS, Windows and Linux and the CLI, and attaches them under stable names
 newest. The web app's **Download** page (`/download`, public, also in the account
 menu) links to them. With an `NPM_TOKEN` secret the CLI is also published to npm as
 `opensession-cli`. It needs the repository variables `OPENSESSION_WEB_URL` and
-`OPENSESSION_GATEWAY_URL` (compiled into both apps). Builds are signed and notarized
+`OPENSESSION_GATEWAY_URL` (compiled into both apps), and optionally `OPENCODE_VERSION`
+(the OpenCode they install for local mode; match the server's). Builds are signed and notarized
 when the signing secrets are set (see the workflow file); otherwise macOS and Windows
 warn on first launch. Build locally with `pnpm desktop:build` (see
 `scripts/build-desktop.mjs`). Both download OpenCode for local mode by themselves.

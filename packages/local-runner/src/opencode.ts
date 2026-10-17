@@ -18,8 +18,23 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { createGunzip } from "node:zlib";
 
-/** The OpenCode version OpenSession installs: the one the sandbox image uses (services/sandbox/Dockerfile OPENCODE_VERSION); change them together. */
-export const OPENCODE_VERSION = "2.0.0";
+// Release builds compile in OPENCODE_VERSION from the build environment (the CLI's and
+// the desktop app's tsup configs), the same variable the sandbox image is built with.
+declare const __OPENCODE_VERSION__: string;
+
+/** Used when neither the build nor the environment sets OPENCODE_VERSION. */
+const FALLBACK_OPENCODE_VERSION = "2.0.0";
+
+/**
+ * The OpenCode version local mode installs: OPENCODE_VERSION at run time, else the one
+ * compiled in at build time, else the fallback. Keep it the sandbox's version
+ * (docker-compose OPENCODE_VERSION): OpenSession is tested against that one.
+ */
+export function opencodeVersion(env: NodeJS.ProcessEnv = process.env): string {
+  const v = env.OPENCODE_VERSION?.trim().replace(/^v/, "") || (typeof __OPENCODE_VERSION__ === "string" && __OPENCODE_VERSION__) || FALLBACK_OPENCODE_VERSION;
+  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v)) throw new Error(`OPENCODE_VERSION must be a version like 2.0.0, got "${v}"`);
+  return v;
+}
 
 const REGISTRY = "https://registry.npmjs.org";
 
@@ -30,7 +45,8 @@ export function dataDir(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** Where OpenSession keeps its own OpenCode (whether or not it is installed yet). */
-export function managedOpencodePath(version = OPENCODE_VERSION, env: NodeJS.ProcessEnv = process.env): string {
+export function managedOpencodePath(version?: string, env: NodeJS.ProcessEnv = process.env): string {
+  version ??= opencodeVersion(env);
   return join(dataDir(env), "opencode", version, platform() === "win32" ? "opencode.exe" : "opencode");
 }
 
@@ -102,7 +118,7 @@ export interface InstallOptions {
 
 /** Download OpenCode for this computer into OpenSession's data folder. Returns its path. */
 export async function installOpencode(o: InstallOptions = {}): Promise<string> {
-  const version = o.version ?? OPENCODE_VERSION;
+  const version = o.version ?? opencodeVersion();
   const dest = o.dest ?? managedOpencodePath(version);
   const target = o.target ?? opencodeTarget();
   const registry = (o.registry ?? process.env.OPENSESSION_NPM_REGISTRY ?? REGISTRY).replace(/\/+$/, "");

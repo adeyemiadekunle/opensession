@@ -49,4 +49,5 @@ opensession --help
 
 OpenCode is downloaded to `~/.local/share/opensession/opencode` (Windows:
 `%LOCALAPPDATA%\opensession\opencode`); `opensession opencode path` shows which one is
-used, and `OPENCODE_BIN` picks another.
+used. `OPENCODE_VERSION` picks another version (downloaded the same way) and
+`OPENCODE_BIN` another OpenCode executable.
