@@ -120,8 +120,10 @@ irm https://app.yourdomain.com/install.ps1 | iex             # Windows PowerShel
 
 or from npm (`npm install -g opensession-cli`, then
 `opensession config --gateway https://api.yourdomain.com --web https://app.yourdomain.com`),
-and sign in with `opensession login`. The install scripts download the CLI from the
-latest release, so publish one (above) first.
+Both also install OpenCode, the agent runtime for local mode. Then, in a terminal in
+a project folder: `opensession local key anthropic` once, and `opensession` to chat
+with the agent there; `opensession login` for cloud projects. The install scripts
+download the CLI from the latest release, so publish one (above) first.
 
 ## Go-live checklist
 

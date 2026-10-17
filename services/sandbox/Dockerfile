@@ -53,6 +53,7 @@ RUN mkdir -p /home/agent/.state/data /home/agent/.state/config \
  && ln -s /home/agent/.state/data /home/agent/.local/share/opencode \
  && ln -s /home/agent/.state/config /home/agent/.config/opencode
 
+# Keep in step with OPENCODE_VERSION in packages/local-runner/src/opencode.ts (local mode).
 ARG OPENCODE_VERSION=2.0.0
 RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/oc-install.sh \
  && (bash /tmp/oc-install.sh --version "${OPENCODE_VERSION}" || bash /tmp/oc-install.sh) \

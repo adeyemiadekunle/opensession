@@ -2,6 +2,10 @@
 export interface LocalStatus {
   folder: string | null;
   running: boolean;
+  /** OpenCode is starting (or downloading, the first time). */
+  starting: boolean;
+  /** First-run OpenCode download progress, in bytes. */
+  download: { received: number; total: number } | null;
   error: string | null;
 }
 

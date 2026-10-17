@@ -75,8 +75,13 @@ Requirements: Node 22+, pnpm 10 (`npm i -g pnpm`), Python 3.10+, Docker.
 
 ### Local: desktop app and CLI
 
-Install OpenCode V2 (`curl -fsSL https://opencode.ai/v2/install | bash`, or the
-Windows binary from the OpenCode site; set `OPENCODE_BIN` if it is not on PATH).
+Local mode runs OpenCode V2, which OpenSession downloads by itself the first time
+(only the build for this computer, about 100 MB, from OpenCode's npm release, checked
+against its sha512) into `~/.local/share/opensession/opencode/<version>/`
+(`%LOCALAPPDATA%\opensession\opencode\` on Windows). The desktop app and the CLI share
+it. The version is pinned to the sandbox image's (`OPENCODE_VERSION` in
+`packages/local-runner/src/opencode.ts` and `services/sandbox/Dockerfile`); set
+`OPENCODE_BIN` to use another OpenCode.
 
     pnpm dev:desktop                 # Electron app: pick a folder and start coding,
                                      # or switch to Cloud (sign in with the browser)
@@ -111,8 +116,7 @@ menu) links to them. With an `NPM_TOKEN` secret the CLI is also published to npm
 `OPENSESSION_GATEWAY_URL` (compiled into both apps). Builds are signed and notarized
 when the signing secrets are set (see the workflow file); otherwise macOS and Windows
 warn on first launch. Build locally with `pnpm desktop:build` (see
-`scripts/build-desktop.mjs`). Local mode needs OpenCode on the user's computer
-(`curl -fsSL https://opencode.ai/v2/install | bash`).
+`scripts/build-desktop.mjs`). Both download OpenCode for local mode by themselves.
 
 ### Install the CLI
 
@@ -125,6 +129,12 @@ Or from npm, then point it at your servers:
 
     npm install -g opensession-cli
     opensession config --gateway https://api.yourdomain.com --web https://app.yourdomain.com
+
+Both install OpenCode too (the npm package in its postinstall), so nothing else is
+needed. Then, in a terminal in any project folder:
+
+    opensession local key anthropic   # once: a model API key, kept on this computer
+    opensession                       # chat with the agent in this folder
 
 From a checkout, `pnpm cli ...` runs it from source.
 
@@ -359,8 +369,7 @@ installers and the CLI, and publishes them on a `v*` tag.
 - One gateway process per Docker host for now. The data is in Postgres, but which
   sandboxes are in use (leases, last activity) is kept in the process, so two
   gateways on one host could put each other's sandboxes to sleep.
-- Desktop installers are unsigned until signing certificates are added as secrets,
-  and they need OpenCode installed separately.
+- Desktop installers are unsigned until signing certificates are added as secrets.
 - The disk limit is measured, not enforced by the filesystem: a sandbox can go over
   it between measurements (memory, CPU and process limits are enforced).
 - Abuse monitoring (unusual egress, mining, spam) and usage metering for billing.

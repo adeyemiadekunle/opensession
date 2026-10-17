@@ -11,12 +11,11 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { installOpencode, managedOpencodePath, OPENCODE_VERSION, type InstallProgress } from "./opencode";
 
 export const INSTALL_HINT =
-  "OpenCode V2 is not installed. Install it with:\n" +
-  "  macOS/Linux:  curl -fsSL https://opencode.ai/v2/install | bash\n" +
-  "  Windows:      download the standalone binary from https://opencode.ai/v2/docs\n" +
-  "or set OPENCODE_BIN to the opencode executable.";
+  "OpenCode is not installed yet. Run `opensession opencode install` (or restart the desktop app)\n" +
+  "to download it, or set OPENCODE_BIN to an OpenCode V2 executable.";
 
 export interface LocalServer {
   url: string;
@@ -32,8 +31,10 @@ export interface LocalServer {
 export interface StartOptions {
   directory: string;
   port?: number;
-  /** Executable, default: findOpencode(). */
+  /** Executable, default: ensureOpencode() (downloads OpenCode the first time). */
   bin?: string;
+  /** Progress of that first download. */
+  onInstallProgress?: (p: InstallProgress) => void;
   /** Extra args placed before "serve" (tests run a fake server through node). */
   binArgs?: string[];
   env?: Record<string, string>;
@@ -41,9 +42,14 @@ export interface StartOptions {
   onLog?: (line: string) => void;
 }
 
-/** Locate the opencode executable: OPENCODE_BIN, PATH, then the installer's default folder. */
+/**
+ * Locate the opencode executable: OPENCODE_BIN, the copy OpenSession installed, then
+ * PATH and OpenCode installer's default folder.
+ */
 export function findOpencode(env: NodeJS.ProcessEnv = process.env): string | null {
   if (env.OPENCODE_BIN && existsSync(env.OPENCODE_BIN)) return env.OPENCODE_BIN;
+  const managed = managedOpencodePath(OPENCODE_VERSION, env);
+  if (existsSync(managed)) return managed;
   const win = platform() === "win32";
   const which = spawnSync(win ? "where" : "sh", win ? ["opencode"] : ["-c", "command -v opencode"], {
     encoding: "utf8",
@@ -60,6 +66,38 @@ export function findOpencode(env: NodeJS.ProcessEnv = process.env): string | nul
   return null;
 }
 
+/**
+ * The opencode executable, downloading OpenSession's own copy the first time (see
+ * opencode.ts). A copy already on PATH is used only when the download fails (offline),
+ * since it may be an older OpenCode.
+ */
+export async function ensureOpencode(o: { onProgress?: (p: InstallProgress) => void; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
+  const env = o.env ?? process.env;
+  if (env.OPENCODE_BIN && existsSync(env.OPENCODE_BIN)) return env.OPENCODE_BIN;
+  const managed = managedOpencodePath(OPENCODE_VERSION, env);
+  if (existsSync(managed)) return managed;
+  // One download at a time; later callers wait for it (and see its progress).
+  let job = downloads.get(managed);
+  if (!job) {
+    const listeners = new Set<(p: InstallProgress) => void>();
+    const promise = installOpencode({ dest: managed, onProgress: (p) => listeners.forEach((l) => l(p)) }).finally(() => downloads.delete(managed));
+    job = { promise, listeners };
+    downloads.set(managed, job);
+  }
+  if (o.onProgress) job.listeners.add(o.onProgress);
+  try {
+    return await job.promise;
+  } catch (e) {
+    const fallback = findOpencode(env);
+    if (fallback) return fallback;
+    throw new Error(`Couldn't download OpenCode: ${(e as Error).message}\n${INSTALL_HINT}`);
+  } finally {
+    if (o.onProgress) job.listeners.delete(o.onProgress);
+  }
+}
+
+const downloads = new Map<string, { promise: Promise<string>; listeners: Set<(p: InstallProgress) => void> }>();
+
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const s = createServer();
@@ -74,8 +112,7 @@ export function freePort(): Promise<number> {
 }
 
 export async function startLocalServer(o: StartOptions): Promise<LocalServer> {
-  const bin = o.bin ?? findOpencode();
-  if (!bin) throw new Error(INSTALL_HINT);
+  const bin = o.bin ?? (await ensureOpencode({ onProgress: o.onInstallProgress }));
   if (!existsSync(o.directory)) throw new Error(`folder not found: ${o.directory}`);
   const port = o.port ?? (await freePort());
   const password = randomBytes(24).toString("base64url");
@@ -133,6 +170,8 @@ export async function startLocalServer(o: StartOptions): Promise<LocalServer> {
   await stop();
   throw new Error(`opencode did not become ready in time (${last}):\n${tail.join("\n")}`);
 }
+
+export { dataDir, installOpencode, managedOpencodePath, opencodeTarget, OPENCODE_VERSION, type InstallProgress } from "./opencode";
 
 export {
   applyAgentConfig,

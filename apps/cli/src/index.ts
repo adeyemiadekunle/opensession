@@ -3,7 +3,17 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 import { ApiError, CloudClient, LocalClient } from "@opensession/api-client";
 import { emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
-import { ensureLocalAgentDefaults, loadLocalAgentConfig, saveLocalAgentConfig, startLocalServer } from "@opensession/local-runner";
+import {
+  ensureLocalAgentDefaults,
+  ensureOpencode,
+  findOpencode,
+  loadLocalAgentConfig,
+  managedOpencodePath,
+  OPENCODE_VERSION,
+  saveLocalAgentConfig,
+  startLocalServer,
+  type InstallProgress,
+} from "@opensession/local-runner";
 import { configDir, loadConfig, saveConfig } from "./config";
 import { handoffToCloud, handoffToLocal, systemGit } from "@opensession/local-runner";
 import { browserLogin, openBrowser } from "./login";
@@ -15,7 +25,7 @@ declare const __CLI_VERSION__: string;
 
 const program = new Command()
   .name("opensession")
-  .description("OpenSession: an AI coding agent with your own model keys, in the cloud or on this computer.")
+  .description("OpenSession: an AI coding agent with your own model keys, on this computer or in the cloud.")
   .version(typeof __CLI_VERSION__ === "string" ? __CLI_VERSION__ : "0.0.0-dev")
   .option("-p, --project <id>", "cloud project to use (default: $OPENSESSION_PROJECT or your default workspace)");
 
@@ -200,9 +210,9 @@ async function withRuntime<T>(o: { local?: boolean; dir?: string }, f: (c: OpenS
   return f(c, skills);
 }
 
-async function openSession(c: OpenSessionClient, o: { session?: string; model?: string; agent?: string }): Promise<string> {
+async function openSession(c: OpenSessionClient, o: { session?: string; model?: string; agent?: string; local?: boolean }): Promise<string> {
   if (o.session) return o.session;
-  const model = await pickModel(c, o.model ?? loadConfig().defaultModel);
+  const model = await pickModel(c, o.model ?? loadConfig().defaultModel, o.local ? LOCAL_KEY_HINT : undefined);
   const s = await c.createSession({ model, agent: o.agent });
   console.error(`session ${s.id}  ${model.providerID}/${model.id}`);
   return s.id;
@@ -232,30 +242,38 @@ program
   .option("-s, --session <id>", "continue an existing session")
   .option("--local", "use OpenCode on this computer instead of the cloud")
   .option("-C, --dir <folder>", "project folder (with --local)", ".")
-  .action(async (o) => {
-    const { createInterface } = await import("node:readline/promises");
-    await withRuntime(o, async (c, skills) => {
-      const sessionId = await openSession(c, o);
-      const where = o.local ? resolve(o.dir) : `cloud project ${(c as CloudClient).workspace}`;
-      console.error(`attached to ${where}. Type a prompt or /command; Ctrl+D or :q to leave (the session is kept).`);
-      const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "> " });
-      rl.prompt();
-      for await (const line of rl) {
-        const text = line.trim();
-        if (text === ":q") break;
-        if (text) {
-          try {
-            await runPrompt(c, sessionId, text, (s) => console.log(s), { skills });
-          } catch (e) {
-            console.error(`error: ${(e as Error).message}`);
-          }
+  .action((o) => chat(o));
+
+// `opensession` on its own: chat with the agent on this computer, in the current folder.
+program.action(() => {
+  if (program.args.length) program.error(`unknown command '${program.args[0]}' (see opensession --help)`);
+  return chat({ local: true, dir: "." });
+});
+
+async function chat(o: { local?: boolean; dir: string; session?: string; model?: string; agent?: string }): Promise<void> {
+  const { createInterface } = await import("node:readline/promises");
+  await withRuntime(o, async (c, skills) => {
+    const sessionId = await openSession(c, o);
+    const where = o.local ? resolve(o.dir) : `cloud project ${(c as CloudClient).workspace}`;
+    console.error(`attached to ${where}. Type a prompt or /command; Ctrl+D or :q to leave (the session is kept).`);
+    const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "> " });
+    rl.prompt();
+    for await (const line of rl) {
+      const text = line.trim();
+      if (text === ":q") break;
+      if (text) {
+        try {
+          await runPrompt(c, sessionId, text, (s) => console.log(s), { skills });
+        } catch (e) {
+          console.error(`error: ${(e as Error).message}`);
         }
-        rl.prompt();
       }
-      rl.close();
-      console.error(`left session ${sessionId} (continue with: opensession attach -s ${sessionId}${o.local ? " --local" : ""})`);
-    });
+      rl.prompt();
+    }
+    rl.close();
+    console.error(`left session ${sessionId} (continue with: opensession attach -s ${sessionId}${o.local ? ` --local -C ${JSON.stringify(resolve(o.dir))}` : ""})`);
   });
+}
 
 // ---- moving work between this computer and the cloud --------------------------------
 
@@ -390,9 +408,25 @@ gitCmd
 
 // ---- local mode ---------------------------------------------------------------------
 
+const LOCAL_KEY_HINT = "no models available: add an API key with `opensession local key <provider>` (e.g. anthropic)";
+
+/** Prints OpenCode's first-time download progress on stderr. */
+function downloadProgress(): (p: InstallProgress) => void {
+  let shown = false;
+  return ({ received, total }) => {
+    if (!shown) console.error(`Downloading OpenCode ${OPENCODE_VERSION} (first run only)...`);
+    shown = true;
+    const mb = (n: number) => (n / 1e6).toFixed(0);
+    const done = total > 0 && received >= total;
+    const line = total ? `  ${mb(received)} / ${mb(total)} MB` : `  ${mb(received)} MB`;
+    if (process.stderr.isTTY) process.stderr.write(`\r${line}${done ? "\n" : ""}`);
+    else if (done) console.error(line);
+  };
+}
+
 async function withLocal<T>(dir: string, f: (c: LocalClient) => Promise<T>): Promise<T> {
   ensureLocalAgentDefaults(configDir()); // git approval on from the first run
-  const srv = await startLocalServer({ directory: dir });
+  const srv = await startLocalServer({ directory: dir, onInstallProgress: downloadProgress() });
   try {
     return await f(new LocalClient({ baseUrl: srv.url, password: srv.password, directory: dir }));
   } finally {
@@ -408,7 +442,7 @@ local
   .action(async (o) => {
     const dir = resolve(o.dir);
     ensureLocalAgentDefaults(configDir());
-    const srv = await startLocalServer({ directory: dir });
+    const srv = await startLocalServer({ directory: dir, onInstallProgress: downloadProgress() });
     console.log(`OpenCode is running for ${dir}`);
     console.log(`  URL:      ${srv.url}`);
     console.log(`  user:     opencode`);
@@ -429,7 +463,7 @@ local
     const dir = resolve(o.dir);
     const skills = loadLocalAgentConfig(configDir()).skills.map((s) => s.id);
     await withLocal(dir, async (c) => {
-      const model = await pickModel(c, o.model ?? loadConfig().defaultModel);
+      const model = await pickModel(c, o.model ?? loadConfig().defaultModel, LOCAL_KEY_HINT);
       const s = await c.createSession({ model, agent: o.agent });
       console.error(`${model.providerID}/${model.id} in ${dir}`);
       await runPrompt(c, s.id, words.join(" "), (x) => console.log(x), { skills });
@@ -442,6 +476,28 @@ local
     const key = await readSecret(`${provider} API key: `);
     await withLocal(process.cwd(), (c) => c.connectKey(provider, key));
     console.log(`Saved ${provider} key on this computer.`);
+  });
+
+const opencode = program.command("opencode").description("The OpenCode that local mode runs (OpenSession downloads it for you)");
+opencode
+  .command("install")
+  .description("Download OpenCode now instead of on the first local run")
+  .option("--postinstall", "run by the npm package's install: never fails the install")
+  .action(async (o) => {
+    try {
+      const bin = await ensureOpencode({ onProgress: downloadProgress() });
+      console.log(`OpenCode is ready: ${bin}`);
+    } catch (e) {
+      if (!o.postinstall) throw e;
+      console.error(`OpenSession: OpenCode will be downloaded on the first local run (${(e as Error).message.split("\n")[0]}).`);
+    }
+  });
+opencode
+  .command("path")
+  .description("Show which OpenCode local mode uses")
+  .action(() => {
+    const bin = findOpencode();
+    console.log(bin ?? `not installed yet (run \`opensession opencode install\`; it goes to ${managedOpencodePath()})`);
   });
 
 program
@@ -458,6 +514,10 @@ program
     const cfg = Object.keys(patch).length ? saveConfig(patch) : loadConfig();
     console.log({ ...cfg, token: cfg.token ? `${cfg.token.slice(0, 8)}…` : undefined });
   });
+
+// Set last, so subcommands don't inherit it: the default action reports unknown commands.
+program.allowExcessArguments(true);
+program.addHelpText("after", "\nRun `opensession` with no command in a project folder to chat with the agent there.");
 
 program.parseAsync().catch((e: unknown) => {
   const msg = e instanceof ApiError && e.status === 401 ? "not signed in or token revoked: run `opensession login`" : (e as Error).message;

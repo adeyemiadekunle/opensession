@@ -54,5 +54,13 @@ if (-not (($userPath -split ";") -contains $Dir)) {
 
 $installed = & node $Target --version
 Write-Host "Installed opensession $installed in $Dir"
+
+# The agent runtime (OpenCode) for local mode: OpenSession installs its own copy.
+& node $Target opencode install --postinstall
+if ($LASTEXITCODE -ne 0) { Write-Host "OpenCode will be downloaded on the first local run." }
+
 Write-Host ""
-Write-Host "Next: opensession login"
+Write-Host "Next, in a terminal in your project folder:"
+Write-Host "  opensession local key anthropic   # once: a model API key (any provider OpenCode supports)"
+Write-Host "  opensession                       # chat with the agent in this folder"
+Write-Host "To use your cloud projects too: opensession login"

@@ -50,6 +50,9 @@ protocol.registerSchemesAsPrivileged([
 let server: LocalServer | null = null;
 let folder: string | null = null;
 let lastError: string | null = null;
+let starting = false;
+let download: LocalStatus["download"] = null;
+let startGen = 0; // the latest start wins when folders change mid-start
 let win: BrowserWindow | null = null;
 
 interface Settings {
@@ -117,19 +120,34 @@ async function cloudStatus(): Promise<CloudStatus> {
   return { signedIn: Boolean(cloudToken), user: cloudUser, gatewayUrl: GATEWAY_URL, webUrl: WEB_URL };
 }
 
-const status = (): LocalStatus => ({ folder, running: Boolean(server), error: lastError });
+const status = (): LocalStatus => ({ folder, running: Boolean(server), starting, download, error: lastError });
 
+/** Start OpenCode in `dir` (downloading it the first time). Callers that don't await it poll status(). */
 async function startFor(dir: string): Promise<LocalStatus> {
-  if (server) await server.stop().catch(() => undefined);
-  server = null;
+  const gen = ++startGen;
   folder = dir;
   lastError = null;
+  starting = true;
+  download = null;
+  const old = server;
+  server = null;
+  if (old) await old.stop().catch(() => undefined);
   try {
     ensureLocalAgentDefaults(setupDir()); // git approval on from the first run
-    server = await startLocalServer({ directory: dir });
+    const started = await startLocalServer({ directory: dir, onInstallProgress: (p) => (download = p) });
+    if (gen !== startGen) {
+      await started.stop().catch(() => undefined);
+      return status();
+    }
+    server = started;
     saveSettings({ folder: dir });
   } catch (e) {
-    lastError = (e as Error).message;
+    if (gen === startGen) lastError = (e as Error).message;
+  } finally {
+    if (gen === startGen) {
+      starting = false;
+      download = null;
+    }
   }
   return status();
 }
@@ -217,11 +235,15 @@ function createWindow() {
 }
 
 ipcMain.handle("local:status", () => status());
-ipcMain.handle("local:restart", () => (folder ? startFor(folder) : status()));
+ipcMain.handle("local:restart", () => {
+  if (folder) void startFor(folder);
+  return status();
+});
 ipcMain.handle("local:chooseFolder", async () => {
   const r = await dialog.showOpenDialog(win!, { properties: ["openDirectory", "createDirectory"] });
   if (r.canceled || !r.filePaths[0]) return status();
-  return startFor(r.filePaths[0]);
+  void startFor(r.filePaths[0]);
+  return status();
 });
 ipcMain.handle("open:cloud", () => shell.openExternal(WEB_URL));
 
@@ -356,7 +378,7 @@ app.whenReady().then(async () => {
   registerProtocols();
   loadCloudToken();
   const saved = loadSettings().folder;
-  if (saved && existsSync(saved)) await startFor(saved);
+  if (saved && existsSync(saved)) void startFor(saved); // the window shows its progress
   createWindow();
 });
 
