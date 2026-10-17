@@ -114,6 +114,16 @@ class SandboxManager:
         # the gateway reads them from its database). None values mean "use the default".
         self.limits: Callable[[str], dict] = lambda user: {}
         self._user_locks: dict[str, asyncio.Lock] = {}
+        # Lifecycle events for observability: (kind, ref, details). Kinds: started,
+        # slept (reason: idle | manual | make_room), destroyed, user_limit, capacity,
+        # start_failed. Must not raise or block.
+        self.on_event: Callable[[str, SandboxRef, dict], None] = lambda kind, ref, data: None
+
+    def _emit(self, kind: str, ref: SandboxRef, **data: Any) -> None:
+        try:
+            self.on_event(kind, ref, data)
+        except Exception:
+            pass
 
     # ---- identity -----------------------------------------------------------
 
@@ -221,17 +231,29 @@ class SandboxManager:
         running = await self.provider.state(ref) == "running"
         if running and want is not None and await self.provider.created_digest(ref) != want:
             running = False  # the provider recreates it with the new env
+        began = time.monotonic()
         if running:
             await self.provider.start(ref, extra_env, want, config_tar)  # reattach only
         else:
             async with self._user_locks.setdefault(ref.user, asyncio.Lock()):
-                await self._make_room(ref)
+                try:
+                    await self._make_room(ref)
+                except SandboxUserLimitError:
+                    self._emit("user_limit", ref)
+                    raise
                 others = [i for i in await self.provider.list() if i.ref.key != ref.key]
                 if len(others) >= self.cfg.max_running:
+                    self._emit("capacity", ref, running=len(others))
                     raise SandboxCapacityError("no free sandbox capacity, try again later")
                 await self.provider.start(ref, extra_env, want, config_tar)
-        entry = await self._wait_ready(ref)
+        try:
+            entry = await self._wait_ready(ref)
+        except Exception as e:
+            self._emit("start_failed", ref, error=str(e)[:300])
+            raise
         entry.env_digest = await self.provider.created_digest(ref)
+        if not running:
+            self._emit("started", ref, seconds=round(time.monotonic() - began, 1))
         return entry
 
     async def _wait_ready(self, ref: SandboxRef) -> _Entry:
@@ -306,8 +328,8 @@ class SandboxManager:
         only visible to this one process (used for short-lived git credentials)."""
         return await self.provider.exec(self._ref(user, workspace), cmd, env, workdir)
 
-    async def stop(self, user: str, workspace: str) -> None:
-        await self._sleep(self._ref(user, workspace))
+    async def stop(self, user: str, workspace: str, reason: str = "manual") -> None:
+        await self._sleep(self._ref(user, workspace), reason)
 
     async def destroy(self, user: str, workspace: str, delete_data: bool = False) -> None:
         ref = self._ref(user, workspace)
@@ -316,6 +338,7 @@ class SandboxManager:
             await entry.client.aclose()
         self._orphans.pop(ref.key, None)
         await self.provider.destroy(ref, delete_data)
+        self._emit("destroyed", ref, data_deleted=delete_data)
 
     # ---- per-user limit, busy check, sleep ----------------------------------------
 
@@ -355,7 +378,7 @@ class SandboxManager:
         if len(idle) < need:
             raise SandboxUserLimitError(limit, sorted(o.workspace for o in others))
         for _, _, other in sorted(idle, key=lambda t: (t[0], t[1]))[:need]:
-            await self._sleep(other)
+            await self._sleep(other, "make_room")
 
     async def _busy(self, ref: SandboxRef) -> bool:
         """True if OpenCode in this sandbox has a session still working."""
@@ -379,12 +402,13 @@ class SandboxManager:
             if temp:
                 await client.aclose()
 
-    async def _sleep(self, ref: SandboxRef) -> None:
+    async def _sleep(self, ref: SandboxRef, reason: str = "idle") -> None:
         entry = self._entries.pop(ref.key, None)
         if entry:
             await entry.client.aclose()
         self._orphans.pop(ref.key, None)
         await self.provider.stop(ref)
+        self._emit("slept", ref, reason=reason)
 
     # ---- status and disk ------------------------------------------------------------
 
@@ -459,7 +483,7 @@ class SandboxManager:
                     if now - entry.busy_since < self.cfg.max_busy_seconds:
                         continue
                 if entry.ref:
-                    await self._sleep(entry.ref)
+                    await self._sleep(entry.ref, "idle")
                 stopped.append(key)
             else:
                 entry.busy_since = None
@@ -473,8 +497,30 @@ class SandboxManager:
                 self._orphan_busy.pop(key, None)
                 self._orphans.pop(key, None)
                 await self.provider.stop(ref)
+                self._emit("slept", ref, reason="idle")
                 stopped.append(key)
         return stopped
+
+    async def snapshot(self) -> list[dict]:
+        """Every sandbox the provider knows, with what this gateway knows about it (admin)."""
+        now = time.monotonic()
+        out = []
+        for info in await self.provider.list(include_stopped=True):
+            e = self._entries.get(info.ref.key)
+            row: dict[str, Any] = {
+                "user": info.ref.user,
+                "workspace": info.ref.workspace,
+                "state": "running" if info.running else "sleeping",
+                "connections": e.leases if e else 0,
+                "idle_seconds": int(now - e.last_used) if e else None,
+                "disk_mb": e.disk_mb if e else None,
+                "disk_limit_mb": self.disk_limit_for(info.ref.user),
+                "adopted": info.ref.key in self._orphans,
+            }
+            if e and e.busy_since:
+                row["busy_seconds"] = int(now - e.busy_since)
+            out.append(row)
+        return out
 
     async def run_reaper(self, interval: float = 60.0) -> None:
         try:

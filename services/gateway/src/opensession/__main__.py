@@ -59,12 +59,21 @@ def main() -> None:
         print(f"copied into {redact(args[2])}")
         return
 
+    import logging
+
     import uvicorn
 
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     uvicorn.run(
         "opensession.gateway:app",
         host=os.environ.get("GATEWAY_HOST", "127.0.0.1"),
         port=int(os.environ.get("GATEWAY_PORT", "8000")),
+        # The gateway logs each request itself (route, status, time: observability.py).
+        access_log=os.environ.get("LOG_REQUESTS", "1") == "0",
+        log_config=None,
     )
 
 

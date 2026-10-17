@@ -119,6 +119,7 @@ def test_terminal_keeps_sandbox_awake_while_connected(monkeypatch):
 
 def test_bad_origin_refused(monkeypatch):
     monkeypatch.setenv("CORS_ORIGINS", "https://app.opensession.dev")
+    monkeypatch.setenv("ALLOW_UNSAFE_START", "1")  # a public origin with dev auth (test only)
     c, mgr, seen, opened = setup(monkeypatch)
     with c:
         t = c.post("/terminals/pty_abc/ticket", headers=A).json()["ticket"]

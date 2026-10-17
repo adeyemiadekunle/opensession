@@ -49,7 +49,7 @@ def test_clerk_token_accepted_and_bad_ones_rejected(tmp_path):
     c, _, _ = app_client(tmp_path)
     with c:
         r = c.get("/me", headers=bearer(clerk_token()))
-        assert r.status_code == 200 and r.json() == {"user_id": "user_2abcDEF123", "via": "clerk"}
+        assert r.status_code == 200 and r.json() == {"user_id": "user_2abcDEF123", "via": "clerk", "admin": False}
         assert c.get("/me").status_code == 401
         assert c.get("/me", headers={"X-User-Id": "alice"}).status_code == 401  # no dev header in clerk mode
         assert c.get("/me", headers=bearer(clerk_token(key=OTHER))).status_code == 401  # wrong signer
@@ -85,7 +85,7 @@ def test_access_token_lifecycle(tmp_path):
         assert r.status_code == 201
         tok = r.json()["token"]
         assert tok.startswith("osk_")
-        assert c.get("/me", headers=bearer(tok)).json() == {"user_id": "user_2abcDEF123", "via": "token"}
+        assert c.get("/me", headers=bearer(tok)).json() == {"user_id": "user_2abcDEF123", "via": "token", "admin": False}
         listed = c.get("/tokens", headers=s).json()
         assert listed[0]["name"] == "laptop cli" and "token" not in listed[0]
         assert listed[0]["last_used_at"] is not None

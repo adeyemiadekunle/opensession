@@ -67,6 +67,7 @@ SANDBOX_MAX_RUNNING=6
 SANDBOX_MAX_PER_USER=2
 POSTGRES_PASSWORD=smoke-$RANDOM
 GATEWAY_HOST_PORT=$PORT
+ADMIN_USER_IDS=alice
 ENV
 export OPENSESSION_ENV_FILE=.env.smoke
 docker compose --env-file .env.smoke up -d --build
@@ -74,6 +75,7 @@ docker compose --env-file .env.smoke up -d --build
 echo "== gateway"
 for _ in $(seq 1 60); do curl -sf "$G/providers" >/dev/null && break; sleep 2; done
 check "gateway answers" 200 "$(api GET alice /providers)"
+check "health" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$G/health")"
 
 echo "== sandboxes"
 check "alice sandbox starts" 200 "$(api GET alice /p/default/api/health)"
@@ -185,6 +187,14 @@ PY
 REUSE=$(curl -s -o /dev/null -w '%{http_code}' "$G/terminals/$PTY/connect?ticket=$TICKET" -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -m 5 || true)
 [[ "$REUSE" != "101" ]] && ok "ticket cannot be reused ($REUSE)" || bad "ticket reused"
 check "close terminal" 204 "$(apiw DELETE alice p3 "/terminals/$PTY")"
+
+echo "== admin"
+check "admin overview" 200 "$(api GET alice /admin/overview)"
+python3 -c "import json;o=json.load(open('/tmp/os_body'));assert o['counts']['running']>=1 and o['requests']['requests']>0" \
+  && ok "overview counts sandboxes and requests" || bad "overview: $(head -c 400 /tmp/os_body)"
+check "not for other users" 403 "$(api GET bob /admin/overview)"
+check "prometheus metrics" 200 "$(api GET alice /admin/metrics)"
+grep -q "opensession_sandboxes_running" /tmp/os_body && ok "metrics have sandbox gauges" || bad "metrics: $(head -c 300 /tmp/os_body)"
 
 echo "== stop and delete"
 check "stop bob" 204 "$(api POST bob /workspace/stop)"

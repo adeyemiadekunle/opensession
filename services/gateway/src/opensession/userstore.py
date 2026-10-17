@@ -325,6 +325,22 @@ class UserStore:
                 )
         return self.get_limits(user)
 
+    def ping(self) -> None:
+        """Raises if the database can't be reached (health checks)."""
+        with self._lock:
+            self._db.execute("SELECT 1").fetchone()
+
+    def stats(self) -> dict:
+        """How many people use this deployment (admin page): users with any data, projects."""
+        with self._lock:
+            users = self._db.execute(
+                "SELECT COUNT(*) FROM (SELECT user_id FROM workspaces UNION SELECT user_id FROM api_tokens "
+                "UNION SELECT user_id FROM agent_config UNION SELECT user_id FROM egress_domains) AS u"
+            ).fetchone()[0]
+            projects = self._db.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0]
+            tokens = self._db.execute("SELECT COUNT(*) FROM api_tokens").fetchone()[0]
+        return {"users": users, "projects": projects, "access_tokens": tokens}
+
     def close(self) -> None:
         self._db.close()
 

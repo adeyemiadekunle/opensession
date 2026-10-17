@@ -417,6 +417,8 @@ class DockerProvider(SandboxProvider):
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
             restart_policy={"Name": "no"},
+            # A chatty sandbox can't fill the host's disk with its logs.
+            log_config={"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}},
         )
         if self.cfg.runtime:
             kwargs["runtime"] = self.cfg.runtime

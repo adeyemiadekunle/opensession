@@ -154,6 +154,48 @@ const handlers: Record<string, unknown> = {
     { id: "e2b", name: "e2b-provider", repo: null, branch: null, cloned: false, state: "sleeping" },
   ],
   connectKey: async () => undefined,
+  // ?admin: the platform admin page.
+  adminOverview: async () => {
+    const now = Date.now() / 1000;
+    return {
+      gateway: { started: now - 93_000, uptime_seconds: 93_000, provider: "docker", auth_mode: "clerk" },
+      requests: {
+        window_seconds: 300, requests: 412, per_minute: 82.4, errors: 3, error_rate: 0.0073, limited: 1, p50_ms: 18.2, p95_ms: 240.5,
+        busiest: [
+          { route: "/p/{workspace}/api/{path:path}", count: 351, p95_ms: 210.4 },
+          { route: "/workspace", count: 31, p95_ms: 12.1 },
+          { route: "/git/checks", count: 18, p95_ms: 640.2 },
+          { route: "/browser/ticket", count: 6, p95_ms: 35.0 },
+        ],
+        slowest: [
+          { route: "/git/checks", count: 18, p95_ms: 640.2 },
+          { route: "/p/{workspace}/api/{path:path}", count: 351, p95_ms: 210.4 },
+          { route: "/browser/ticket", count: 6, p95_ms: 35.0 },
+        ],
+      },
+      requests_hour: { window_seconds: 3600, requests: 4120, per_minute: 68.7, errors: 9, error_rate: 0.0022, limited: 2, p50_ms: 17.0, p95_ms: 198.0 },
+      sandboxes: [
+        { user: "user_2abcDEF123", workspace: "default", state: "running", connections: 2, idle_seconds: 4, disk_mb: 1860, disk_limit_mb: 2048, adopted: false },
+        { user: "user_2abcDEF123", workspace: "e2b", state: "running", connections: 0, idle_seconds: 1320, disk_mb: 412, disk_limit_mb: 2048, adopted: false, busy_seconds: 300 },
+        { user: "user_9xyZ", workspace: "default", state: "sleeping", connections: 0, idle_seconds: null, disk_mb: null, disk_limit_mb: 2048, adopted: false },
+      ],
+      counts: { users: 14, projects: 23, access_tokens: 9, running: 2, sleeping: 1, max_running: 4 },
+      limits: { max_per_user: 2, disk_mb: 2048, idle_seconds: 1800 },
+      host: { load: [1.12, 0.94, 0.88], cpus: 4, memory_mb: { total: 7940, available: 3110 }, disk_mb: { total: 160000, free: 41200 } },
+      errors: [
+        { time: now - 120, method: "POST", route: "/p/{workspace}/api/{path:path}", status: 502, user: "user_2abcDEF123" },
+        { time: now - 900, method: "GET", route: "/p/{workspace}/api/{path:path}", status: 429, user: "user_9xyZ" },
+      ],
+      events: [
+        { time: now - 60, kind: "started", user: "user_2abcDEF123", workspace: "e2b", seconds: 6.4 },
+        { time: now - 61, kind: "slept", user: "user_9xyZ", workspace: "default", reason: "make_room" },
+        { time: now - 3600, kind: "user_limit", user: "user_9xyZ", workspace: "web" },
+        { time: now - 7200, kind: "slept", user: "user_2abcDEF123", workspace: "default", reason: "idle" },
+      ],
+      warnings: [{ level: "info", text: "GitHub App not configured: projects can't clone, push or open pull requests." }],
+    };
+  },
+  adminLimits: async () => ({ override: { max_running: null, disk_mb: 4096 }, effective: { max_running: 2, disk_mb: 4096 }, defaults: { max_running: 2, disk_mb: 2048 } }),
   agentConfigStore: () => {
     let config: Record<string, unknown> = { git_approval: true, agents: [], skills: [], commands: [] };
     return {
