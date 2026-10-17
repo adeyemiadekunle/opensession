@@ -1,5 +1,6 @@
 import type { CiChecks, CloudClient } from "@opensession/api-client";
 import { useEffect, useMemo, useState } from "react";
+import { AdminPage } from "./AdminPage";
 import { AgentSetup, type SecretsApi } from "./AgentSetup";
 import { parsePortTarget, type PreviewApi } from "./BrowserPanel";
 import { ProfilePages } from "./AccountPages";
@@ -28,7 +29,7 @@ export interface CloudAccount {
 export interface CloudAppProps {
   /** Signed-in client (web: Clerk session; desktop: access token added by the main process). */
   client: CloudClient;
-  /** Current page ("/", "/sessions", "/projects", "/agent", "/settings") and navigation. */
+  /** Current page ("/", "/sessions", "/projects", "/agent", "/settings", "/admin") and navigation. */
   path: string;
   go: (to: string) => void;
   account?: CloudAccount;
@@ -99,6 +100,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
   );
   const [projectsVersion, setProjectsVersion] = useState(0);
   const projects = useAsync(() => client.listProjects(), [client, projectsVersion]);
+  const me = useAsync(() => client.me(), [client]);
   const [setupVersion, setSetupVersion] = useState(0);
   const setup = useAsync(() => store.get(), [store, setupVersion]);
   const skillIds = setup.data?.config.skills.map((s) => s.id) ?? [];
@@ -151,9 +153,11 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
     { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => go("/settings") },
     { id: "agent", label: "Agent setup", onSelect: () => go("/agent") },
     { id: "projects", label: "Projects", onSelect: () => go("/projects") },
+    ...(me.data?.admin ? [{ id: "admin", label: "Admin", onSelect: () => go("/admin") }] : []),
     ...(account?.items ?? []),
   ];
 
+  if (path === "/admin") return <AdminPage client={client} onBack={back} />;
   if (path === "/sessions") {
     return (
       <CloudSessions

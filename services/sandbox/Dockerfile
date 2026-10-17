@@ -1,7 +1,7 @@
 # Sandbox image: OpenCode V2 server + common toolchains, running as a non-root user.
 #
 # Build (from the repo root):
-#   docker build -t opencode-sandbox:latest --build-arg OPENCODE_VERSION=2.0.0 sandbox/
+#   docker build -t opencode-sandbox:latest --build-arg OPENCODE_VERSION=2.0.0 services/sandbox/
 #
 # OpenCode V2 is installed with its official installer (https://opencode.ai/v2/install),
 # as the agent user. Re-run scripts/check after changing OPENCODE_VERSION: the V2

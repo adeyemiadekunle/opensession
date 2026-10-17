@@ -7,6 +7,17 @@
 #
 # No container_name anywhere: Dokploy rewrites names, so the gateway finds itself
 # ("self") and the egress proxy ("compose:egress") through Docker Compose's labels.
+#
+# Every service rotates its logs and has a memory cap; gateway, web and egress have
+# healthchecks (the gateway's: GET /health, which also checks the database). Run ONE
+# gateway: terminal, browser and preview tickets are kept in its memory.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   web:
     build:
@@ -18,6 +29,13 @@ services:
     restart: unless-stopped
     expose:
       - "80"
+    logging: *logging
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   gateway:
     build: services/gateway
@@ -32,6 +50,17 @@ services:
       OPENSESSION_DB: /data/opensession.db
     expose:
       - "8000"
+    logging: *logging
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      # The gateway also joins every sandbox's network; Traefik must use Dokploy's.
+      - traefik.docker.network=dokploy-network
     volumes:
       # Full control of Docker: this server should run nothing you don't trust it with.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -56,6 +85,7 @@ services:
     image: ${SANDBOX_IMAGE:-opencode-sandbox:latest}
     entrypoint: ["true"]
     restart: "no"
+    logging: *logging
 
   # The gateway's database. Not published and not on any sandbox network.
   db:
@@ -67,6 +97,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pg-data:/var/lib/postgresql/data
+    logging: *logging
+    mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U opensession -d opensession"]
       interval: 3s
@@ -79,6 +111,13 @@ services:
     restart: unless-stopped
     volumes:
       - egress-conf:/etc/squid/conf.d
+    logging: *logging
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "squid", "-k", "check", "-f", "/etc/squid/squid.conf"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   pg-data:

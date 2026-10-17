@@ -17,6 +17,7 @@ export type { LiveBrowserApi } from "./LiveBrowser";
 export { SandboxGate } from "./SandboxGate";
 export { CloudApp } from "./CloudApp";
 export { CloudSessions } from "./CloudSessions";
+export { AdminPage } from "./AdminPage";
 export type { CloudAppProps, CloudAccount } from "./CloudApp";
 export { useCiWatch } from "./ciWatch";
 export { ReviewView } from "./ReviewView";

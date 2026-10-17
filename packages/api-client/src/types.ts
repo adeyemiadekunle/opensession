@@ -404,3 +404,60 @@ export function skillMentions(text: string, known: string[]): { id: string; ment
   }
   return out;
 }
+
+// ---- platform admin (GET /admin/overview) ---------------------------------------------
+
+export interface AdminRoute {
+  route: string;
+  count: number;
+  p95_ms: number;
+}
+
+export interface AdminRequests {
+  window_seconds: number;
+  requests: number;
+  per_minute: number;
+  errors: number;
+  error_rate: number;
+  limited: number;
+  p50_ms: number;
+  p95_ms: number;
+  busiest?: AdminRoute[];
+  slowest?: AdminRoute[];
+}
+
+export interface AdminSandbox {
+  user: string;
+  workspace: string;
+  state: "running" | "sleeping";
+  connections: number;
+  idle_seconds: number | null;
+  disk_mb: number | null;
+  disk_limit_mb: number;
+  adopted: boolean;
+  busy_seconds?: number;
+}
+
+export interface AdminOverview {
+  gateway: { started: number; uptime_seconds: number; provider: string; auth_mode: string };
+  requests: AdminRequests;
+  requests_hour: AdminRequests;
+  sandboxes: AdminSandbox[];
+  counts: { users: number; projects: number; access_tokens: number; running: number; sleeping: number; max_running: number };
+  limits: { max_per_user: number; disk_mb: number; idle_seconds: number };
+  host: {
+    load?: number[];
+    cpus?: number;
+    memory_mb?: { total?: number; available?: number };
+    disk_mb?: { total: number; free: number };
+  };
+  errors: { time: number; method: string; route: string; status: number; user: string | null }[];
+  events: { time: number; kind: string; user: string | null; workspace: string | null; [k: string]: unknown }[];
+  warnings: { level: "danger" | "warning" | "info"; text: string }[];
+}
+
+export interface AdminLimits {
+  override: { max_running: number | null; disk_mb: number | null };
+  effective: { max_running: number; disk_mb: number };
+  defaults: { max_running: number; disk_mb: number };
+}

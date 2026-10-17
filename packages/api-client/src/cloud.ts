@@ -14,6 +14,8 @@ import type {
   AgentConfigStore,
   CiChecks,
   OutgoingChanges,
+  AdminOverview,
+  AdminLimits,
 } from "./types";
 
 export interface CloudClientOptions {
@@ -123,7 +125,24 @@ export class CloudClient extends OpenCodeClient {
 
   // ---- account (cloud only) -----------------------------------------------------
 
-  me(): Promise<{ user_id: string; via: string }> {
+  // ---- platform admin (ADMIN_USER_IDS) ---------------------------------------------
+
+  /** This gateway, its requests, every sandbox, recent errors and events. */
+  adminOverview(): Promise<AdminOverview> {
+    return this.http.get("/admin/overview");
+  }
+  /** Put any user's project sandbox to sleep (files and sessions are kept). */
+  async adminSleep(user: string, workspace: string) {
+    await this.http.post(`/admin/sandboxes/${enc(user)}/${enc(workspace)}/sleep`);
+  }
+  adminLimits(user: string): Promise<AdminLimits> {
+    return this.http.get(`/admin/users/${enc(user)}/limits`);
+  }
+  adminSetLimits(user: string, limits: { max_running: number | null; disk_mb: number | null }): Promise<unknown> {
+    return this.http.put(`/admin/users/${enc(user)}/limits`, { json: limits });
+  }
+
+  me(): Promise<{ user_id: string; via: string; admin?: boolean }> {
     return this.http.get("/me");
   }
   providers(): Promise<{ id: string; env_var: string }[]> {

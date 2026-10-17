@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import re
 import shlex
 from contextlib import asynccontextmanager
@@ -55,6 +56,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import agentconfig
 from . import opencode_proxy as ocp
 from . import preview as pv
+from . import observability as obs
+from . import ratelimit as rl
 from .agentconfig import BUILTIN_AGENTS, BUILTIN_TOOLS, AgentConfig
 from .auth import USER_ID_RE, AuthConfig, Authenticator, Principal
 from . import db as dbmod
@@ -79,6 +82,70 @@ from .orchestrator import (
 )
 
 WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+# One JSON line per request on the "opensession.access" logger (LOG_REQUESTS=0 turns it off).
+LOG_REQUESTS = os.environ.get("LOG_REQUESTS", "1") != "0"
+
+
+def public_base(request: Request) -> str:
+    """The gateway's public URL: GATEWAY_PUBLIC_URL, else the request's, with the scheme the
+    reverse proxy saw (X-Forwarded-Proto). Only the scheme is taken from forwarded headers:
+    trusting the forwarded client address would let a sandbox pose as another host."""
+    configured = os.environ.get("GATEWAY_PUBLIC_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+    base = str(request.base_url).rstrip("/")
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if proto in ("http", "https") and not base.startswith(proto + "://"):
+        base = proto + base[base.index("://") :]
+    return base
+
+
+LOCAL_ORIGIN_RE = re.compile(r"^(https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?|app://opensession)$")
+
+
+def public_deployment() -> bool:
+    """True when the web app is served from a real domain (CORS_ORIGINS or GATEWAY_PUBLIC_URL)."""
+    origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+    public_url = os.environ.get("GATEWAY_PUBLIC_URL", "").strip()
+    return any(not LOCAL_ORIGIN_RE.match(o) for o in origins) or bool(public_url and not LOCAL_ORIGIN_RE.match(public_url.rstrip("/")))
+
+
+def production_problems(app) -> list[str]:
+    """Settings that make a public deployment unsafe or broken; startup refuses them
+    (set ALLOW_UNSAFE_START=1 to start anyway, e.g. to fix things from a shell)."""
+    if not public_deployment():
+        return []
+    st = app.state
+    out = []
+    if st.auth.cfg.mode == "dev":
+        out.append("AUTH_MODE=dev lets anyone act as any user; use AUTH_MODE=clerk")
+    if st.keystore is None:
+        out.append("KEYSTORE_MASTER_KEYS is not set, so users can't store model API keys")
+    if st.github is not None and not os.environ.get("GITHUB_STATE_SECRET"):
+        out.append("GITHUB_STATE_SECRET is not set, so GitHub connect links break on every restart")
+    db = os.environ.get("DATABASE_URL", "")
+    if ":change-me@" in db or os.environ.get("POSTGRES_PASSWORD") == "change-me":
+        out.append("the database password is still the example 'change-me'")
+    return out
+
+
+def config_warnings(app) -> list[dict]:
+    """Settings an operator should know about (admin page; startup refuses the serious ones
+    on a public deployment, see production_problems)."""
+    st = app.state
+    out: list[dict] = []
+    if st.auth.cfg.mode == "dev":
+        out.append({"level": "danger", "text": "AUTH_MODE=dev: anyone can act as any user with an X-User-Id header."})
+    if st.keystore is None:
+        out.append({"level": "warning", "text": "KEYSTORE_MASTER_KEYS is not set: users can't store model API keys."})
+    if st.github is None:
+        out.append({"level": "info", "text": "GitHub App not configured: projects can't clone, push or open pull requests."})
+    if not st.egress.enabled:
+        out.append({"level": "warning", "text": "Egress filtering is off: sandboxes can reach any address."})
+    if not _admins():
+        out.append({"level": "info", "text": "ADMIN_USER_IDS is empty: nobody can open this page or change limits."})
+    return out
+
 
 PtyId = Annotated[str, Path(pattern=r"^pty_[A-Za-z0-9]{1,80}$")]
 TERMINAL_TICKET_SECONDS = 60
@@ -254,12 +321,17 @@ def create_app(
                 "(e.g. services/egress/allowlist.txt), or sandboxes cannot reach any model provider"
             )
         mgr.limits = _cached_limits(app.state.users)
+        metrics: obs.Metrics = app.state.metrics
+        mgr.on_event = lambda kind, ref, data: metrics.event(kind, ref.user, ref.workspace, **data)
         app.state.http = httpx.AsyncClient(transport=http_transport)
         if github is _FROM_ENV:
             gh_cfg = GitHubAppConfig.from_env()
             app.state.github = GitHubApp(gh_cfg, app.state.http) if gh_cfg else None
         else:
             app.state.github = github
+        problems = production_problems(app)
+        if problems and os.environ.get("ALLOW_UNSAFE_START") != "1":
+            raise RuntimeError("refusing to start a public deployment: " + "; ".join(problems))
         app.state.clone_locks = {}
         app.state.term_tickets = {}
         app.state.previews = pv.Tickets()
@@ -275,6 +347,8 @@ def create_app(
             await app.state.http.aclose()
 
     app = FastAPI(title="OpenSession gateway", lifespan=lifespan)
+    app.state.metrics = obs.Metrics()
+    app.state.limiter = rl.RateLimiter()
     app.state.ws_connect = _ws_connect
 
     origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
@@ -286,6 +360,20 @@ def create_app(
             allow_headers=["authorization", "content-type", "x-workspace", "last-event-id"],
             allow_credentials=False,
         )
+
+    # Middleware order, outermost first: preview_host, observe, block_sandboxes, rate_limit.
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        """Per-caller and per-action limits, and slowing down failed sign-ins (ratelimit.py)."""
+        limiter: rl.RateLimiter = request.app.state.limiter
+        host = request.client.host if request.client else None
+        over = limiter.check(request.method, request.url.path, request.headers, host)
+        if over:
+            return rl.too_many(*over)
+        response = await call_next(request)
+        if response.status_code == 401:
+            limiter.failed_sign_in(request.headers, host)
+        return response
 
     @app.middleware("http")
     async def block_sandboxes(request: Request, call_next):
@@ -300,6 +388,24 @@ def create_app(
         return await call_next(request)
 
     @app.middleware("http")
+    async def observe(request: Request, call_next):
+        """Times every request and records it by route template (observability.py)."""
+        began = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            route = request.scope.get("route")
+            path = getattr(route, "path", None) or ("preview" if pv.ticket_from_host(request.headers.get("host")) else "unmatched")
+            if path not in ("/health", "/admin/metrics"):
+                ms = (time.perf_counter() - began) * 1000
+                request.app.state.metrics.request(request.method, path, status, ms, getattr(request.state, "user", None))
+                if LOG_REQUESTS:
+                    obs.log_request(request.method, path, status, ms)
+
+    @app.middleware("http")
     async def preview_host(request: Request, call_next):
         """<ticket>.<PREVIEW_DOMAIN> is a browser preview (see preview.py), not the API."""
         ticket = pv.ticket_from_host(request.headers.get("host"))
@@ -310,7 +416,9 @@ def create_app(
     # ---- identity / routing -------------------------------------------------
 
     async def current_principal(request: Request) -> Principal:
-        return await request.app.state.auth.authenticate(request)
+        p = await request.app.state.auth.authenticate(request)
+        request.state.user = p.user_id  # for the request metrics' error list
+        return p
 
     async def current_user(p: Principal = Depends(current_principal)) -> str:
         return p.user_id
@@ -442,6 +550,59 @@ def create_app(
             cache.pop(user_id, None)
         return out
 
+    @app.get("/admin/overview")
+    async def admin_overview(request: Request, _: str = Depends(require_admin)):
+        """Everything on the admin page: this gateway, its requests, the sandboxes, problems."""
+        mgr: SandboxManager = request.app.state.sandboxes
+        metrics: obs.Metrics = request.app.state.metrics
+        sandboxes = await mgr.snapshot()
+        stats = await asyncio.to_thread(request.app.state.users.stats)
+        return {
+            "gateway": {
+                "started": metrics.started,
+                "uptime_seconds": int(time.time() - metrics.started),
+                "provider": mgr.cfg.provider,
+                "auth_mode": request.app.state.auth.cfg.mode,
+            },
+            "requests": metrics.summary(300),
+            "requests_hour": {k: v for k, v in metrics.summary(3600).items() if k not in ("busiest", "slowest")},
+            "sandboxes": sandboxes,
+            "counts": {
+                **stats,
+                "running": sum(1 for s in sandboxes if s["state"] == "running"),
+                "sleeping": sum(1 for s in sandboxes if s["state"] == "sleeping"),
+                "max_running": mgr.cfg.max_running,
+            },
+            "limits": {"max_per_user": mgr.cfg.max_per_user, "disk_mb": mgr.cfg.disk_limit_mb, "idle_seconds": mgr.cfg.idle_seconds},
+            "host": obs.host_stats(),
+            "errors": list(reversed(metrics.errors))[:50],
+            "events": list(reversed(metrics.events))[:80],
+            "warnings": config_warnings(request.app),
+        }
+
+    @app.get("/admin/metrics")
+    async def admin_metrics(request: Request, _: str = Depends(require_admin)):
+        """Prometheus text format. Scrape with an admin's personal access token as the bearer."""
+        from fastapi.responses import PlainTextResponse
+
+        mgr: SandboxManager = request.app.state.sandboxes
+        sandboxes = await mgr.snapshot()
+        gauges = {
+            "uptime_seconds": int(time.time() - request.app.state.metrics.started),
+            "sandboxes_running": sum(1 for s in sandboxes if s["state"] == "running"),
+            "sandboxes_sleeping": sum(1 for s in sandboxes if s["state"] == "sleeping"),
+            "sandboxes_max_running": mgr.cfg.max_running,
+            "sandbox_connections": sum(s["connections"] for s in sandboxes),
+        }
+        return PlainTextResponse(request.app.state.metrics.prometheus(gauges), media_type="text/plain; version=0.0.4")
+
+    @app.post("/admin/sandboxes/{user_id}/{ws_id}/sleep", status_code=204)
+    async def admin_sleep(user_id: str, ws_id: str, request: Request, admin: str = Depends(require_admin)):
+        """Put any user's project sandbox to sleep (files and sessions are kept)."""
+        if not USER_ID_RE.match(user_id) or not WORKSPACE_ID_RE.match(ws_id):
+            raise HTTPException(400, "invalid id")
+        await request.app.state.sandboxes.stop(user_id, ws_id, reason=f"admin:{admin}")
+
     @app.delete("/workspace", status_code=204)
     async def workspace_destroy(
         request: Request,
@@ -455,7 +616,18 @@ def create_app(
 
     @app.get("/me")
     async def me(p: Principal = Depends(current_principal)):
-        return {"user_id": p.user_id, "via": p.via}
+        return {"user_id": p.user_id, "via": p.via, "admin": p.user_id in _admins()}
+
+    @app.get("/health")
+    async def health(request: Request):
+        """For load balancers and Docker healthchecks: the gateway answers and its database works."""
+        from fastapi.responses import JSONResponse
+
+        try:
+            await asyncio.to_thread(request.app.state.users.ping)
+        except Exception:
+            return JSONResponse({"status": "error", "database": "unreachable"}, status_code=503)
+        return {"status": "ok", "uptime_seconds": int(time.time() - request.app.state.metrics.started)}
 
     @app.get("/tokens")
     async def list_tokens(request: Request, user: str = Depends(current_user)):
@@ -1177,7 +1349,7 @@ def create_app(
         if domain:
             url = f"{pv.preview_scheme()}://{ticket}.{domain}/"
         else:
-            url = str(request.base_url).rstrip("/") + f"/preview/{ticket}/"
+            url = public_base(request) + f"/preview/{ticket}/"
         return {"url": url, "port": body.port, "expires_in": pv.PREVIEW_SECONDS}
 
     @app.api_route("/preview/{ticket}", methods=["GET", "HEAD"])
