@@ -68,6 +68,21 @@
   --os-user: #26262a; --os-selected: #23231f; color-scheme: dark;
 }
 
+/* Accent color and code font from Settings > Appearance (blue and JetBrains Mono are the defaults).
+   Each accent has a light and a dark value so text on it keeps its contrast. */
+:root[data-accent="clay"] { --os-accent: #a8502f; --os-accent-text: #ffffff; }
+:root[data-accent="teal"] { --os-accent: #1f7a6f; --os-accent-text: #ffffff; }
+:root[data-accent="amber"] { --os-accent: #94600a; --os-accent-text: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  :root[data-accent="clay"]:not([data-theme="light"]) { --os-accent: #d98b6a; --os-accent-text: #1c0f08; }
+  :root[data-accent="teal"]:not([data-theme="light"]) { --os-accent: #5fbfb0; --os-accent-text: #0a1a17; }
+  :root[data-accent="amber"]:not([data-theme="light"]) { --os-accent: #e6b04c; --os-accent-text: #1f1607; }
+}
+:root[data-theme="dark"][data-accent="clay"] { --os-accent: #d98b6a; --os-accent-text: #1c0f08; }
+:root[data-theme="dark"][data-accent="teal"] { --os-accent: #5fbfb0; --os-accent-text: #0a1a17; }
+:root[data-theme="dark"][data-accent="amber"] { --os-accent: #e6b04c; --os-accent-text: #1f1607; }
+:root[data-code-font="system"] { --os-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+
 /* Tailwind theme: shadcn color names resolve to the tokens above, so utilities follow the theme. */
 @theme inline {
   --color-background: var(--os-bg);

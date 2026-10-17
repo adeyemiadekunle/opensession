@@ -3,11 +3,13 @@ import {
   AgentSetup,
   Button,
   CloudApp,
-  LocalKeys,
+  LocalSettings,
   NamedIcon,
+  PREF,
   OPEN_SESSION_KEY,
   PageHeader,
   Workspace,
+  readPref,
   useAsync,
   useCiWatch,
   type MoveToCloudRequest,
@@ -50,9 +52,10 @@ function projectStatus(p: Project) {
       : undefined;
 }
 
-/** CI changes become OS notifications. */
-const notifyCi = (messages: string[], ci: CiChecks) =>
-  void window.opensession.notify(`CI · ${ci.repo}`, messages.join("\n"));
+/** CI changes become OS notifications, unless turned off in Settings > General. */
+const notifyCi = (messages: string[], ci: CiChecks) => {
+  if (readPref(PREF.notifyCi, true)) void window.opensession.notify(`CI · ${ci.repo}`, messages.join("\n"));
+};
 
 export function App() {
   const [mode, setModeState] = useState<Mode>(savedMode);
@@ -181,6 +184,7 @@ function CloudMode({ onLocal }: { onLocal: () => void }) {
       path={path}
       go={go}
       onCi={notifyCi}
+      desktop
       sectionsAfter={[computer]}
       account={{
         name: st.user ?? "Cloud account",
@@ -313,18 +317,7 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       </div>
     );
   }
-  if (page === "settings") {
-    return (
-      <div className="flex h-full min-h-0 flex-col bg-background">
-        <PageHeader title="Keys" onBack={back} aside="Applies to this computer" />
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="os-settings">
-            <LocalKeys client={client} onSaved={() => setGen((g) => g + 1)} />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (page === "settings") return <LocalSettings client={client} store={store} onBack={back} onSaved={() => setGen((g) => g + 1)} />;
 
   const name = basename(st.folder);
   const projects: SidebarSection = {
@@ -365,7 +358,7 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
         name: cloud.data?.user ?? "This computer",
         detail: signedIn ? "Signed in to the cloud" : "Not signed in to the cloud",
         items: [
-          { id: "keys", label: "Keys", hint: "Ctrl ,", onSelect: () => setPage("settings") },
+          { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => setPage("settings") },
           { id: "agent", label: "Agent setup", onSelect: () => setPage("agent") },
           ...(signedIn ? [] : [{ id: "signin", label: "Sign in to the cloud", onSelect: () => onCloud() }]),
         ],
@@ -374,9 +367,9 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       }}
       noModels={
         <>
-          Add a model API key under{" "}
+          Add a model API key in{" "}
           <button className="os-link" onClick={() => setPage("settings")}>
-            Keys
+            Settings
           </button>
           .
         </>

@@ -1,6 +1,7 @@
 import type { CiChecks, CloudClient } from "@opensession/api-client";
 import { useEffect, useMemo, useState } from "react";
 import { AgentSetup, type SecretsApi } from "./AgentSetup";
+import { ProfilePages } from "./AccountPages";
 import { useCiWatch } from "./ciWatch";
 import { useAsync } from "./hooks";
 import { PageHeader } from "./PageHeader";
@@ -14,6 +15,9 @@ import { Workspace, type WorkspaceNotice } from "./Workspace";
 export interface CloudAccount {
   name: string;
   detail?: string;
+  email?: string;
+  /** Opens the sign-in provider's account screen (web: Clerk). */
+  onManage?: () => void;
   /** Menu items besides the app's own (Settings, Agent setup, Projects). */
   items?: AccountMenuItem[];
   onSignOut?: () => void;
@@ -28,6 +32,8 @@ export interface CloudAppProps {
   account?: CloudAccount;
   /** Sidebar sections after the cloud sessions (desktop: This computer). */
   sectionsAfter?: SidebarSection[];
+  /** Desktop app (shows its own preferences in Settings, and is "this device" in Profile). */
+  desktop?: boolean;
   /** Called when CI on the open project's branch changes (desktop: OS notification). */
   onCi?: (messages: string[], ci: CiChecks) => void;
 }
@@ -38,7 +44,7 @@ const PROJECT_KEY = "opensession.project";
  *  The same component runs in the web app and in the desktop app's cloud mode, so
  *  both show the same projects and sessions. The workspace fills the window (design);
  *  projects are in its sidebar and the other pages are in the account menu. */
-export function CloudApp({ client, path, go, account, sectionsAfter, onCi }: CloudAppProps) {
+export function CloudApp({ client, path, go, account, sectionsAfter, desktop, onCi }: CloudAppProps) {
   const store = useMemo(() => client.agentConfigStore(), [client]);
   const secrets = useMemo<SecretsApi>(
     () => ({ list: () => client.listSecrets(), set: (n, v) => client.setSecret(n, v), remove: (n) => client.deleteSecret(n) }),
@@ -112,13 +118,26 @@ export function CloudApp({ client, path, go, account, sectionsAfter, onCi }: Clo
       : undefined;
 
   const menu: AccountMenuItem[] = [
+    { id: "profile", label: "Profile", onSelect: () => go("/profile") },
+    { id: "usage", label: "Usage and limits", onSelect: () => go("/usage") },
     { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => go("/settings") },
     { id: "agent", label: "Agent setup", onSelect: () => go("/agent") },
     { id: "projects", label: "Projects", onSelect: () => go("/projects") },
     ...(account?.items ?? []),
   ];
 
-  if (path === "/settings") return <CloudSettings client={client} onBack={back} />;
+  if (path === "/settings") return <CloudSettings client={client} project={projectClient} onBack={back} desktop={desktop} />;
+  if (path === "/profile" || path === "/usage") {
+    return (
+      <ProfilePages
+        client={client}
+        account={{ name: account?.name ?? "Cloud account", email: account?.email, onManage: account?.onManage, onSignOut: account?.onSignOut }}
+        thisDevice={desktop ? { label: "Desktop app on this computer", kind: "desktop" } : { label: "This browser", kind: "web" }}
+        onBack={back}
+        initial={path === "/usage" ? "usage" : undefined}
+      />
+    );
+  }
   if (path === "/projects" || path === "/agent") {
     return (
       <div className="flex h-full min-h-0 flex-col bg-background">

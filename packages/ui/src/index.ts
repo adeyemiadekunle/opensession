@@ -1,7 +1,7 @@
 export { Workspace } from "./Workspace";
 export type { WorkspaceProps, MoveToCloudRequest, WorkspaceNotice } from "./Workspace";
 export { OPEN_SESSION_KEY } from "./Workspace";
-export { CloudSettings, LocalKeys } from "./Settings";
+export { CloudSettings, LocalKeys, LocalSettings } from "./Settings";
 export { MessageView } from "./Messages";
 export { FilesPanel, DiffPanel } from "./Panels";
 export { useAsync, errText } from "./hooks";
@@ -21,3 +21,5 @@ export { Button } from "./components/ui/button";
 export { initTheme, setTheme, getTheme } from "./theme";
 export type { Theme } from "./theme";
 export { NamedIcon } from "./icons";
+export { PREF, readPref, usePref } from "./prefs";
+export { ProfilePages } from "./AccountPages";

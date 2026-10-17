@@ -29,11 +29,9 @@ import { Composer, modelKey, type ContextUse } from "./Composer";
 import { AccountFooter, SectionHeader, SectionView, ShortcutList, SidebarRow, type Account, type SidebarSection } from "./Sidebar";
 import { NamedIcon, icons, Icon } from "./icons";
 import { cn } from "./lib/utils";
+import { MODEL_KEY, PREF, VARIANT_KEY, readPref } from "./prefs";
 
-const MODEL_KEY = "opensession.model";
 const AGENT_KEY = "opensession.agent";
-/** Chosen effort (model variant) per model, as {"provider/model": "high"}. */
-const VARIANT_KEY = "opensession.variant";
 const SIDEBAR_KEY = "opensession.sidebar";
 /** Set by the desktop app before it switches to the cloud, so the moved session opens. */
 export const OPEN_SESSION_KEY = "opensession.openSession";
@@ -291,6 +289,12 @@ export function Workspace({
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages.length]);
 
+  /** Settings > General: open the Terminal panel when a session starts. */
+  const openTerminalIfWanted = () => {
+    if (terminal && readPref(PREF.openTerminal, false))
+      setDock((d) => (d.stack.includes("terminal") ? d : { ...d, stack: [...d.stack, "terminal"] }));
+  };
+
   const openNew = () => {
     setDraft({ model: chosen ? modelKey(chosen) : "", agent, text: "", where: "computer" });
     setNewOpen(true);
@@ -347,6 +351,7 @@ export function Workspace({
       await sessions.reload();
       setActive(s.id);
       setNewOpen(false);
+      openTerminalIfWanted();
       const first = draft.text.trim();
       if (first) {
         setBusy(true);
@@ -370,6 +375,7 @@ export function Workspace({
         id = s.id;
         setActive(id);
         void sessions.reload();
+        openTerminalIfWanted();
       }
       setText("");
       setBusy(true);

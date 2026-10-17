@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { ReviewView, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
+import { CloudSettings, LocalSettings, ProfilePages, ReviewView, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
 import "@opensession/ui/styles.css";
 import { gitActions, mock } from "./mock";
 
@@ -42,7 +42,19 @@ const account: Account = {
 
 createRoot(document.getElementById("root")!).render(
   <div style={{ height: "100vh", position: "relative" }}>
-    {q.has("review") ? (
+    {q.get("account") ? (
+      <ProfilePages
+        client={mock}
+        account={{ name: "Adeyemi Adekunle", email: "adeyemi@example.com", onManage: noop, onSignOut: noop }}
+        thisDevice={{ label: "This browser", kind: "web" }}
+        onBack={noop}
+        initial={q.get("account")!}
+      />
+    ) : q.get("settings") === "cloud" ? (
+      <CloudSettings client={mock} project={mock} onBack={noop} desktop />
+    ) : q.get("settings") === "local" ? (
+      <LocalSettings client={mock} store={(mock as { agentConfigStore: () => never }).agentConfigStore()} onBack={noop} />
+    ) : q.has("review") ? (
       <ReviewView client={mock} actions={gitActions} refreshKey={0} onClose={noop} />
     ) : (
       <Workspace

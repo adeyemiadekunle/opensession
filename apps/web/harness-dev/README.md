@@ -18,5 +18,7 @@ Query flags:
 | `?noperm` | hide the pending approval card |
 | `?move` | desktop's Move to cloud actions |
 | `?review` | the full-screen Review |
+| `?account=profile`, `usage`, `connected`, `keys`, `devices` | the Profile pages |
+| `?settings=cloud`, `?settings=local` | the settings pages (web and cloud, or this computer) |
 
 `design/` (git-ignored) is for local copies of design artboards to compare against.

@@ -1,8 +1,18 @@
-import { useState } from "react";
-import type { CloudClient, LocalClient } from "@opensession/api-client";
+import { useMemo, useState } from "react";
+import type { AgentConfigStore, CloudClient, LocalClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { GithubCard } from "./Projects";
-import { PageHeader } from "./PageHeader";
+import { SettingsShell, type SettingsPage } from "./SettingsUi";
+import {
+  AppearanceCard,
+  BehaviourCard,
+  EditorCard,
+  GatewayConnector,
+  GitApprovalCard,
+  ModelsCard,
+  SandboxCard,
+  ShortcutsCard,
+} from "./SettingsPages";
 
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: "Anthropic",
@@ -16,40 +26,117 @@ const PROVIDER_NAMES: Record<string, string> = {
 };
 
 /** Cloud account settings: model API keys, allowed domains, CLI/desktop access tokens. */
-export function CloudSettings({ client, onBack }: { client: CloudClient; onBack?: () => void }) {
-  // Design: a header, a section nav on the left and one card per section.
-  const sections = [
-    { id: "keys", title: "Model API keys", body: <ApiKeys client={client} /> },
-    { id: "github", title: "GitHub", body: <GithubCard client={client} /> },
-    { id: "domains", title: "Allowed domains", body: <AllowedDomains client={client} /> },
-    { id: "tokens", title: "Access tokens", body: <AccessTokens client={client} /> },
+export function CloudSettings({
+  client,
+  project,
+  onBack,
+  desktop,
+}: {
+  client: CloudClient;
+  /** The open project, for its sandbox and model list. */
+  project: CloudClient;
+  onBack?: () => void;
+  /** Desktop app: shows its own preferences (CI notifications). */
+  desktop?: boolean;
+}) {
+  const store = useMemo(() => client.agentConfigStore(), [client]);
+  // The model list comes from the project's sandbox: read it only when it is already running.
+  const status = useAsync(() => project.workspaceStatus(), [project]);
+  const running = status.data?.state === "running";
+  const models = useAsync(() => (running ? project.listModels() : Promise.resolve(null)), [project, running]);
+  const pages: SettingsPage[] = [
+    {
+      id: "general",
+      title: "General",
+      description: "What happens on its own, internet access for sandboxes, and access tokens.",
+      body: (
+        <>
+          <BehaviourCard terminal desktop={desktop} />
+          <AllowedDomains client={client} />
+          <AccessTokens client={client} />
+        </>
+      ),
+    },
+    { id: "appearance", title: "Appearance", description: "Theme, accent color and the code font.", body: <AppearanceCard /> },
+    { id: "editor", title: "Editor", description: "Font size, line numbers and wrapping for files and diffs.", body: <EditorCard /> },
+    {
+      id: "models",
+      title: "Models and effort",
+      description: "The model new sessions start with, how hard it thinks, and your API keys.",
+      body: (
+        <>
+          <ModelsCard
+            models={models.data ?? null}
+            unavailable={
+              running || status.loading
+                ? "Loading models…"
+                : "The model list comes from this project's sandbox, which is asleep. Open a session to wake it, then choose the default here or in the composer."
+            }
+          />
+          <ApiKeys client={client} />
+        </>
+      ),
+    },
+    { id: "sandbox", title: "Sandbox", description: "Limits for cloud sandboxes and the state of this project's.", body: <SandboxCard account={client} project={project} /> },
+    { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
+    { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
+    {
+      id: "connectors",
+      title: "Connectors",
+      description: "Services this account is signed in to.",
+      body: (
+        <>
+          <GatewayConnector account={client} />
+          <GithubCard client={client} />
+        </>
+      ),
+    },
   ];
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <PageHeader title="Settings" onBack={onBack} aside="Applies to your cloud account" />
-      <div className="flex min-h-0 flex-1">
-        <nav aria-label="Settings sections" className="flex w-[232px] shrink-0 flex-col gap-0.5 border-r border-border bg-sidebar p-3 text-sm">
-          {sections.map((sec) => (
-            <a key={sec.id} href={`#${sec.id}`} className="flex h-[34px] items-center rounded-md px-2.5 text-muted-foreground no-underline hover:bg-sunken hover:text-foreground">
-              {sec.title}
-            </a>
-          ))}
-        </nav>
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-auto p-7">
-          <div className="flex max-w-[760px] flex-col gap-4">
-            {sections.map((sec) => (
-              <div key={sec.id} id={sec.id} className="scroll-mt-7">
-                {sec.body}
-              </div>
-            ))}
-          </div>
-        </main>
-      </div>
-    </div>
-  );
+  return <SettingsShell pages={pages} onBack={onBack} aside="Applies to your cloud account" />;
 }
 
-function ApiKeys({ client }: { client: CloudClient }) {
+/** Desktop app, this computer: the same settings pages, with keys and agent setup stored here. */
+export function LocalSettings({
+  client,
+  store,
+  onBack,
+  onSaved,
+}: {
+  client: LocalClient;
+  store: AgentConfigStore;
+  onBack?: () => void;
+  /** After keys change (the workspace remounts to pick up new models). */
+  onSaved?: () => void;
+}) {
+  const models = useAsync(() => client.listModels(), [client]);
+  const pages: SettingsPage[] = [
+    { id: "general", title: "General", description: "What happens on its own.", body: <BehaviourCard desktop /> },
+    { id: "appearance", title: "Appearance", description: "Theme, accent color and the code font.", body: <AppearanceCard /> },
+    { id: "editor", title: "Editor", description: "Font size, line numbers and wrapping for files and diffs.", body: <EditorCard /> },
+    {
+      id: "models",
+      title: "Models and effort",
+      description: "The model new sessions start with, how hard it thinks, and your API keys.",
+      body: (
+        <>
+          <ModelsCard models={models.data ?? null} unavailable={models.error ?? "Loading models…"} />
+          <LocalKeys
+            client={client}
+            onSaved={() => {
+              void models.reload();
+              onSaved?.();
+            }}
+          />
+        </>
+      ),
+    },
+    { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
+    { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
+  ];
+  return <SettingsShell pages={pages} onBack={onBack} aside="Applies to this computer" />;
+}
+
+export function ApiKeys({ client }: { client: CloudClient }) {
   const providers = useAsync(() => client.providers(), [client]);
   const keys = useAsync(() => client.listKeys(), [client]);
   const [provider, setProvider] = useState("anthropic");
