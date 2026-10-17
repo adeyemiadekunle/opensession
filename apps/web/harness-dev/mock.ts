@@ -42,19 +42,34 @@ const messages: Record<string, unknown[]> = {
       time: q.has("fail") || q.has("limit") ? { created: Date.now() - 60_000, completed: Date.now() - 60_000 } : {},
       model: { providerID: "anthropic", id: "claude-opus-5-5" },
       ...(q.has("fail") ? { error: { type: "provider", message: "The provider returned 529 Overloaded. Nothing was changed." } } : {}),
-      // ?limit: the model's usage limit; ?limit=unknown leaves out when it resets.
+      // ?limit: plan usage limit with a reset time; ?limit=rate: OpenCode gave up retrying a throttle;
+      // ?limit=unknown: no reset time. Shapes follow OpenCode's provider.quota / provider.rate-limit errors.
       ...(q.has("limit")
         ? {
-            error: {
-              type: "rate_limit",
-              status: 429,
-              message: q.get("limit") === "unknown" ? "Rate limit exceeded." : "You have reached your usage limit. Try again in 45 minutes.",
-            },
+            error:
+              q.get("limit") === "rate"
+                ? {
+                    type: "provider.rate-limit",
+                    status: 429,
+                    message: "Rate limit reached for tokens per min (TPM): Limit 30000, Used 29000, Requested 2000. Please try again in 6m0s.",
+                  }
+                : q.get("limit") === "unknown"
+                  ? { type: "provider.quota", status: 429, message: "You exceeded your current quota, please check your plan and billing details." }
+                  : {
+                      type: "provider.quota",
+                      status: 429,
+                      message: "ChatGPT usage limit reached. Check ChatGPT Settings → Usage for details.",
+                      response: { body: '{"error":{"type":"usage_limit_reached","resets_in_seconds":2700}}' },
+                    },
           }
+        : {}),
+      // ?retrying: OpenCode is waiting to retry a rate-limited call.
+      ...(q.has("retrying")
+        ? { retry: { attempt: 3, at: Date.now() + 8_000, error: { type: "provider.rate-limit", status: 429, message: "Too many requests" } } }
         : {}),
       content: [
         { type: "tool", name: "edit", state: { ...done("Edited 1 file"), input: { filePath: "apps/desktop/src/main/main.ts" } } },
-        ...(q.has("fail") || q.has("limit") ? [] : [{ type: "tool", name: "shell", state: { status: "running", input: { command: "pnpm test:smoke" }, metadata: {} } }]),
+        ...(q.has("fail") || q.has("limit") || q.has("retrying") ? [] : [{ type: "tool", name: "shell", state: { status: "running", input: { command: "pnpm test:smoke" }, metadata: {} } }]),
       ],
     },
   ],

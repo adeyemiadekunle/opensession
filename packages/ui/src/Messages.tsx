@@ -168,33 +168,62 @@ function Card({ tone, title, children, action }: { tone: "danger" | "warning"; t
   );
 }
 
-type StructuredError = { type?: string; message?: string; status?: number };
+type StructuredError = { type?: string; message?: string; status?: number; response?: { body?: string } };
 
-const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+const UNIT_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+/** "6m0s", "1.5s", "45 minutes", "2 hours" → milliseconds. */
+function duration(text: string): number | undefined {
+  let total = 0;
+  let found = false;
+  for (const [, n, u] of text.matchAll(/(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?)(?![a-z])/gi)) {
+    const unit = u!.toLowerCase();
+    total += Number(n) * UNIT_MS[unit.startsWith("ms") || unit.startsWith("milli") ? "ms" : unit[0]!]!;
+    found = true;
+  }
+  return found ? total : undefined;
+}
+
+/** When a limit resets, from the phrasings and fields providers use (see usageLimit). */
+function resetFrom(text: string, at: number): number | undefined {
+  const rel = /(?:try again|retry|resets?|available again|regain access)\s+(?:in|after)\s+((?:\d+(?:\.\d+)?\s*[a-z]+[\s,]*(?:and\s+)?)+)/i.exec(text);
+  const relMs = rel ? duration(rel[1]!) : undefined;
+  if (relMs !== undefined) return at + relMs;
+  const secs = /"(?:retry_after|retry-after|resets?_in_seconds)"\s*:\s*"?(\d+(?:\.\d+)?)/i.exec(text) ?? /retry-after:?\s*(\d+)/i.exec(text);
+  if (secs) return at + Number(secs[1]) * 1_000;
+  const delay = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(text);
+  if (delay) return at + Number(delay[1]) * 1_000;
+  // Anthropic spend cap: "You will regain access on 2026-09-01 at 00:00 UTC."
+  const utc = /(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}):(\d{2})\s*UTC/i.exec(text);
+  if (utc) return Date.parse(`${utc[1]}T${utc[2]!.padStart(2, "0")}:${utc[3]}:00Z`);
+  const iso = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/.exec(text);
+  if (iso && !Number.isNaN(Date.parse(iso[0]))) return Date.parse(iso[0]);
+  const epoch = /reset\w*\D{0,12}(\d{10})\b/i.exec(text);
+  if (epoch) return Number(epoch[1]) * 1_000;
+  return undefined;
+}
 
 /**
- * Whether a turn stopped on the model's usage or rate limit, and when it resets if the
- * provider said so. OpenCode passes the provider's error through as {type, message, status};
- * the reset time is only in the message text, so it is read from the common phrasings
- * ("try again in 45 minutes", "retry after 30s", "resets at 2026-10-17T15:00:00Z").
+ * Whether a turn stopped on the model's limits, and when they reset if the provider said so.
+ *
+ * OpenCode classifies provider errors itself: `provider.rate-limit` (a throttle; OpenCode has
+ * already retried it about ten times, honouring retry-after, before giving up) and
+ * `provider.quota` (a spend cap or plan usage limit, never retried). The reset time isn't a
+ * field: OpenCode passes the provider's message and response body through, so it is read from
+ * them ("try again in 6m0s", "regain access on 2026-09-01 at 00:00 UTC", "retryDelay": "37s",
+ * "resets_in_seconds": 1800). Older servers send no type, so status and wording are checked too.
  */
-export function usageLimit(error: StructuredError | undefined, at: number): { resetAt?: number } | null {
+export function usageLimit(error: StructuredError | undefined, at: number): { kind: "rate" | "quota"; resetAt?: number } | null {
   if (!error) return null;
-  const msg = error.message ?? "";
-  const hit =
-    error.status === 429 ||
-    /rate.?limit|usage.?limit|quota|too many requests/i.test(`${error.type ?? ""} ${msg}`) ||
-    /\b429\b/.test(msg);
-  if (!hit) return null;
-  const rel = /(?:try again|retry|resets?|available again)\s+(?:in|after)\s+(\d+(?:\.\d+)?)\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?)\b/i.exec(msg);
-  if (rel) return { resetAt: at + Number(rel[1]) * UNIT_MS[rel[2]!.toLowerCase()[0]!]! };
-  const after = /retry-after:?\s*(\d+)/i.exec(msg);
-  if (after) return { resetAt: at + Number(after[1]) * 1_000 };
-  const iso = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/.exec(msg);
-  if (iso && !Number.isNaN(Date.parse(iso[0]))) return { resetAt: Date.parse(iso[0]) };
-  const epoch = /reset\w*\D{0,12}(\d{10})\b/i.exec(msg);
-  if (epoch) return { resetAt: Number(epoch[1]) * 1_000 };
-  return {};
+  const text = `${error.message ?? ""}\n${error.response?.body ?? ""}`;
+  const kind =
+    error.type === "provider.quota" || error.status === 402 || /quota|usage.?limit|spend|billing|credit/i.test(`${error.type ?? ""} ${text}`)
+      ? "quota"
+      : error.type === "provider.rate-limit" || error.status === 429 || /rate.?limit|too many requests|\b429\b/i.test(`${error.type ?? ""} ${text}`)
+        ? "rate"
+        : null;
+  if (!kind) return null;
+  return { kind, resetAt: resetFrom(text, at) };
 }
 
 /** Wait used when the provider didn't say when the limit resets. */
@@ -231,7 +260,19 @@ export interface LimitResume {
   resumeNow: () => void;
 }
 
-function LimitCard({ error, resetAt, model, resume }: { error: StructuredError; resetAt?: number; model?: string; resume?: LimitResume }) {
+function LimitCard({
+  error,
+  kind,
+  resetAt,
+  model,
+  resume,
+}: {
+  error: StructuredError;
+  kind: "rate" | "quota";
+  resetAt?: number;
+  model?: string;
+  resume?: LimitResume;
+}) {
   const scheduled = resume?.scheduledAt ?? null;
   const now = useNow(Boolean(resume));
   const reset = resetAt && resetAt > now ? resetAt : null;
@@ -239,7 +280,7 @@ function LimitCard({ error, resetAt, model, resume }: { error: StructuredError; 
   return (
     <Card
       tone="warning"
-      title="Model usage limit reached"
+      title={kind === "quota" ? "Model usage limit reached" : "Model rate limit reached"}
       action={
         resume ? (
           scheduled ? (
@@ -268,7 +309,8 @@ function LimitCard({ error, resetAt, model, resume }: { error: StructuredError; 
       }
     >
       <p className="m-0 text-muted-foreground">
-        {model ? `${model} ` : "The model "}stopped before finishing. Nothing was lost: resuming picks up where it stopped.{" "}
+        {model ? `${model} ` : "The model "}stopped before finishing
+        {kind === "rate" ? " after OpenCode retried it for about a minute" : ""}. Nothing was lost: resuming picks up where it stopped.{" "}
         {reset
           ? `The limit resets at ${clock(reset)} (in ${inWords(reset - now)}).`
           : known
@@ -277,6 +319,25 @@ function LimitCard({ error, resetAt, model, resume }: { error: StructuredError; 
       </p>
       {error.message ? <p className="m-0 font-mono text-xs text-faint">{error.message}</p> : null}
     </Card>
+  );
+}
+
+/** OpenCode is waiting to retry a failed model call (assistant.retry: attempt, next try time, error). */
+function RetryLine({ retry }: { retry: { attempt: number; at: number; error?: StructuredError } }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = Math.round((retry.at - now) / 1_000);
+  const why = usageLimit(retry.error, retry.at)?.kind === "rate" ? "Rate limited" : (retry.error?.message ?? "The provider failed");
+  return (
+    <div role="status" className="flex items-center gap-2.5 text-[13px] text-warning">
+      <Spinner />
+      <span className="min-w-0 truncate" title={retry.error?.message}>
+        {why.length > 80 ? `${why.slice(0, 80)}…` : why} · {secs > 0 ? `retrying in ${secs} s` : "retrying now"} (attempt {retry.attempt})
+      </span>
+    </div>
   );
 }
 
@@ -311,6 +372,7 @@ export function MessageView({ m, onRetry, resume }: { m: Message; onRetry?: () =
     const parts = m.content ?? [];
     const error = m.error as StructuredError | undefined;
     const limit = usageLimit(error, m.time?.completed ?? m.time?.created ?? Date.now());
+    const retry = m.retry as { attempt: number; at: number; error?: StructuredError } | undefined;
     const runningTool = [...parts].reverse().find((p) => p.type === "tool" && ["running", "streaming", "pending"].includes(stateOf(p).status ?? ""));
     const step = runningTool ? toolTitle(runningTool) : null;
     return (
@@ -333,7 +395,7 @@ export function MessageView({ m, onRetry, resume }: { m: Message; onRetry?: () =
           return null;
         })}
         {error && limit ? (
-          <LimitCard error={error} resetAt={limit.resetAt} model={m.model?.id} resume={resume} />
+          <LimitCard error={error} kind={limit.kind} resetAt={limit.resetAt} model={m.model?.id} resume={resume} />
         ) : error?.message ? (
           <Card
             tone="danger"
@@ -351,7 +413,9 @@ export function MessageView({ m, onRetry, resume }: { m: Message; onRetry?: () =
             <p className="m-0 text-muted-foreground">{error.message}</p>
           </Card>
         ) : null}
-        {!m.time?.completed && !error ? (
+        {!m.time?.completed && !error && retry ? (
+          <RetryLine retry={retry} />
+        ) : !m.time?.completed && !error ? (
           <div className="flex items-center gap-2.5 text-[13px] text-muted-foreground">
             <Spinner />
             <span>
