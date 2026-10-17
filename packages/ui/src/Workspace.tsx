@@ -164,6 +164,9 @@ export function Workspace({
   });
   const [sidebarOpen, setSidebarOpen] = useState(() => storageGet(SIDEBAR_KEY) !== "hidden");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Live event stream: "lost" with seconds until the next try, so the banner can count down.
+  const [conn, setConn] = useState<{ lost: boolean; retryIn: number }>({ lost: false, retryIn: 0 });
+  const retryNow = useRef<(() => void) | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const modelList = models.data ?? [];
@@ -240,6 +243,7 @@ export function Workspace({
       ]);
       setMessages(m);
       setLoadingMessages(false);
+      setConn((c) => (c.lost ? { lost: false, retryIn: 0 } : c));
       setPerms(p);
       setForms(f);
       const last = m[m.length - 1];
@@ -266,22 +270,50 @@ export function Workspace({
         setRefreshKey((k) => k + 1);
       }, 250);
     };
+    // Reconnects with backoff (2 s doubling to 30 s); the banner counts down and offers Retry now.
+    const pause = (seconds: number) =>
+      new Promise<void>((resolve) => {
+        let left = seconds;
+        setConn({ lost: true, retryIn: left });
+        const tick = setInterval(() => {
+          left -= 1;
+          if (left <= 0 || ctl.signal.aborted) done();
+          else setConn({ lost: true, retryIn: left });
+        }, 1000);
+        const done = () => {
+          clearInterval(tick);
+          retryNow.current = null;
+          resolve();
+        };
+        retryNow.current = done;
+        ctl.signal.addEventListener("abort", done, { once: true });
+      });
     (async () => {
+      let backoff = 2;
       while (!ctl.signal.aborted) {
+        let failed = false;
         try {
           for await (const ev of client.events(active, { after: cursor, signal: ctl.signal })) {
             cursor = eventCursor(ev) ?? cursor;
+            backoff = 2;
+            setConn((c) => (c.lost ? { lost: false, retryIn: 0 } : c));
             kick();
           }
         } catch {
-          /* reconnect below */
+          failed = true;
         }
-        if (!ctl.signal.aborted) await new Promise((r) => setTimeout(r, 2000));
+        if (ctl.signal.aborted) break;
+        if (failed) {
+          await pause(backoff);
+          backoff = Math.min(backoff * 2, 30);
+          void refresh();
+        } else await new Promise((r) => setTimeout(r, 2000));
       }
     })();
     return () => {
       ctl.abort();
       clearTimeout(timer);
+      setConn({ lost: false, retryIn: 0 });
     };
   }, [client, active, refresh]);
 
@@ -384,6 +416,21 @@ export function Workspace({
         const [cmd, ...rest] = t.slice(1).split(/\s+/);
         await client.runCommand(id, cmd!, t.slice(1 + cmd!.length).trim() || rest.join(" "));
       } else await client.prompt(id, t, busy ? "steer" : undefined, { skills });
+      void refresh();
+    } catch (e) {
+      setErr(errText(e));
+      setBusy(false);
+    }
+  };
+
+  /** Send the last thing the user typed again (after a failed step). */
+  const retryLast = async () => {
+    const last = [...messages].reverse().find((m) => m.type === "user" && m.text);
+    if (!active || !last?.text) return;
+    try {
+      setErr(null);
+      setBusy(true);
+      await client.prompt(active, last.text, undefined, { skills });
       void refresh();
     } catch (e) {
       setErr(errText(e));
@@ -627,6 +674,20 @@ export function Workspace({
         ) : null}
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {conn.lost && active ? (
+            <div role="alert" className="mx-10 mt-3 flex max-w-[640px] items-center gap-3 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
+              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
+              <span className="min-w-0 flex-1">
+                <strong className="font-semibold text-destructive">Lost connection to the agent.</strong>{" "}
+                <span className="text-muted-foreground">
+                  Retrying in {conn.retryIn} s. The session keeps its history and the agent keeps working.
+                </span>
+              </span>
+              <Button size="sm" variant="outline" onClick={() => retryNow.current?.()}>
+                Retry now
+              </Button>
+            </div>
+          ) : null}
           <div
             ref={listRef}
             className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-10 pr-7 pt-7 [&>*]:max-w-[640px]"
@@ -654,7 +715,7 @@ export function Workspace({
               </div>
             ) : null}
             {messages.map((m) => (
-              <MessageView key={m.id} m={m} />
+              <MessageView key={m.id} m={m} onRetry={busy ? undefined : () => void retryLast()} />
             ))}
             {notice ? (
               <div

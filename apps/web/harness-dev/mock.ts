@@ -1,3 +1,4 @@
+import { ApiError } from "@opensession/api-client";
 // Fixture client for the design harness: enough data to show every part of the workspace.
 const now = Date.now();
 const sessions = [
@@ -5,6 +6,8 @@ const sessions = [
   { id: "s2", title: "Generic OpenCode proxy", time: { created: now - 86_400_000, updated: now - 7_200_000 } },
   { id: "s3", title: "Post-merge todo review", time: { created: now - 172_800_000, updated: now - 172_800_000 } },
 ];
+const q = new URLSearchParams(location.search);
+const done = (text: string) => ({ status: "completed", input: {}, content: [{ type: "text", text }] });
 const messages: Record<string, unknown[]> = {
   s1: [
     { id: "m1", type: "user", text: "Run the smoke test on main and tell me what failed." },
@@ -16,9 +19,32 @@ const messages: Record<string, unknown[]> = {
       tokens: { input: 98000, output: 2100, reasoning: 0, cache: { read: 6000, write: 0 } },
       content: [
         { type: "text", text: "I'll run the smoke test on main and read the log for the failing section." },
-        { type: "tool", name: "shell", state: { status: "completed" } },
-        { type: "tool", name: "read", state: { status: "completed" } },
+        { type: "tool", name: "read", state: { ...done("export function startTerminal() {\n  // starts the PTY\n}"), input: { filePath: "apps/desktop/src/main/main.ts" } } },
+        {
+          type: "tool",
+          name: "shell",
+          state: { ...done("$ pnpm test:smoke\nerror smoke: terminal section timed out after 30s"), input: { command: "pnpm test:smoke" } },
+        },
+        { type: "tool", name: "edit", state: { ...done("Edited 1 file"), input: { filePath: "apps/desktop/src/main/main.ts" } } },
+        {
+          type: "tool",
+          name: "shell",
+          state: { status: "error", input: { command: "node scripts/patch-terminal.mjs" }, error: { type: "shell", message: "The shell rejected the inline script: exit code 2." } },
+        },
         { type: "text", text: "The terminal section timed out after 30s. The fix is in apps/desktop/main.ts: the shell is started before the PTY is ready." },
+      ],
+    },
+    { id: "m3", type: "shell", command: "pnpm lint", status: "exited", exit: 1, output: { output: "apps/desktop/src/main/main.ts\n  12:5  error  'pty' is never reassigned  prefer-const" } },
+    { id: "m4", type: "user", text: "Fix the lint error and run the smoke test again." },
+    {
+      id: "m5",
+      type: "assistant",
+      time: q.has("fail") ? { completed: 2 } : {},
+      model: { providerID: "anthropic", id: "claude-opus-5-5" },
+      ...(q.has("fail") ? { error: { type: "provider", message: "The provider returned 529 Overloaded. Nothing was changed." } } : {}),
+      content: [
+        { type: "tool", name: "edit", state: { ...done("Edited 1 file"), input: { filePath: "apps/desktop/src/main/main.ts" } } },
+        ...(q.has("fail") ? [] : [{ type: "tool", name: "shell", state: { status: "running", input: { command: "pnpm test:smoke" }, metadata: {} } }]),
       ],
     },
   ],
@@ -71,8 +97,18 @@ const handlers: Record<string, unknown> = {
   ],
   gitInfo: async () => ({ branch: "feature/review", default_branch: "main", repo: "adeyemiadekunle/opensession", status: [], branches: ["main", "feature/review"], can_push: true }),
   events: async function* () {
-    /* no live events in the harness */
+    // ?lost: the stream fails, so the workspace shows the lost-connection banner.
+    if (q.has("lost")) throw new Error("connection refused");
+    await new Promise(() => undefined);
   },
+  health: () =>
+    q.get("gate") === "waking"
+      ? new Promise(() => undefined)
+      : q.get("gate") === "limit"
+        ? Promise.reject(Object.assign(new ApiError(429, "You have 10 sandboxes running, the most allowed at once."), {}))
+        : q.get("gate") === "error"
+          ? Promise.reject(new Error("The sandbox didn't pass its health check."))
+          : Promise.resolve({}),
   createSession: async () => ({ id: "s-new", title: "" }),
   // account and settings
   me: async () => ({ user_id: "user_adeyemi", via: "clerk" }),
@@ -86,7 +122,7 @@ const handlers: Record<string, unknown> = {
   github: async () => ({ configured: true, installations: [{ installation_id: 1, account: "adeyemiadekunle" }] }),
   githubRepos: async () => [],
   limits: async () => ({ max_running: 10, disk_mb: 2048, idle_timeout_seconds: 1800, running: ["opensession"] }),
-  workspaceStatus: async () => ({ state: "running", busy: false, disk_mb: 1860, disk_limit_mb: 2048, sleeps_in: 1500, idle_timeout_seconds: 1800 }),
+  workspaceStatus: async () => ({ state: q.get("gate") ? "sleeping" : "running", busy: false, disk_mb: 1860, disk_limit_mb: 2048, sleeps_in: 1500, idle_timeout_seconds: 1800 }),
   stopWorkspace: async () => undefined,
   deleteToken: async () => undefined,
   listProjects: async () => [

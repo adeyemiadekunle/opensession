@@ -17,6 +17,9 @@ Query flags:
 | `?notice` | the disk-limit notice in the conversation |
 | `?noperm` | hide the pending approval card |
 | `?move` | desktop's Move to cloud actions |
+| `?fail` | the agent stopping with an error |
+| `?lost` | the live event stream failing (lost-connection banner) |
+| `?gate=waking`, `limit`, `error` | the sandbox gate states |
 | `?review` | the full-screen Review |
 | `?account=profile`, `usage`, `connected`, `keys`, `devices` | the Profile pages |
 | `?settings=cloud`, `?settings=local` | the settings pages (web and cloud, or this computer) |
