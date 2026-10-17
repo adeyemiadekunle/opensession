@@ -94,6 +94,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [dock, setDock] = useState<DockState>(loadDock);
+  const [query, setQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +107,11 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const sessionList = useMemo(
     () => [...(sessions.data ?? [])].sort((a, b) => (b.time?.updated ?? b.time?.created ?? 0) - (a.time?.updated ?? a.time?.created ?? 0)),
     [sessions.data],
+  );
+
+  const visibleSessions = useMemo(
+    () => sessionList.filter((s) => (s.title ?? "").toLowerCase().includes(query.trim().toLowerCase())),
+    [sessionList, query],
   );
 
   useEffect(() => {
@@ -255,7 +261,17 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
 
   return (
     <div className="flex h-full min-h-0 bg-background max-[1000px]:flex-col">
-      <aside className="flex w-[248px] shrink-0 flex-col gap-4 overflow-auto border-r border-border bg-sidebar px-2.5 py-3.5 max-[1000px]:max-h-[220px] max-[1000px]:w-auto max-[1000px]:border-b max-[1000px]:border-r-0">
+      <aside className="flex w-[248px] shrink-0 flex-col gap-[18px] overflow-auto border-r border-border bg-sidebar px-2.5 py-3.5 max-[1000px]:max-h-[220px] max-[1000px]:w-auto max-[1000px]:border-b max-[1000px]:border-r-0">
+        <label className="flex h-[34px] items-center gap-2 rounded-lg border border-border bg-card px-2.5 text-faint">
+          <Icon><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></Icon>
+          <input
+            className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none"
+            placeholder="Search"
+            aria-label="Search sessions"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
         <Button variant="ghost" className="h-8 justify-start px-2 text-sm text-foreground" disabled={!chosen} onClick={newSession}>
           <Icon><path d="M12 5v14M5 12h14" /></Icon>
           New session
@@ -263,33 +279,44 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
         <section className="flex flex-col gap-0.5">
           <div className="flex h-[26px] items-center px-2 text-xs font-medium text-faint">Sessions</div>
           <ul className="flex flex-col gap-0.5">
-            {sessionList.map((s) => (
-              <li
-                key={s.id}
-                className={cn("group flex items-center rounded-md hover:bg-sunken", s.id === active && "bg-sunken")}
-              >
-                <button
-                  className="h-[30px] min-w-0 flex-1 truncate border-0 bg-transparent px-2 text-left text-foreground"
-                  onClick={() => setActive(s.id)}
-                >
-                  {s.title || new Date(s.time?.created ?? 0).toLocaleString()}
-                </button>
-                <Button
-                  variant="ghost"
-                  size="icon"
+            {visibleSessions.map((s) => {
+              const isActive = s.id === active;
+              return (
+                <li
+                  key={s.id}
                   className={cn(
-                    "size-6 text-muted-foreground focus-visible:opacity-100",
-                    s.id === active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                    "group flex items-center rounded-lg border border-transparent hover:bg-sunken",
+                    isActive && "border-input bg-selected",
                   )}
-                  title="Delete session"
-                  aria-label="Delete session"
-                  onClick={() => remove(s.id)}
                 >
-                  ×
-                </Button>
-              </li>
-            ))}
+                  <button
+                    className="flex min-w-0 flex-1 flex-col items-start gap-0.5 border-0 bg-transparent px-2 py-1.5 text-left"
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={() => setActive(s.id)}
+                  >
+                    <span className="w-full truncate text-[13px] font-semibold text-foreground">
+                      {s.title || new Date(s.time?.created ?? 0).toLocaleString()}
+                    </span>
+                    <span className="text-xs text-faint">{relativeTime(s.time?.updated ?? s.time?.created)}</span>
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "mr-1 size-6 text-muted-foreground focus-visible:opacity-100",
+                      isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                    )}
+                    title="Delete session"
+                    aria-label="Delete session"
+                    onClick={() => remove(s.id)}
+                  >
+                    ×
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
+          {sessions.data && sessionList.length === 0 ? <div className="px-2 text-xs text-faint">No sessions yet.</div> : null}
         </section>
         {models.data && !modelList.length ? <div className="os-hint">{noModels ?? "No models available."}</div> : null}
         {models.error ? <div className="os-error">{models.error}</div> : null}
@@ -349,9 +376,9 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
         <div className="shrink-0 pb-4 pl-10 pr-7">
           <div className="flex max-w-[640px] flex-col gap-2.5 rounded-lg border border-input bg-card px-3.5 pb-2.5 pt-3 focus-within:border-muted-foreground">
             <textarea
-              className="min-h-11 max-h-60 w-full resize-none border-0 bg-transparent p-0 text-foreground outline-none"
+              className="min-h-11 max-h-60 w-full resize-none border-0 bg-transparent p-0 text-[14px] text-foreground outline-none placeholder:text-faint"
               value={text}
-              placeholder={busy ? "Steer the agent…" : "Ask the agent…  /command  @skill  !shell"}
+              placeholder={busy ? "Steer the agent…" : "Type / for commands, @ for skills, ! for shell"}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -360,7 +387,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
                 }
               }}
             />
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
               <Select variant="ghost" aria-label="Agent" value={agent} onChange={(e) => pickAgent(e.target.value)}>
                 {agentChoices.map((a) => (
                   <option key={a} value={a}>
@@ -368,6 +395,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
                   </option>
                 ))}
               </Select>
+              <span className="flex-1" />
               <Select
                 variant="ghost"
                 aria-label="Model"
@@ -386,7 +414,6 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
                   </optgroup>
                 ))}
               </Select>
-              <span className="flex-1" />
               {busy && active ? (
                 <Button size="sm" variant="outline" onClick={() => client.interrupt(active).then(refresh).catch((e) => setErr(errText(e)))}>
                   Stop
@@ -420,6 +447,17 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
       ) : null}
     </div>
   );
+}
+
+/** "3 min ago" style label for the session list. */
+function relativeTime(ms: number | undefined): string {
+  if (!ms) return "";
+  const min = Math.round((Date.now() - ms) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(ms).toLocaleDateString();
 }
 
 function confirmDelete(): boolean {
