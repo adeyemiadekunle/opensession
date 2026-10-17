@@ -76,15 +76,19 @@ function modifiers(e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shi
 /**
  * Browser card, cloud (design: Browser pane): the sandbox's Chromium, live. The agent drives
  * it with its browser tools; this shows the same tabs, follows the tab the agent works in,
- * and lets you take control to click and type yourself.
+ * and lets you use it yourself: Take control opens your own tab (the agent keeps working in
+ * its own; sign-ins are shared), and when the agent hands over (hand_over), you get its tab.
  */
-export function LiveBrowser({ api }: { api: LiveBrowserApi }) {
+export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; handOver?: number; waiting?: boolean }) {
   const [state, setState] = useState<"connecting" | "live" | "lost">("connecting");
   const [err, setErr] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [frame, setFrame] = useState<{ src: string; w: number; h: number } | null>(null);
-  const [control, setControl] = useState(false);
+  // watch: follow the agent; own: you use a tab of your own; handover: you use the agent's tab while it waits.
+  const [mode, setMode] = useState<"watch" | "own" | "handover">("watch");
+  const control = mode !== "watch";
+  const userTabs = useRef(new Set<string>());
   const [address, setAddress] = useState("");
   const [editing, setEditing] = useState(false);
   const cdp = useRef<Cdp | null>(null);
@@ -116,7 +120,7 @@ export function LiveBrowser({ api }: { api: LiveBrowserApi }) {
         const info = m.params?.targetInfo as { targetId: string; type: string; title: string; url: string } | undefined;
         if (m.method === "Target.targetCreated" && info?.type === "page") {
           setTabs((t) => (t.some((x) => x.id === info.targetId) ? t : [...t, { id: info.targetId, title: info.title, url: info.url }]));
-          if (!controlRef.current) setActive(info.targetId); // follow the agent into a new tab
+          if (!controlRef.current && !userTabs.current.has(info.targetId)) setActive(info.targetId); // follow the agent into a new tab
         } else if (m.method === "Target.targetInfoChanged" && info?.type === "page") {
           let moved = false;
           setTabs((t) =>
@@ -126,7 +130,8 @@ export function LiveBrowser({ api }: { api: LiveBrowserApi }) {
               return { ...x, title: info.title, url: info.url };
             }),
           );
-          if (moved && !controlRef.current && activeRef.current !== info.targetId) setActive(info.targetId); // the agent works there
+          if (moved && !controlRef.current && !userTabs.current.has(info.targetId) && activeRef.current !== info.targetId)
+            setActive(info.targetId); // the agent works there
         } else if (m.method === "Target.targetDestroyed") {
           const id = m.params?.targetId as string;
           setTabs((t) => t.filter((x) => x.id !== id));
@@ -237,6 +242,30 @@ export function LiveBrowser({ api }: { api: LiveBrowserApi }) {
     if (entry) await page("Page.navigateToHistoryEntry", { entryId: entry.id });
   };
 
+  // The agent handed the browser over: you get its tab (it waits until you click Done in the chat).
+  useEffect(() => {
+    if (handOver) setMode("handover");
+  }, [handOver]);
+  // Done (or I can't) in the chat ends it: back to watching the agent.
+  useEffect(() => {
+    if (!waiting) setMode((m) => (m === "handover" ? "watch" : m));
+  }, [waiting]);
+
+  /** Your own tab, on the page you were watching, so the agent's tab is left to the agent. */
+  const takeControl = async () => {
+    const client = cdp.current;
+    if (!client) return;
+    try {
+      const url = tab?.url && tab.url !== "about:blank" ? tab.url : "about:blank";
+      const { targetId } = await client.send<{ targetId: string }>("Target.createTarget", { url });
+      userTabs.current.add(targetId);
+      setMode("own");
+      setActive(targetId);
+    } catch (e) {
+      setErr(errText(e));
+    }
+  };
+
   // Your input, when you have taken control: image coordinates scaled to the page's.
   const point = (e: MouseEvent<HTMLImageElement> | WheelEvent<HTMLImageElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -277,6 +306,7 @@ export function LiveBrowser({ api }: { api: LiveBrowserApi }) {
             )}
           >
             <button role="tab" aria-selected={t.id === active} className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left" title={t.url} onClick={() => setActive(t.id)}>
+              {userTabs.current.has(t.id) ? <span className="mr-1.5 rounded bg-warning/15 px-1 text-[10.5px] text-warning">You</span> : null}
               {t.title || t.url || "New tab"}
             </button>
             <button
@@ -409,13 +439,21 @@ export function LiveBrowser({ api }: { api: LiveBrowserApi }) {
       <div className="flex shrink-0 items-center gap-2.5 border-t border-border bg-card px-3.5 py-2 text-[13px] text-muted-foreground">
         <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", control ? "bg-warning" : "bg-primary")} />
         <span className="min-w-0 flex-1">
-          {control
-            ? "You have control: clicks and typing go to the page. The agent can still act here."
-            : "The agent uses this browser. It shows the tab the agent is working in."}
+          {mode === "handover"
+            ? "The agent is waiting on this tab for you. When you're done, click Done in the chat."
+            : mode === "own"
+              ? "This is your tab: clicks and typing go here. The agent keeps working in its own tabs, and sign-ins are shared."
+              : "Watching the agent's browser. Take control to use a tab of your own; the agent keeps going."}
         </span>
-        <Button size="sm" variant={control ? "default" : "outline"} disabled={!frame} onClick={() => setControl((c) => !c)}>
-          {control ? "Hand back" : "Take control"}
-        </Button>
+        {mode === "watch" ? (
+          <Button size="sm" variant="outline" disabled={state !== "live"} onClick={() => void takeControl()}>
+            Take control
+          </Button>
+        ) : (
+          <Button size="sm" variant="default" onClick={() => setMode("watch")}>
+            {mode === "own" ? "Hand back" : "Stop controlling"}
+          </Button>
+        )}
       </div>
     </div>
   );

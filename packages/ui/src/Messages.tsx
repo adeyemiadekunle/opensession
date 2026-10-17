@@ -51,12 +51,15 @@ const PRESENT: Record<string, string> = {
   "Took a screenshot": "Taking a screenshot",
   "Used the browser": "Using the browser",
   "Asked for internet access": "Asking for internet access",
+  "Handed the browser to you": "Waiting for you in the browser",
 };
 
 /** The sandbox's browser (Playwright MCP, server "sandbox") and network tool, in plain words. */
 function browserTitle(tool: string, input: unknown): { verb: string; target?: string } | null {
   const t = tool.replace(/^sandbox_/, "");
-  if (t === "network_request_access" || t === "request_access") return { verb: "Asked for internet access", target: field(input, "domain") };
+  const own = t.replace(/^opensession_/, "");
+  if (own === "request_access") return { verb: "Asked for internet access", target: field(input, "domain") };
+  if (own === "hand_over") return { verb: "Handed the browser to you", target: field(input, "task") };
   if (!t.startsWith("browser_")) return null;
   switch (t.slice("browser_".length)) {
     case "navigate":

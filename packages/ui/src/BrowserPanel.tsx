@@ -47,8 +47,8 @@ export function localPreview(storageKey: string): PreviewApi {
 }
 
 /** Browser card (design: Browser pane): an address field, reload, open outside, and the page. */
-export function BrowserPanel({ preview }: { preview: PreviewApi }) {
-  return preview.live ? <LiveBrowser api={preview.live} /> : <PreviewFrame preview={preview} />;
+export function BrowserPanel({ preview, handOver, waiting }: { preview: PreviewApi; handOver?: number; waiting?: boolean }) {
+  return preview.live ? <LiveBrowser api={preview.live} handOver={handOver} waiting={waiting} /> : <PreviewFrame preview={preview} />;
 }
 
 /** Desktop: the page at an address on this computer, in a frame. */

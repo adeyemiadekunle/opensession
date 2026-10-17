@@ -68,7 +68,7 @@ def test_render_files_matches_opencode_v2_layout():
     assert oc["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}, *GUARD]
     assert {"action": "shell", "resource": "git push *", "effect": "ask"} in oc["permissions"]
     allow_all = AgentConfig(permissions=[{"action": "shell", "resource": "*", "effect": "allow"}])
-    assert json.loads(agentconfig.render_files(allow_all)["opencode.json"])["permissions"][-2]["resource"] == "git push *"
+    assert json.loads(agentconfig.render_files(allow_all)["opencode.json"])["permissions"][-1 - len(agentconfig.NETWORK_APPROVAL_RULES)]["resource"] == "git push *"
     # Built-in agents (build allows tools by default) get the rules appended as well.
     assert oc["agents"]["build"] == {"permissions": GUARD}
     off = json.loads(agentconfig.render_files(AgentConfig.model_validate({**FULL, "git_approval": False}))["opencode.json"])
@@ -90,15 +90,18 @@ def test_render_files_matches_opencode_v2_layout():
 def test_cloud_sandboxes_get_the_browser_and_the_network_tool():
     oc = json.loads(agentconfig.render_files(AgentConfig())["opencode.json"])
     assert oc["mcp"]["servers"] == {
-        "network": {"type": "local", "command": ["node", "/usr/local/lib/opensession/network-mcp.mjs"]},
+        "opensession": {"type": "local", "command": ["node", "/usr/local/lib/opensession/opensession-mcp.mjs"]},
         "sandbox": {"type": "local", "command": ["opensession-browser"]},
     }
     # Asking for a domain always waits for the user, whatever the user's own rules say.
     allow_all = AgentConfig(permissions=[{"action": "*", "resource": "*", "effect": "allow"}])
     rules = json.loads(agentconfig.render_files(allow_all)["opencode.json"])["permissions"]
-    assert rules[-1] == {"action": "network_request_access", "resource": "*", "effect": "ask"}
+    assert rules[-2:] == [
+        {"action": "opensession_request_access", "resource": "*", "effect": "ask"},
+        {"action": "opensession_hand_over", "resource": "*", "effect": "ask"},
+    ]
     no_browser = json.loads(agentconfig.render_files(AgentConfig(browser=False))["opencode.json"])
-    assert set(no_browser["mcp"]["servers"]) == {"network"}
+    assert set(no_browser["mcp"]["servers"]) == {"opensession"}
     mine = AgentConfig(mcp={"sandbox": {"type": "local", "command": ["my-browser"]}})
     assert json.loads(agentconfig.render_files(mine)["opencode.json"])["mcp"]["servers"]["sandbox"]["command"] == ["my-browser"]
     assert "mcp" not in json.loads(agentconfig.render_files(AgentConfig(), cloud=False)["opencode.json"])
