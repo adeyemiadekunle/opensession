@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "harness": "vite --config harness-dev/vite.config.ts",
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
