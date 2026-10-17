@@ -35,8 +35,11 @@ import {
 import type { CloudStatus, LocalStatus, OutgoingChanges } from "./bridge";
 
 const APP_ORIGIN = "app://opensession";
-const WEB_URL = process.env.OPENSESSION_WEB_URL ?? "http://localhost:5173";
-const GATEWAY_URL = (process.env.OPENSESSION_GATEWAY_URL ?? "http://localhost:8787").replace(/\/+$/, "");
+// Fixed at build time (tsup.config.ts); the environment can override them, e.g. in development.
+declare const __DEFAULT_WEB_URL__: string;
+declare const __DEFAULT_GATEWAY_URL__: string;
+const WEB_URL = (process.env.OPENSESSION_WEB_URL || __DEFAULT_WEB_URL__).replace(/\/+$/, "");
+const GATEWAY_URL = (process.env.OPENSESSION_GATEWAY_URL || __DEFAULT_GATEWAY_URL__).replace(/\/+$/, "");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },

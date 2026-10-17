@@ -8,6 +8,7 @@
     "test": "turbo run test",
     "dev:web": "pnpm --filter @opensession/web dev",
     "dev:desktop": "pnpm --filter @opensession/desktop dev",
+    "desktop:build": "node scripts/build-desktop.mjs",
     "cli": "pnpm --filter @opensession/cli exec tsx src/index.ts",
     "gateway:test": "cd services/gateway && python -m pytest -q"
   },

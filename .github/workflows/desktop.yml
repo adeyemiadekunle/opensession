@@ -4,7 +4,10 @@ name: Desktop app
 # - Run it by hand (Actions > Desktop app > Run workflow) to get the installers as
 #   build artifacts.
 # - Push a tag like desktop-v0.2.0 to also attach them to a draft GitHub Release
-#   (set "version" in apps/desktop/package.json to match first).
+#   (the tag sets the version).
+# - Both need the repository variables OPENSESSION_WEB_URL and OPENSESSION_GATEWAY_URL:
+#   the servers the app talks to are compiled in (scripts/build-desktop.mjs; run it
+#   locally the same way).
 # Code signing is used only when the secrets exist; without them the builds are
 # unsigned (macOS Gatekeeper and Windows SmartScreen will warn on first launch):
 #   macOS:   MAC_CSC_LINK (base64 .p12 "Developer ID Application"), MAC_CSC_KEY_PASSWORD,
@@ -34,13 +37,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo run build --filter=@opensession/desktop...
-
-      - name: Package
+      # The servers the app talks to are compiled in: set them as repository variables
+      # (Settings > Secrets and variables > Actions > Variables).
+      - name: Build and package
         shell: bash
-        working-directory: apps/desktop
         env:
+          OPENSESSION_WEB_URL: ${{ vars.OPENSESSION_WEB_URL }}
+          OPENSESSION_GATEWAY_URL: ${{ vars.OPENSESSION_GATEWAY_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -50,21 +53,18 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          args=()
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            if [[ -n "$MAC_CSC_LINK" ]]; then
-              export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
-              [[ -n "$APPLE_ID" ]] && args+=(-c.mac.notarize=true)
-            else
-              export CSC_IDENTITY_AUTO_DISCOVERY=false
-              args+=(-c.mac.identity=null)
-            fi
+          if [[ -z "$OPENSESSION_WEB_URL" || -z "$OPENSESSION_GATEWAY_URL" ]]; then
+            echo "::error::Set the OPENSESSION_WEB_URL and OPENSESSION_GATEWAY_URL repository variables (the servers the app talks to)."
+            exit 1
+          fi
+          if [[ "$RUNNER_OS" == "macOS" && -n "$MAC_CSC_LINK" ]]; then
+            export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
           elif [[ "$RUNNER_OS" == "Windows" && -n "$WIN_CSC_LINK" ]]; then
             export CSC_LINK="$WIN_CSC_LINK" CSC_KEY_PASSWORD="$WIN_CSC_KEY_PASSWORD"
           fi
-          publish=never
-          [[ "$GITHUB_REF" == refs/tags/desktop-v* ]] && publish=always
-          pnpm exec electron-builder --publish "$publish" "${args[@]}"
+          args=()
+          [[ "$GITHUB_REF" == refs/tags/desktop-v* ]] && args+=(--publish --version "${GITHUB_REF#refs/tags/desktop-v}")
+          node scripts/build-desktop.mjs "${args[@]}"
 
       - uses: actions/upload-artifact@v4
         with:
