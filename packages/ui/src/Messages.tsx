@@ -101,8 +101,9 @@ function Spinner({ className }: { className?: string }) {
 }
 
 /** Design (tool-call rows): one line per action, collapsed; expand to see output.
- *  A running row shows a spinner; a failed one stays open and offers Retry. */
-function ToolRow({ part, onRetry }: { part: ContentPart; onRetry?: () => void }) {
+ *  A running row shows a spinner; a failed one stays open. A tool error goes back to the
+ *  model as that call's result, so there is nothing for the user to retry. */
+function ToolRow({ part }: { part: ContentPart }) {
   const st = stateOf(part);
   const failed = st.status === "error";
   const running = isRunning(part);
@@ -141,13 +142,7 @@ function ToolRow({ part, onRetry }: { part: ContentPart; onRetry?: () => void })
         <div className="mb-1.5 ml-5 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
           {failed && st.error?.message ? <div className="text-[13px] text-destructive">{st.error.message}</div> : null}
           {output ? <pre className="m-0 max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-[1.7] text-muted-foreground">{output}</pre> : null}
-          {failed && onRetry ? (
-            <div>
-              <Button size="sm" onClick={onRetry}>
-                Retry
-              </Button>
-            </div>
-          ) : null}
+          {failed ? <div className="text-xs text-faint">The agent got this error back and decides what to do next.</div> : null}
         </div>
       ) : null}
     </div>
@@ -215,7 +210,7 @@ export function MessageView({ m, onRetry }: { m: Message; onRetry?: () => void }
                 <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{p.text}</div>
               </details>
             );
-          if (p.type === "tool") return <ToolRow key={i} part={p} onRetry={onRetry} />;
+          if (p.type === "tool") return <ToolRow key={i} part={p} />;
           return null;
         })}
         {error?.message ? (
