@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ContentPart, Message } from "@opensession/api-client";
 import { Button } from "./components/ui/button";
 import { NamedIcon } from "./icons";
@@ -149,12 +149,18 @@ function ToolRow({ part }: { part: ContentPart }) {
   );
 }
 
-function Card({ tone, title, children, action }: { tone: "danger"; title: string; children?: ReactNode; action?: ReactNode }) {
+function Card({ tone, title, children, action }: { tone: "danger" | "warning"; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div role="alert" className={cn("flex w-full flex-col gap-2 rounded-lg border px-3.5 py-3 text-[13px]", tone === "danger" && "border-destructive/40 bg-del-bg")}>
+    <div
+      role="alert"
+      className={cn(
+        "flex w-full flex-col gap-2 rounded-lg border px-3.5 py-3 text-[13px]",
+        tone === "danger" ? "border-destructive/40 bg-del-bg" : "border-warning/40 bg-warning/10",
+      )}
+    >
       <div className="flex items-center gap-2.5">
-        <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
-        <strong className="font-semibold text-destructive">{title}</strong>
+        <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", tone === "danger" ? "bg-destructive" : "bg-warning")} />
+        <strong className={cn("font-semibold", tone === "danger" ? "text-destructive" : "text-warning")}>{title}</strong>
       </div>
       {children}
       {action}
@@ -162,8 +168,120 @@ function Card({ tone, title, children, action }: { tone: "danger"; title: string
   );
 }
 
+type StructuredError = { type?: string; message?: string; status?: number };
+
+const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+/**
+ * Whether a turn stopped on the model's usage or rate limit, and when it resets if the
+ * provider said so. OpenCode passes the provider's error through as {type, message, status};
+ * the reset time is only in the message text, so it is read from the common phrasings
+ * ("try again in 45 minutes", "retry after 30s", "resets at 2026-10-17T15:00:00Z").
+ */
+export function usageLimit(error: StructuredError | undefined, at: number): { resetAt?: number } | null {
+  if (!error) return null;
+  const msg = error.message ?? "";
+  const hit =
+    error.status === 429 ||
+    /rate.?limit|usage.?limit|quota|too many requests/i.test(`${error.type ?? ""} ${msg}`) ||
+    /\b429\b/.test(msg);
+  if (!hit) return null;
+  const rel = /(?:try again|retry|resets?|available again)\s+(?:in|after)\s+(\d+(?:\.\d+)?)\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?)\b/i.exec(msg);
+  if (rel) return { resetAt: at + Number(rel[1]) * UNIT_MS[rel[2]!.toLowerCase()[0]!]! };
+  const after = /retry-after:?\s*(\d+)/i.exec(msg);
+  if (after) return { resetAt: at + Number(after[1]) * 1_000 };
+  const iso = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/.exec(msg);
+  if (iso && !Number.isNaN(Date.parse(iso[0]))) return { resetAt: Date.parse(iso[0]) };
+  const epoch = /reset\w*\D{0,12}(\d{10})\b/i.exec(msg);
+  if (epoch) return { resetAt: Number(epoch[1]) * 1_000 };
+  return {};
+}
+
+/** Wait used when the provider didn't say when the limit resets. */
+export const LIMIT_FALLBACK_MS = 5 * 60_000;
+
+function clock(t: number) {
+  return new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function inWords(ms: number) {
+  const min = Math.ceil(ms / 60_000);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  return min % 60 ? `${h} h ${min % 60} min` : `${h} h`;
+}
+
+/** Re-renders every 15 s so countdowns stay current. */
+function useNow(on: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, [on]);
+  return now;
+}
+
+/** What the conversation offers when the model's usage limit stops a turn. */
+export interface LimitResume {
+  /** When an automatic resume is scheduled, if one is. */
+  scheduledAt: number | null;
+  schedule: (at: number) => void;
+  cancel: () => void;
+  resumeNow: () => void;
+}
+
+function LimitCard({ error, resetAt, model, resume }: { error: StructuredError; resetAt?: number; model?: string; resume?: LimitResume }) {
+  const scheduled = resume?.scheduledAt ?? null;
+  const now = useNow(Boolean(resume));
+  const reset = resetAt && resetAt > now ? resetAt : null;
+  const known = resetAt !== undefined;
+  return (
+    <Card
+      tone="warning"
+      title="Model usage limit reached"
+      action={
+        resume ? (
+          scheduled ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span role="status" className="flex items-center gap-2 text-muted-foreground">
+                <Spinner />
+                Resuming at {clock(scheduled)} (in {inWords(Math.max(0, scheduled - now))}). Keep this window open.
+              </span>
+              <Button size="sm" variant="ghost" onClick={resume.cancel}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {reset || !known ? (
+                <Button size="sm" onClick={() => resume.schedule(reset ?? now + LIMIT_FALLBACK_MS)}>
+                  {reset ? "Resume when it resets" : "Try again in 5 min"}
+                </Button>
+              ) : null}
+              <Button size="sm" variant={reset || !known ? "ghost" : "default"} onClick={resume.resumeNow}>
+                Resume now
+              </Button>
+            </div>
+          )
+        ) : undefined
+      }
+    >
+      <p className="m-0 text-muted-foreground">
+        {model ? `${model} ` : "The model "}stopped before finishing. Nothing was lost: resuming picks up where it stopped.{" "}
+        {reset
+          ? `The limit resets at ${clock(reset)} (in ${inWords(reset - now)}).`
+          : known
+            ? "The limit has reset."
+            : "The provider didn't say when the limit resets. You can switch model in the composer to carry on now."}
+      </p>
+      {error.message ? <p className="m-0 font-mono text-xs text-faint">{error.message}</p> : null}
+    </Card>
+  );
+}
+
 /** Design: assistant text in a bordered card, tool calls as collapsible rows, user prompts as bubbles. */
-export function MessageView({ m, onRetry }: { m: Message; onRetry?: () => void }) {
+export function MessageView({ m, onRetry, resume }: { m: Message; onRetry?: () => void; resume?: LimitResume }) {
   if (m.type === "user") {
     return (
       <div className="max-w-[min(85%,640px)] self-end whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-user px-3 py-2">
@@ -191,7 +309,8 @@ export function MessageView({ m, onRetry }: { m: Message; onRetry?: () => void }
   }
   if (m.type === "assistant") {
     const parts = m.content ?? [];
-    const error = m.error as { message?: string } | undefined;
+    const error = m.error as StructuredError | undefined;
+    const limit = usageLimit(error, m.time?.completed ?? m.time?.created ?? Date.now());
     const runningTool = [...parts].reverse().find((p) => p.type === "tool" && ["running", "streaming", "pending"].includes(stateOf(p).status ?? ""));
     const step = runningTool ? toolTitle(runningTool) : null;
     return (
@@ -213,7 +332,9 @@ export function MessageView({ m, onRetry }: { m: Message; onRetry?: () => void }
           if (p.type === "tool") return <ToolRow key={i} part={p} />;
           return null;
         })}
-        {error?.message ? (
+        {error && limit ? (
+          <LimitCard error={error} resetAt={limit.resetAt} model={m.model?.id} resume={resume} />
+        ) : error?.message ? (
           <Card
             tone="danger"
             title="The agent stopped with an error"

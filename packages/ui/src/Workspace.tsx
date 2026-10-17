@@ -13,8 +13,8 @@ import {
   type Session,
   type TerminalApi,
 } from "@opensession/api-client";
-import { errText, storageGet, storageSet, useAsync } from "./hooks";
-import { MessageView } from "./Messages";
+import { errText, storageGet, storageRemove, storageSet, useAsync } from "./hooks";
+import { MessageView, type LimitResume } from "./Messages";
 import { DiffPanel, FilesPanel } from "./Panels";
 import { GitPanel } from "./GitPanel";
 import { TerminalPanel } from "./TerminalPanel";
@@ -398,6 +398,8 @@ export function Workspace({
   const send = async () => {
     const t = text.trim();
     if (!t) return;
+    // A new message replaces any resume waiting on the usage limit.
+    scheduleResume(null);
     try {
       setErr(null);
       let id = active;
@@ -422,6 +424,47 @@ export function Workspace({
       setBusy(false);
     }
   };
+
+  // Usage limit: resume time per session, kept across reloads; the timer runs while this window is open.
+  const resumeKey = (id: string) => `opensession.resumeAt.${id}`;
+  const [resumeAt, setResumeAt] = useState<number | null>(null);
+  useEffect(() => {
+    const v = active ? Number(storageGet(resumeKey(active))) : 0;
+    setResumeAt(v > 0 ? v : null);
+  }, [active]);
+  const scheduleResume = (at: number | null) => {
+    if (!active) return;
+    if (at) storageSet(resumeKey(active), String(at));
+    else storageRemove(resumeKey(active));
+    setResumeAt(at);
+  };
+
+  /** Continue a turn the usage limit stopped, without sending the original prompt again. */
+  const resume = async () => {
+    if (!active) return;
+    scheduleResume(null);
+    try {
+      setErr(null);
+      setBusy(true);
+      await client.prompt(active, "Continue where you left off.", undefined, { skills });
+      void refresh();
+    } catch (e) {
+      setErr(errText(e));
+      setBusy(false);
+    }
+  };
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
+  useEffect(() => {
+    if (!resumeAt) return;
+    const t = setTimeout(() => void resumeRef.current(), Math.max(0, resumeAt - Date.now()));
+    return () => clearTimeout(t);
+  }, [resumeAt]);
+
+  const lastAssistant = [...messages].reverse().find((m) => m.type === "assistant")?.id;
+  const limitResume: LimitResume | undefined = busy
+    ? undefined
+    : { scheduledAt: resumeAt, schedule: (at) => scheduleResume(at), cancel: () => scheduleResume(null), resumeNow: () => void resume() };
 
   /** Send the last thing the user typed again (after a failed step). */
   const retryLast = async () => {
@@ -715,7 +758,12 @@ export function Workspace({
               </div>
             ) : null}
             {messages.map((m) => (
-              <MessageView key={m.id} m={m} onRetry={busy ? undefined : () => void retryLast()} />
+              <MessageView
+                key={m.id}
+                m={m}
+                onRetry={busy ? undefined : () => void retryLast()}
+                resume={m.id === lastAssistant ? limitResume : undefined}
+              />
             ))}
             {notice ? (
               <div

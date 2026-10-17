@@ -39,12 +39,22 @@ const messages: Record<string, unknown[]> = {
     {
       id: "m5",
       type: "assistant",
-      time: q.has("fail") ? { completed: 2 } : {},
+      time: q.has("fail") || q.has("limit") ? { created: Date.now() - 60_000, completed: Date.now() - 60_000 } : {},
       model: { providerID: "anthropic", id: "claude-opus-5-5" },
       ...(q.has("fail") ? { error: { type: "provider", message: "The provider returned 529 Overloaded. Nothing was changed." } } : {}),
+      // ?limit: the model's usage limit; ?limit=unknown leaves out when it resets.
+      ...(q.has("limit")
+        ? {
+            error: {
+              type: "rate_limit",
+              status: 429,
+              message: q.get("limit") === "unknown" ? "Rate limit exceeded." : "You have reached your usage limit. Try again in 45 minutes.",
+            },
+          }
+        : {}),
       content: [
         { type: "tool", name: "edit", state: { ...done("Edited 1 file"), input: { filePath: "apps/desktop/src/main/main.ts" } } },
-        ...(q.has("fail") ? [] : [{ type: "tool", name: "shell", state: { status: "running", input: { command: "pnpm test:smoke" }, metadata: {} } }]),
+        ...(q.has("fail") || q.has("limit") ? [] : [{ type: "tool", name: "shell", state: { status: "running", input: { command: "pnpm test:smoke" }, metadata: {} } }]),
       ],
     },
   ],
