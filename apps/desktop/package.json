@@ -12,11 +12,11 @@
     "typecheck": "tsc -p . --noEmit",
     "release": "tsup && vite build && electron-builder --publish always"
   },
-  "dependencies": {},
   "devDependencies": {
     "@opensession/api-client": "workspace:*",
     "@opensession/local-runner": "workspace:*",
     "@opensession/ui": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

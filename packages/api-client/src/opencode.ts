@@ -67,6 +67,7 @@ export abstract class OpenCodeClient implements OpenSessionClient {
       name: m.name,
       family: m.family,
       variants: (m.variants ?? []).map((v: any) => v?.id).filter(Boolean),
+      limit: typeof m.limit?.context === "number" ? { context: m.limit.context, output: m.limit.output } : undefined,
     }));
   }
   async listSessions(): Promise<Session[]> {

@@ -15,6 +15,7 @@ export interface CloudStatus {
 }
 
 import type { AgentConfig, AgentConfigResponse, CiChecks, OutgoingChanges } from "@opensession/api-client";
+import type { HandoffResult } from "@opensession/local-runner";
 export type { OutgoingChanges };
 
 export interface DesktopBridge {
@@ -30,7 +31,7 @@ export interface DesktopBridge {
   gitPush(): Promise<{ branch: string }>;
   /** Opens GitHub's "compare & pull request" page for the current branch. */
   gitPullRequest(title: string, body: string): Promise<{ url: string }>;
-  gitCommit(message: string): Promise<{ committed: boolean; head: string | null }>;
+  gitCommit(message: string, paths?: string[]): Promise<{ committed: boolean; head: string | null }>;
   gitOutgoing(): Promise<OutgoingChanges>;
   /** CI for the open folder's branch, through the cloud account (needs sign-in). */
   gitChecks(): Promise<CiChecks>;
@@ -38,6 +39,8 @@ export interface DesktopBridge {
   cloudStatus(): Promise<CloudStatus>;
   cloudLogin(): Promise<CloudStatus>;
   cloudLogout(): Promise<CloudStatus>;
+  /** Push the open folder's branch (committing first if a message is given) and bring it into the cloud project. */
+  cloudHandoff(commit?: string): Promise<HandoffResult>;
   /** OS notification. */
   notify(title: string, body: string): Promise<void>;
 }

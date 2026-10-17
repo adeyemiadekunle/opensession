@@ -20,10 +20,13 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BUILTIN_AGENTS, BUILTIN_TOOLS, type AgentConfig } from "@opensession/api-client";
+import { BUILTIN_AGENTS, BUILTIN_TOOLS, CloudClient, type AgentConfig } from "@opensession/api-client";
 import {
   browserLogin,
   ensureLocalAgentDefaults,
+  handoffToCloud,
+  systemGit,
+  type HandoffResult,
   loadLocalAgentConfig,
   saveLocalAgentConfig,
   startLocalServer,
@@ -233,6 +236,15 @@ ipcMain.handle("cloud:login", async () => {
   } // else: signed in until the app quits; the token is never written in plain text
   return cloudStatus();
 });
+// Move the open folder to the cloud: push its branch (and commit first if asked), then bring
+// it into the cloud project for the same repository. Runs here so the token stays in main.
+ipcMain.handle("cloud:handoff", async (_e, commit?: string): Promise<HandoffResult> => {
+  if (!folder) throw new Error("open a project folder first");
+  if (!cloudToken) throw new Error("sign in to the cloud first");
+  const token = cloudToken;
+  const cloud = new CloudClient({ gatewayUrl: GATEWAY_URL, getToken: () => token });
+  return handoffToCloud(cloud, systemGit, folder, { commit: commit || undefined });
+});
 ipcMain.handle("cloud:logout", () => {
   signOutLocally();
   return cloudStatus();
@@ -297,9 +309,16 @@ ipcMain.handle("git:outgoing", async (): Promise<OutgoingChanges> => {
   const status = await git(["status", "--porcelain"]);
   return { branch, base: upstream || null, commits, uncommitted: status ? status.split("\n").map((l) => l.slice(3)) : [] };
 });
-ipcMain.handle("git:commit", async (_e, message: string) => {
+ipcMain.handle("git:commit", async (_e, message: string, paths?: string[]) => {
   if (typeof message !== "string" || !message.trim()) throw new Error("a commit message is required");
-  await git(["add", "-A"]);
+  if (paths === undefined) await git(["add", "-A"]);
+  else {
+    // Only the chosen paths: start from an empty index, then stage just those (no shell involved).
+    if (!Array.isArray(paths) || !paths.length || paths.some((p) => typeof p !== "string" || !p || p.startsWith("/") || p.split("/").includes("..")))
+      throw new Error("invalid paths to commit");
+    if (await git(["rev-parse", "-q", "--verify", "HEAD"]).catch(() => "")) await git(["reset", "-q"]);
+    await git(["add", "-A", "--", ...paths]);
+  }
   if (!(await git(["diff", "--cached", "--name-only"]))) return { committed: false, head: null };
   await git(["commit", "-q", "-m", message]);
   return { committed: true, head: await git(["rev-parse", "--short", "HEAD"]) };

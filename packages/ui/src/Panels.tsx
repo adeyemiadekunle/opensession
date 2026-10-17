@@ -1,83 +1,221 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { DiffFile, FileEntry, OpenSessionClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
+import { NamedIcon } from "./icons";
+import { cn } from "./lib/utils";
 
-export function FilesPanel({ client, refreshKey }: { client: OpenSessionClient; refreshKey: number }) {
+/** Files card (design): its own header (tree toggle, open-file tabs, filter, close), the folder
+ *  tree on the left and the open file with line numbers on the right. */
+export function FilesPanel({ client, refreshKey, onClose }: { client: OpenSessionClient; refreshKey: number; onClose?: () => void }) {
   const [dir, setDir] = useState("");
-  const [open, setOpen] = useState<{ path: string; text: string } | null>(null);
+  const [filter, setFilter] = useState("");
+  const [tabs, setTabs] = useState<{ path: string; text: string }[]>([]);
+  const [activePath, setActivePath] = useState<string | null>(null);
+  const [showTree, setShowTree] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
   const list = useAsync<FileEntry[]>(() => client.listFiles(dir), [client, dir, refreshKey]);
 
   const openFile = async (path: string) => {
+    if (tabs.some((t) => t.path === path)) {
+      setActivePath(path);
+      return;
+    }
     try {
       setErr(null);
-      setOpen({ path, text: await client.readFile(path) });
+      const text = await client.readFile(path);
+      setTabs((ts) => [...ts.filter((t) => t.path !== path), { path, text }]);
+      setActivePath(path);
     } catch (e) {
       setErr(errText(e));
     }
   };
 
-  if (open) {
-    return (
-      <div className="os-panel">
-        <div className="os-panel-bar">
-          <button className="os-link" onClick={() => setOpen(null)}>← Files</button>
-          <span className="os-path">{open.path}</span>
-        </div>
-        <pre className="os-pre os-file">{open.text}</pre>
-      </div>
-    );
-  }
+  const closeTab = (path: string) => {
+    const rest = tabs.filter((t) => t.path !== path);
+    setTabs(rest);
+    if (activePath === path) setActivePath(rest[rest.length - 1]?.path ?? null);
+  };
+
   const up = dir.includes("/") ? dir.slice(0, dir.replace(/\/$/, "").lastIndexOf("/")) : "";
+  const entries = useMemo(
+    () => (list.data ?? []).filter((f) => f.path.toLowerCase().includes(filter.toLowerCase())),
+    [list.data, filter],
+  );
+  const open = tabs.find((t) => t.path === activePath) ?? null;
+  const lines = open ? open.text.split("\n") : [];
+  const iconBtn = "grid size-[26px] shrink-0 place-items-center rounded-md border-0 bg-transparent p-0 text-faint hover:bg-sunken hover:text-foreground";
+
   return (
-    <div className="os-panel">
-      <div className="os-panel-bar">
-        {dir ? <button className="os-link" onClick={() => setDir(up)}>← ..</button> : null}
-        <span className="os-path">/{dir}</span>
-      </div>
-      {list.error || err ? <div className="os-error">{list.error ?? err}</div> : null}
-      <ul className="os-list">
-        {(list.data ?? []).map((f) => {
-          const name = f.path.replace(/\/$/, "").split("/").pop() ?? f.path;
-          const full = (dir ? `${dir.replace(/\/$/, "")}/` : "") + name;
-          return (
-            <li key={f.path}>
-              <button
-                className="os-file-row"
-                onClick={() => (f.type === "directory" ? setDir(full) : openFile(full))}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <header className="flex h-[42px] shrink-0 items-center gap-1.5 border-b border-border pl-2 pr-1.5">
+        <button
+          className={cn(iconBtn, showTree && "text-foreground")}
+          aria-label="Show the file tree"
+          aria-pressed={showTree}
+          onClick={() => setShowTree((v) => !v)}
+        >
+          <NamedIcon name="list" className="size-[13px]" />
+        </button>
+        <div role="tablist" aria-label="Open files" className="flex min-w-0 flex-1 items-end gap-0.5 self-end overflow-x-auto">
+          {tabs.length === 0 ? <span className="px-1 pb-2.5 text-[13.5px] font-semibold">Files</span> : null}
+          {tabs.map((t) => {
+            const name = t.path.split("/").pop() ?? t.path;
+            const selected = t.path === activePath;
+            return (
+              <div
+                key={t.path}
+                className={cn(
+                  "flex h-[30px] shrink-0 items-center gap-2 rounded-t-md border border-b-0 pl-2.5 pr-1 font-mono text-[12.5px]",
+                  selected ? "border-border bg-card text-foreground" : "border-transparent text-faint",
+                )}
               >
-                {f.type === "directory" ? "📁" : "📄"} {name}
+                <button
+                  role="tab"
+                  aria-selected={selected}
+                  title={t.path}
+                  className="border-0 bg-transparent p-0 font-mono text-inherit"
+                  onClick={() => setActivePath(t.path)}
+                >
+                  {name}
+                </button>
+                <button
+                  aria-label={`Close ${name}`}
+                  className="grid size-4 place-items-center rounded border-0 bg-transparent p-0 text-faint hover:bg-sunken hover:text-foreground"
+                  onClick={() => closeTab(t.path)}
+                >
+                  <NamedIcon name="close" className="size-3" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <button
+          className={iconBtn}
+          aria-label="Filter files"
+          onClick={() => {
+            setShowTree(true);
+            setTimeout(() => filterRef.current?.focus());
+          }}
+        >
+          <NamedIcon name="search" className="size-[13px]" />
+        </button>
+        {onClose ? (
+          <button className={iconBtn} aria-label="Close files panel" onClick={onClose}>
+            <NamedIcon name="close" className="size-[14px]" />
+          </button>
+        ) : null}
+      </header>
+      <div className="flex min-h-0 flex-1">
+        {showTree ? (
+          <aside aria-label="File tree" className="flex w-[156px] shrink-0 flex-col gap-1.5 overflow-hidden border-r border-border p-2">
+            <label className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-faint">
+              <NamedIcon name="search" className="size-3" />
+              <input
+                ref={filterRef}
+                className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-xs text-foreground outline-none placeholder:text-faint"
+                placeholder="Filter"
+                aria-label="Filter files"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </label>
+            {dir ? (
+              <button className="h-6 justify-start border-0 bg-transparent px-1.5 text-left font-mono text-xs text-muted-foreground" onClick={() => setDir(up)}>
+                ‹ ..
               </button>
-            </li>
-          );
-        })}
-        {list.data && list.data.length === 0 ? <li className="os-muted">Empty folder</li> : null}
-      </ul>
+            ) : null}
+            <ul className="m-0 flex min-h-0 list-none flex-col gap-px overflow-auto p-0 font-mono text-xs text-foreground">
+              {entries.map((f) => {
+                const name = f.path.replace(/\/$/, "").split("/").pop() ?? f.path;
+                const full = (dir ? `${dir.replace(/\/$/, "")}/` : "") + name;
+                const isOpen = activePath === full;
+                return (
+                  <li key={f.path}>
+                    <button
+                      className={cn(
+                        "flex h-6 w-full items-center gap-1.5 truncate rounded-md border-0 bg-transparent px-1.5 text-left",
+                        isOpen && "bg-muted text-foreground",
+                        f.type === "directory" && "text-muted-foreground",
+                      )}
+                      onClick={() => (f.type === "directory" ? setDir(full) : openFile(full))}
+                    >
+                      {f.type === "directory" ? <span aria-hidden="true">›</span> : null}
+                      <span className="truncate">{name}</span>
+                    </button>
+                  </li>
+                );
+              })}
+              {list.data && entries.length === 0 ? <li className="px-1.5 text-muted-foreground">Empty folder</li> : null}
+            </ul>
+            {list.error || err ? <div className="os-error text-xs">{list.error ?? err}</div> : null}
+          </aside>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex h-[30px] shrink-0 items-center border-b border-border px-3 font-mono text-xs text-muted-foreground">
+            <span className="truncate">{open ? open.path : "No file open"}</span>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto py-2 font-mono text-xs leading-[1.7]">
+            {open
+              ? lines.map((line, i) => (
+                  <div key={i} className="grid grid-cols-[28px_1fr] whitespace-pre pr-2.5">
+                    <span className="pr-2.5 text-right text-faint/70">{i + 1}</span>
+                    <span className="truncate">{line || " "}</span>
+                  </div>
+                ))
+              : null}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
+/** Changes card (design): one row per changed file with +/- counts, and the selected file's patch below. */
 export function DiffPanel({ client, refreshKey }: { client: OpenSessionClient; refreshKey: number }) {
   const diff = useAsync<DiffFile[]>(() => client.diff("working"), [client, refreshKey]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const files = diff.data ?? [];
+  const current = files.find((d) => d.file === selected) ?? files[0];
+
   return (
-    <div className="os-panel">
-      {diff.error ? <div className="os-error">{diff.error}</div> : null}
-      {diff.data && diff.data.length === 0 ? <div className="os-muted">No changes (needs a git repo).</div> : null}
-      {(diff.data ?? []).map((d) => (
-        <details key={d.file} className="os-diff" open={diff.data!.length < 4}>
-          <summary>
-            <span className="os-path">{d.file}</span>{" "}
-            <span className="os-add">+{d.additions}</span> <span className="os-del">−{d.deletions}</span>
-          </summary>
-          <pre className="os-pre">
-            {d.patch.split("\n").map((l, i) => (
-              <div key={i} className={l.startsWith("+") ? "os-add" : l.startsWith("-") ? "os-del" : undefined}>
-                {l || " "}
-              </div>
-            ))}
-          </pre>
-        </details>
-      ))}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {diff.error ? <div className="os-error px-3">{diff.error}</div> : null}
+      {diff.data && files.length === 0 ? <div className="px-3 py-2 text-muted-foreground">No changes (needs a git repo).</div> : null}
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-2 text-[13px]">
+        {files.map((d) => (
+          <li key={d.file}>
+            <button
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left",
+                current?.file === d.file && "bg-muted",
+              )}
+              onClick={() => setSelected(d.file)}
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{d.file}</span>
+              <span className="font-mono text-xs">
+                <span className="text-success">+{d.additions}</span> <span className="text-destructive">-{d.deletions}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {current ? (
+        <div className="min-h-0 flex-1 overflow-auto border-t border-border py-2.5 font-mono text-xs leading-[1.7]">
+          {current.patch.split("\n").map((l, i) => (
+            <div
+              key={i}
+              className={cn(
+                "whitespace-pre px-4",
+                l.startsWith("+") && "bg-add-bg text-success",
+                l.startsWith("-") && "bg-del-bg text-destructive",
+              )}
+            >
+              {l || " "}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

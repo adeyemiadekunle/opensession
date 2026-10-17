@@ -1,6 +1,6 @@
-import { Show, SignIn, UserButton, useAuth } from "@clerk/react";
+import { Show, SignIn, useAuth, useClerk, useUser } from "@clerk/react";
 import { CloudClient } from "@opensession/api-client";
-import { CloudApp } from "@opensession/ui";
+import { CloudApp, type CloudAccount } from "@opensession/ui";
 import { useMemo } from "react";
 import { CliAuthorize } from "./CliAuthorize";
 import { usePath } from "./router";
@@ -25,9 +25,18 @@ export function App() {
 
 function SignedInApp() {
   const { getToken } = useAuth();
+  const { user } = useUser();
+  const clerk = useClerk();
   const [path, go] = usePath();
   // Clerk session tokens are short-lived; getToken() returns a fresh one each call.
   const client = useMemo(() => new CloudClient({ gatewayUrl: GATEWAY_URL, getToken: () => getToken() }), [getToken]);
   if (path === "/cli-auth") return <CliAuthorize client={client} />;
-  return <CloudApp client={client} path={path} go={go} headerEnd={<UserButton />} />;
+  const email = user?.primaryEmailAddress?.emailAddress;
+  const account: CloudAccount = {
+    name: user?.fullName || email || "Account",
+    detail: email,
+    items: [{ id: "profile", label: "Profile", onSelect: () => clerk.openUserProfile() }],
+    onSignOut: () => void clerk.signOut(),
+  };
+  return <CloudApp client={client} path={path} go={go} account={account} />;
 }

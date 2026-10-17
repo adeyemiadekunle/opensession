@@ -95,9 +95,9 @@ export class CloudClient extends OpenCodeClient {
   gitPull(branch: string): Promise<{ repo: string; branch: string; head: string }> {
     return this.http.post("/git/pull", { json: { branch } });
   }
-  /** Commit everything changed in the project; `committed` is false when there was nothing to commit. */
-  gitCommit(message: string): Promise<{ committed: boolean; head: string | null }> {
-    return this.http.post("/git/commit", { json: { message } });
+  /** Commit what changed in the project (everything, or only `paths`); `committed` is false when there was nothing to commit. */
+  gitCommit(message: string, paths?: string[]): Promise<{ committed: boolean; head: string | null }> {
+    return this.http.post("/git/commit", { json: paths?.length ? { message, paths } : { message } });
   }
   pullRequest(o: { title: string; body?: string; base?: string }): Promise<{ number: number; url: string; head: string; base: string }> {
     return this.http.post("/git/pull-request", { json: o });
@@ -115,7 +115,7 @@ export class CloudClient extends OpenCodeClient {
       checkout: (b, create) => this.gitCheckout(b, create),
       push: () => this.gitPush(),
       pullRequest: (title, body) => this.pullRequest({ title, body }),
-      commit: (message) => this.gitCommit(message),
+      commit: (message, paths) => this.gitCommit(message, paths),
       outgoing: () => this.gitOutgoing(),
       checks: () => this.gitChecks(),
     };

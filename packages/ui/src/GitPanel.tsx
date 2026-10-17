@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import type { CiChecks, GitActions, GitInfo, OpenSessionClient, OutgoingChanges } from "@opensession/api-client";
+import { useState } from "react";
+import type { GitActions, GitInfo, OpenSessionClient, OutgoingChanges } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
+import { ChecksView } from "./Checks";
 
 /** A pending commit, push or pull request, shown for approval before it runs. */
 export interface Review {
@@ -263,44 +264,5 @@ function ReviewStep({
         </button>
       </div>
     </form>
-  );
-}
-
-const CI_LABEL: Record<string, string> = { success: "passing", failure: "failing", pending: "running", none: "no checks" };
-
-/** GitHub checks for the current branch, refreshed while the panel is open. */
-function ChecksView({ checks, refreshKey }: { checks: () => Promise<CiChecks>; refreshKey: number }) {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 20_000);
-    return () => clearInterval(t);
-  }, []);
-  const ci = useAsync(() => checks(), [checks, refreshKey, tick]);
-  if (ci.error) return <div className="os-muted os-small">CI: {ci.error}</div>;
-  const d = ci.data;
-  if (!d) return <div className="os-muted os-small">CI: loading…</div>;
-  return (
-    <div className="os-git-ci">
-      <div className="os-row os-between">
-        <strong className="os-small">
-          CI <span className={`os-ci os-ci-${d.state}`}>{CI_LABEL[d.state] ?? d.state}</span>
-        </strong>
-        {d.pull_request ? (
-          <a className="os-small" href={d.pull_request.url} target="_blank" rel="noreferrer">
-            PR #{d.pull_request.number}
-          </a>
-        ) : null}
-      </div>
-      <ul className="os-list">
-        {d.checks.map((c) => (
-          <li key={c.name} className="os-row os-between">
-            <span>{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}</span>
-            <span className={`os-small os-ci os-ci-${c.status !== "completed" ? "pending" : c.conclusion === "success" || c.conclusion === "skipped" || c.conclusion === "neutral" ? "success" : "failure"}`}>
-              {c.status !== "completed" ? c.status.replace("_", " ") : c.conclusion}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

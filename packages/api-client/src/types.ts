@@ -12,6 +12,8 @@ export interface Model extends ModelRef {
   name?: string;
   family?: string;
   variants?: string[];
+  /** Token limits: `context` is the context window. */
+  limit?: { context: number; output?: number };
 }
 
 export interface Session {
@@ -101,8 +103,8 @@ export interface GitActions {
   checkout(branch: string, create?: boolean): Promise<unknown>;
   push?(): Promise<{ branch: string }>;
   pullRequest?(title: string, body: string): Promise<{ url?: string | null; number?: number | null }>;
-  /** Commit everything changed (shown for approval first). */
-  commit?(message: string): Promise<{ committed: boolean; head: string | null }>;
+  /** Commit what changed (shown for approval first): everything, or only `paths` when given. */
+  commit?(message: string, paths?: string[]): Promise<{ committed: boolean; head: string | null }>;
   /** What a push would send, for the review screen. */
   outgoing?(): Promise<OutgoingChanges>;
   /** GitHub checks (CI) for the current branch. */

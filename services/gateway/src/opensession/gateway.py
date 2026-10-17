@@ -41,6 +41,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -136,6 +137,8 @@ class GitPull(BaseModel):
 
 class GitCommit(BaseModel):
     message: str = Field(min_length=1, max_length=5_000)
+    # Commit only these paths (relative to the project); everything when omitted.
+    paths: list[str] | None = Field(default=None, min_length=1, max_length=2_000)
 
 
 class PullRequest(BaseModel):
@@ -750,11 +753,21 @@ def create_app(
 
     @app.post("/git/commit")
     async def git_commit(body: GitCommit, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
-        """Commit everything changed in the project (the agent's work), e.g. before
-        handing it to another computer. Nothing to commit is not an error."""
+        """Commit what changed in the project (the agent's work), e.g. before handing it
+        to another computer: everything, or only `paths` (the review screen's selection).
+        Nothing to commit is not an error."""
         await get_client(request, ref)
+        if body.paths is None:
+            stage = "git add -A; "
+        else:
+            for p in body.paths:
+                if not p or "\0" in p or "\n" in p or p.startswith("/") or ".." in p.split("/"):
+                    raise HTTPException(422, f"invalid path: {p!r}")
+            # Start from an empty index so only the chosen paths are committed.
+            quoted = " ".join(shlex.quote(p) for p in body.paths)
+            stage = f"if git rev-parse -q --verify HEAD >/dev/null; then git reset -q; fi; git add -A -- {quoted}; "
         script = (
-            "set -e; cd /workspace; git add -A; "
+            f"set -e; cd /workspace; {stage}"
             "if git diff --cached --quiet; then echo NOTHING; exit 0; fi; "
             'git commit -q -m "$OPENSESSION_COMMIT_MESSAGE"; git rev-parse --short HEAD'
         )
