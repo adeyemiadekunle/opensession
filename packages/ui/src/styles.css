@@ -92,6 +92,7 @@
   --color-ring: var(--os-accent);
   --color-sidebar: var(--os-surface1);
   --color-selected: var(--os-selected);
+  --color-sunken: var(--os-sunken);
   --color-user: var(--os-user);
   --color-add-bg: var(--os-add-bg);
   --color-del-bg: var(--os-del-bg);

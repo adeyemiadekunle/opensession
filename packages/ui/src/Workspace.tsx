@@ -22,6 +22,8 @@ import { Requests } from "./Requests";
 import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
 import { Button } from "./components/ui/button";
 import { Select } from "./components/ui/select";
+import { Dialog } from "./components/ui/dialog";
+import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { cn } from "./lib/utils";
 
 const MODEL_KEY = "opensession.model";
@@ -95,6 +97,11 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [err, setErr] = useState<string | null>(null);
   const [dock, setDock] = useState<DockState>(loadDock);
   const [query, setQuery] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
+  const [draft, setDraft] = useState({ model: "", agent: "", text: "" });
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [refreshKey, setRefreshKey] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +129,26 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
     storageSet(DOCK_KEY, JSON.stringify(dock));
   }, [dock]);
 
+  // Ctrl/Cmd K opens the palette; the browser's online/offline events drive the offline notice.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
     if (!active) return;
     try {
@@ -131,11 +158,13 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
         client.listForms(active).catch(() => []),
       ]);
       setMessages(m);
+      setLoadingMessages(false);
       setPerms(p);
       setForms(f);
       const last = m[m.length - 1];
       setBusy(Boolean(last && (last.type === "user" || (last.type === "assistant" && !last.time?.completed))));
     } catch (e) {
+      setLoadingMessages(false);
       setErr(errText(e));
     }
   }, [client, active]);
@@ -144,6 +173,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   useEffect(() => {
     if (!active) return;
     setMessages([]);
+    setLoadingMessages(true);
     void refresh();
     const ctl = new AbortController();
     let cursor: string | undefined;
@@ -178,13 +208,34 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages.length]);
 
-  const newSession = async () => {
-    if (!chosen) return;
+  const openNew = () => {
+    setDraft({ model: chosen ? modelKey(chosen) : "", agent, text: "" });
+    setNewOpen(true);
+  };
+
+  /** Create a session from the New session dialog, and send its first message if one was typed. */
+  const startFromDraft = async () => {
+    const m = modelList.find((x) => modelKey(x) === draft.model) ?? chosen;
+    if (!m) {
+      setErr("Choose a model first");
+      return;
+    }
     try {
       setErr(null);
-      const s = await client.createSession({ model: { providerID: chosen.providerID, id: chosen.id }, agent });
+      const s = await client.createSession({ model: { providerID: m.providerID, id: m.id }, agent: draft.agent });
+      setModel(modelKey(m));
+      storageSet(MODEL_KEY, modelKey(m));
+      setAgent(draft.agent);
+      storageSet(AGENT_KEY, draft.agent);
       await sessions.reload();
       setActive(s.id);
+      setNewOpen(false);
+      const first = draft.text.trim();
+      if (first) {
+        setBusy(true);
+        await client.prompt(s.id, first, undefined, { skills });
+        void refresh();
+      }
     } catch (e) {
       setErr(errText(e));
     }
@@ -255,6 +306,24 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const at = /(^|\s)@([a-z0-9-]*)$/.exec(text);
   const skillHints = at ? skills.filter((s) => s.startsWith(at[2]!)).slice(0, 8) : [];
   const activeTitle = sessionList.find((s) => s.id === active)?.title || (active ? "Session" : "New session");
+  const paletteItems: PaletteItem[] = [
+    ...sessionList.map((s) => ({
+      id: `session-${s.id}`,
+      group: "Sessions",
+      label: s.title || "Untitled session",
+      hint: relativeTime(s.time?.updated ?? s.time?.created),
+      run: () => setActive(s.id),
+    })),
+    { id: "new", group: "Actions", label: "New session", run: openNew },
+    ...(["changes", "git", "files", "terminal"] as DockPanelId[])
+      .filter((id) => id !== "terminal" || terminal)
+      .map((id) => ({
+        id: `toggle-${id}`,
+        group: "Actions",
+        label: `Toggle ${DOCK_TITLES[id]} panel`,
+        run: () => togglePanel(id),
+      })),
+  ];
   const togglable = (["terminal", "changes", "git", "files"] as DockPanelId[]).filter((id) => id !== "terminal" || terminal);
   // The terminal can be unavailable (no sandbox terminal), so hide its card rather than drop it from state.
   const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => id !== "terminal" || terminal) };
@@ -271,13 +340,24 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          <kbd className="font-mono text-[11px] text-faint">Ctrl K</kbd>
         </label>
-        <Button variant="ghost" className="h-8 justify-start px-2 text-sm text-foreground" disabled={!chosen} onClick={newSession}>
+        <Button variant="ghost" className="h-8 justify-start px-2 text-sm text-foreground" onClick={openNew}>
           <Icon><path d="M12 5v14M5 12h14" /></Icon>
           New session
         </Button>
         <section className="flex flex-col gap-0.5">
           <div className="flex h-[26px] items-center px-2 text-xs font-medium text-faint">Sessions</div>
+          {sessions.loading && !sessions.data ? (
+            <div className="flex animate-pulse flex-col gap-2 px-2 pt-1 motion-reduce:animate-none" role="status" aria-label="Loading sessions">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex flex-col gap-1.5">
+                  <div className="h-3 w-[150px] rounded bg-sunken" />
+                  <div className="h-2.5 w-[84px] rounded bg-sunken" />
+                </div>
+              ))}
+            </div>
+          ) : null}
           <ul className="flex flex-col gap-0.5">
             {visibleSessions.map((s) => {
               const isActive = s.id === active;
@@ -345,12 +425,43 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
           ref={listRef}
           className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-10 pr-7 pt-7 [&>*]:max-w-[640px]"
         >
-          {!active ? <div className="m-auto text-muted-foreground">Start a session, then describe what you want to build.</div> : null}
+          {!active ? (
+            <div className="m-auto flex max-w-[440px] flex-col items-center gap-5 text-center">
+              <span className="grid size-14 place-items-center rounded-[14px] bg-sunken text-primary">
+                <svg className="size-[26px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                </svg>
+              </span>
+              <div className="flex flex-col gap-2">
+                <h1 className="text-[22px] font-semibold">Start a session</h1>
+                <p className="text-sm text-muted-foreground">
+                  Describe what you want to build. Changes stay in the project until you review and commit them.
+                </p>
+              </div>
+              <Button variant="default" onClick={openNew}>
+                New session
+              </Button>
+            </div>
+          ) : null}
+          {active && loadingMessages && messages.length === 0 ? (
+            <div className="flex w-full animate-pulse flex-col gap-3 motion-reduce:animate-none" role="status" aria-label="Loading conversation">
+              <div className="h-[42px] w-[380px] max-w-full rounded-xl bg-sunken" />
+              <div className="h-[84px] w-full max-w-[600px] rounded-lg border border-border bg-card" />
+            </div>
+          ) : null}
           {messages.map((m) => (
             <MessageView key={m.id} m={m} />
           ))}
         </div>
-        {err ? <div className="os-error px-10">{err}</div> : null}
+        {err ? (
+          <div role="alert" className="mx-10 mt-3 flex items-center gap-3 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
+            <span className="min-w-0 flex-1 text-destructive">{err}</span>
+            <Button size="sm" variant="outline" onClick={() => setErr(null)}>
+              Dismiss
+            </Button>
+          </div>
+        ) : null}
         {commandHints.length || skillHints.length ? (
           <ul className="os-suggest os-requests">
             {commandHints.map((c) => (
@@ -373,6 +484,16 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
         <div className="relative shrink-0 pb-4 pl-10 pr-7">
           {active ? (
             <Requests client={client} sessionId={active} permissions={perms} forms={forms} onDone={refresh} />
+          ) : null}
+          {!online && !perms.length && !forms.length ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="absolute inset-x-10 bottom-full z-10 mb-2 flex max-w-[640px] items-center gap-2.5 rounded-lg border border-warning/40 bg-card px-3.5 py-2.5 text-[13px] text-warning shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
+            >
+              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-warning" />
+              You're offline. Your message will send when the connection is back.
+            </div>
           ) : null}
           <div className="flex max-w-[640px] flex-col gap-2.5 rounded-lg border border-input bg-card px-3.5 pb-2.5 pt-3 focus-within:border-muted-foreground">
             <textarea
@@ -445,6 +566,71 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
           }
         />
       ) : null}
+      <Dialog
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        title="New session"
+        footer={
+          <>
+            <span className="text-xs text-faint">Esc to cancel</span>
+            <div className="ml-auto flex gap-2">
+              <Button variant="outline" onClick={() => setNewOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="default" disabled={!modelList.length} onClick={startFromDraft}>
+                Start session
+              </Button>
+            </div>
+          </>
+        }
+      >
+        {modelList.length ? null : <div className="os-hint">{noModels ?? "No models available."}</div>}
+        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+          Model
+          <Select
+            className="h-9 w-full"
+            value={draft.model}
+            onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}
+          >
+            {providers.map((p) => (
+              <optgroup key={p} label={p}>
+                {modelList
+                  .filter((m) => m.providerID === p)
+                  .map((m) => (
+                    <option key={modelKey(m)} value={modelKey(m)}>
+                      {m.name ?? m.id}
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+          </Select>
+        </label>
+        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+          Agent
+          <Select className="h-9 w-full" value={draft.agent} onChange={(e) => setDraft((d) => ({ ...d, agent: e.target.value }))}>
+            {agentChoices.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+          First message <span className="text-faint">(optional)</span>
+          <textarea
+            className="min-h-[72px] rounded-md border border-input bg-card p-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            placeholder="Ask the agent to do something in this project…"
+            value={draft.text}
+            onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
+          />
+        </label>
+      </Dialog>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={paletteItems}
+      />
     </div>
   );
 }
