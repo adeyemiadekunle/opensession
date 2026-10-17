@@ -17,7 +17,7 @@ The project's OpenCode V2 API is served as-is at /p/{project}/api/... (the gener
 proxy at the end of create_app; policy in opencode_proxy.py), so cloud clients speak
 the same API as a local `opencode serve`. The gateway's own routes are only what
 OpenCode does not have: accounts, keys, egress, projects, GitHub, limits, agent
-setup and terminal tickets.
+setup, terminal tickets and browser previews (preview.py).
 
 Because each user has a dedicated OpenCode server, there is no cross-user session
 ownership table: a user can only ever reach their own server. Credentials, MCP
@@ -54,6 +54,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import agentconfig
 from . import opencode_proxy as ocp
+from . import preview as pv
 from .agentconfig import BUILTIN_AGENTS, BUILTIN_TOOLS, AgentConfig
 from .auth import USER_ID_RE, AuthConfig, Authenticator, Principal
 from . import db as dbmod
@@ -81,6 +82,10 @@ WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 PtyId = Annotated[str, Path(pattern=r"^pty_[A-Za-z0-9]{1,80}$")]
 TERMINAL_TICKET_SECONDS = 60
+
+
+class PreviewCreate(BaseModel):
+    port: int = Field(ge=1024, le=65535)
 
 
 class TerminalSize(BaseModel):
@@ -254,6 +259,7 @@ def create_app(
             app.state.github = github
         app.state.clone_locks = {}
         app.state.term_tickets = {}
+        app.state.previews = pv.Tickets()
         task = asyncio.create_task(mgr.run_reaper()) if reaper else None
         try:
             if app.state.egress.enabled:
@@ -289,6 +295,14 @@ def create_app(
 
             return JSONResponse({"detail": "forbidden"}, status_code=403)
         return await call_next(request)
+
+    @app.middleware("http")
+    async def preview_host(request: Request, call_next):
+        """<ticket>.<PREVIEW_DOMAIN> is a browser preview (see preview.py), not the API."""
+        ticket = pv.ticket_from_host(request.headers.get("host"))
+        if ticket is None:
+            return await call_next(request)
+        return await serve_preview(request, ticket, request.url.path.lstrip("/"), "/")
 
     # ---- identity / routing -------------------------------------------------
 
@@ -1100,6 +1114,82 @@ def create_app(
                 await websocket.close(code=1011)
             except Exception:
                 pass
+
+    # ---- browser preview ------------------------------------------------------------
+    #
+    # A port of the project's sandbox (its dev server) behind a ticketed URL, so the
+    # Browser card can show it in an <iframe>. See preview.py.
+
+    @app.post("/preview", status_code=201)
+    async def create_preview(body: PreviewCreate, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
+        mgr: SandboxManager = request.app.state.sandboxes
+        if body.port == mgr.cfg.port:
+            raise HTTPException(400, "that port is the agent's own server")
+        await get_client(request, ref)  # wakes the sandbox
+        ticket = request.app.state.previews.issue(ref[0], ref[1], body.port)
+        domain = pv.preview_domain()
+        if domain:
+            url = f"{pv.preview_scheme()}://{ticket}.{domain}/"
+        else:
+            url = str(request.base_url).rstrip("/") + f"/preview/{ticket}/"
+        return {"url": url, "port": body.port, "expires_in": pv.PREVIEW_SECONDS}
+
+    @app.api_route("/preview/{ticket}", methods=["GET", "HEAD"])
+    async def preview_root(ticket: str):
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse(f"/preview/{ticket}/", status_code=307)
+
+    @app.api_route("/preview/{ticket}/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+    async def preview_path(ticket: str, path: str, request: Request):
+        return await serve_preview(request, ticket, path, f"/preview/{ticket}/")
+
+    async def serve_preview(request: Request, ticket: str, path: str, prefix: str):
+        from contextlib import AsyncExitStack
+
+        from fastapi.responses import HTMLResponse
+
+        held = request.app.state.previews.get(ticket)
+        if held is None:
+            return HTMLResponse(pv.EXPIRED, status_code=404)
+        user, workspace, port = held
+        mgr: SandboxManager = request.app.state.sandboxes
+        stack = AsyncExitStack()
+        try:
+            entry = await stack.enter_async_context(mgr.lease_entry(user, workspace))
+        except SandboxError as e:
+            await stack.aclose()
+            return HTMLResponse(f"<p>The project's sandbox is unavailable: {e}</p>", status_code=502)
+        base = pv.port_url(entry.url, mgr.cfg.port, port)
+        url = f"{base}/{path}" + (f"?{request.url.query}" if request.url.query else "")
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in pv.REQUEST_DROP}
+        try:
+            upstream = request.app.state.http.build_request(
+                request.method, url, content=await request.body() or None, headers=headers,
+                timeout=httpx.Timeout(30.0, read=None),
+            )
+            r = await request.app.state.http.send(upstream, stream=True)
+            stack.push_async_callback(r.aclose)
+        except httpx.HTTPError:
+            await stack.aclose()
+            return HTMLResponse(pv.NOT_LISTENING.format(port=port), status_code=502)
+
+        out = [(k, v) for k, v in r.headers.multi_items() if k.lower() not in pv.RESPONSE_DROP]
+        out = [(k, pv.rewrite_location(v, base, prefix) if k.lower() == "location" else v) for k, v in out]
+
+        async def stream():
+            try:
+                async for chunk in r.aiter_bytes():  # decoded, so content-encoding is dropped
+                    yield chunk
+            except httpx.HTTPError:
+                pass
+            finally:
+                await stack.aclose()
+
+        resp = StreamingResponse(stream(), status_code=r.status_code)
+        for k, v in out:
+            resp.headers.append(k, v)
+        return resp
 
     # ---- generic OpenCode proxy -------------------------------------------------
     #

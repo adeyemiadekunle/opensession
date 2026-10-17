@@ -3,7 +3,7 @@ import { Button } from "./components/ui/button";
 import { cn } from "./lib/utils";
 import { storageGet } from "./hooks";
 
-export type DockPanelId = "files" | "changes" | "git" | "terminal";
+export type DockPanelId = "files" | "changes" | "git" | "terminal" | "browser";
 
 export interface DockState {
   /** Open panels, top to bottom. */
@@ -19,6 +19,7 @@ export const DOCK_TITLES: Record<DockPanelId, string> = {
   changes: "Changes",
   git: "Git",
   terminal: "Terminal",
+  browser: "Browser",
 };
 
 export const DOCK_KEY = "opensession.dock";

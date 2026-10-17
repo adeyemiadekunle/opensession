@@ -192,6 +192,10 @@ export class CloudClient extends OpenCodeClient {
   workspaceStatus(): Promise<WorkspaceStatus> {
     return this.http.get("/workspace");
   }
+  /** A URL that shows a port of this project's sandbox (its dev server) in the Browser card; valid for an hour. */
+  preview(port: number): Promise<{ url: string; port: number; expires_in: number }> {
+    return this.http.post("/preview", { json: { port } });
+  }
   limits(): Promise<Limits> {
     return this.http.get("/limits");
   }

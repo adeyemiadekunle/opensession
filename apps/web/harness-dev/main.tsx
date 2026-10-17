@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { CloudSessions, CloudSettings, LocalSettings, ProfilePages, ReviewView, SandboxGate, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
+import { CloudSessions, CloudSettings, LocalSettings, localPreview, ProfilePages, ReviewView, SandboxGate, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
 import "@opensession/ui/styles.css";
 import { gitActions, mock } from "./mock";
 
@@ -76,6 +76,7 @@ createRoot(document.getElementById("root")!).render(
         git={gitActions}
         moveToCloud={moveToCloud}
         terminal={terminal}
+        preview={localPreview("harness.preview")}
         projectName="opensession"
         sessionsTitle="This computer"
         sectionsBefore={[projects]}

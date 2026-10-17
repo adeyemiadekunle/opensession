@@ -18,6 +18,7 @@ import { MessageView } from "./Messages";
 import { DiffPanel, FilesPanel } from "./Panels";
 import { GitPanel } from "./GitPanel";
 import { TerminalPanel } from "./TerminalPanel";
+import { BrowserPanel, type PreviewApi } from "./BrowserPanel";
 import { Requests } from "./Requests";
 import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
 import { Button } from "./components/ui/button";
@@ -85,6 +86,8 @@ export interface WorkspaceProps {
   commands?: { name: string; description?: string | null }[];
   /** A shell in the cloud sandbox (Terminal panel). */
   terminal?: TerminalApi;
+  /** What the Browser panel can show (the project's dev server). */
+  preview?: PreviewApi;
   /** Branch actions (checkout, push, pull request) for the Git panel. */
   git?: GitActions;
   /** Desktop only: continue a session, or start a new one, in the cloud. */
@@ -112,6 +115,7 @@ export function Workspace({
   commands: setupCommands = [],
   git,
   terminal,
+  preview,
   moveToCloud,
   projectName,
   sessionsTitle = "Sessions",
@@ -483,6 +487,8 @@ export function Workspace({
     if (active) await client.setAgent(active, a).catch((e) => setErr(errText(e)));
   };
 
+  /** Panels this workspace can show: the terminal and browser need their backends. */
+  const available = (id: DockPanelId) => (id !== "terminal" || Boolean(terminal)) && (id !== "browser" || Boolean(preview));
   // A dock card opened in full screen takes the conversation's place until it is docked again.
   const [full, setFull] = useState<DockPanelId | null>(null);
   const togglePanel = (id: DockPanelId) => {
@@ -514,8 +520,8 @@ export function Workspace({
       run: () => setActive(s.id),
     })),
     { id: "new", group: "Actions", label: "New session", run: openNew },
-    ...(["changes", "git", "files", "terminal"] as DockPanelId[])
-      .filter((id) => id !== "terminal" || terminal)
+    ...(["changes", "git", "files", "terminal", "browser"] as DockPanelId[])
+      .filter(available)
       .map((id) => ({
         id: `toggle-${id}`,
         group: "Actions",
@@ -535,9 +541,9 @@ export function Workspace({
     }
     return null;
   }, [messages, chosen]);
-  const togglable = (["terminal", "changes", "git", "files"] as DockPanelId[]).filter((id) => id !== "terminal" || terminal);
-  // The terminal can be unavailable (no sandbox terminal), so hide its card rather than drop it from state.
-  const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => (id !== "terminal" || terminal) && id !== full) };
+  const togglable = (["terminal", "changes", "git", "files", "browser"] as DockPanelId[]).filter(available);
+  // The terminal and browser can be unavailable, so hide their cards rather than drop them from state.
+  const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => available(id) && id !== full) };
 
   const panelBody = (id: DockPanelId, isFull = false) =>
     id === "files" ? (
@@ -552,6 +558,8 @@ export function Workspace({
       <DiffPanel client={client} refreshKey={refreshKey} />
     ) : id === "terminal" && terminal ? (
       <TerminalPanel api={terminal} />
+    ) : id === "browser" && preview ? (
+      <BrowserPanel preview={preview} />
     ) : (
       <GitPanel client={client} actions={git} refreshKey={refreshKey} />
     );

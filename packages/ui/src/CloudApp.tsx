@@ -1,6 +1,7 @@
 import type { CiChecks, CloudClient } from "@opensession/api-client";
 import { useEffect, useMemo, useState } from "react";
 import { AgentSetup, type SecretsApi } from "./AgentSetup";
+import { parsePortTarget, type PreviewApi } from "./BrowserPanel";
 import { ProfilePages } from "./AccountPages";
 import { useCiWatch } from "./ciWatch";
 import { storageSet, useAsync } from "./hooks";
@@ -71,6 +72,21 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
   const gitActions = useMemo(() => projectClient.gitActions(), [projectClient]);
   useCiWatch(onCi ? gitActions.checks : undefined, (m, ci) => onCi?.(m, ci));
   const terminal = useMemo(() => projectClient.terminals(), [projectClient]);
+  // Browser card: a port of the project's sandbox, through a short-lived gateway link.
+  const preview = useMemo<PreviewApi>(
+    () => ({
+      storageKey: `opensession.preview.${project}`,
+      placeholder: "Port of the dev server, e.g. 5173",
+      hint: "Start the dev server in this project's sandbox (for example from the Terminal) listening on 0.0.0.0, then enter its port.",
+      open: async (target) => {
+        const p = parsePortTarget(target);
+        if (!p) throw new Error("Enter the port the dev server listens on in the sandbox, such as 5173.");
+        const { url } = await projectClient.preview(p.port);
+        return url + p.path.replace(/^\//, "");
+      },
+    }),
+    [projectClient, project],
+  );
   const [projectsVersion, setProjectsVersion] = useState(0);
   const projects = useAsync(() => client.listProjects(), [client, projectsVersion]);
   const [setupVersion, setSetupVersion] = useState(0);
@@ -184,6 +200,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         client={projectClient}
         git={gitActions}
         terminal={terminal}
+        preview={preview}
         skills={skillIds}
         agents={agentIds}
         commands={setup.data?.config.commands ?? []}
