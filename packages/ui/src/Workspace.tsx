@@ -59,7 +59,7 @@ function modelKey(m: ModelRef) {
 
 function Icon({ children }: { children: ReactNode }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {children}
     </svg>
   );
@@ -409,7 +409,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <kbd className="font-mono text-[11px] text-faint">Ctrl K</kbd>
+          <kbd className="whitespace-nowrap font-mono text-[11px] text-faint">Ctrl K</kbd>
         </label>
         <Button variant="ghost" className="h-8 justify-start px-2 text-sm text-foreground" onClick={openNew}>
           <Icon><path d="M12 5v14M5 12h14" /></Icon>
@@ -427,7 +427,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
               ))}
             </div>
           ) : null}
-          <ul className="flex flex-col gap-0.5">
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
             {visibleSessions.map((s) => {
               const isActive = s.id === active;
               return (
