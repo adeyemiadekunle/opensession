@@ -111,6 +111,12 @@ FILES=$(docker exec "$(sandbox_of alice)" sh -c 'cd ~/.config/opencode && find .
 [[ "$FILES" == *"opensession-skills/secret-word/SKILL.md"* && "$FILES" == *"AGENTS.md"* ]] && ok "config files written" || bad "config files: $FILES"
 CFG=$(docker exec "$(sandbox_of alice)" cat /home/agent/.config/opencode/opencode.json)
 [[ "$CFG" == *'"greet"'* && "$CFG" == *'"reviewer"'* && "$CFG" == *opensession-skills* ]] && ok "opencode.json has agents, commands, skills" || bad "opencode.json: $CFG"
+echo "== browser"
+[[ "$CFG" == *opensession-browser* && "$CFG" == *network_request_access* ]] && ok "browser and network tools configured" || bad "opencode.json: $CFG"
+NET=$(docker exec "$(sandbox_of alice)" sh -c 'printf "%s\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}" | node /usr/local/lib/opensession/network-mcp.mjs')
+[[ "$NET" == *request_access* ]] && ok "network tool answers" || bad "network tool: $NET"
+BROWSER=$(docker exec "$(sandbox_of alice)" sh -c 'opensession-browser </dev/null >/dev/null 2>&1; curl -fs http://127.0.0.1:9222/json/version' || true)
+[[ "$BROWSER" == *Chrome* ]] && ok "Chromium starts in the sandbox" || bad "browser: $BROWSER $(docker exec "$(sandbox_of alice)" tail -c 600 /home/agent/.cache/browser.log 2>&1)"
 check "secret stored" 200 "$(api PUT alice /secrets/DOCS_TOKEN '{"value":"smoke-value"}')"
 check "literal token in MCP refused" 422 "$(api PUT alice /agent-config '{"mcp":{"x":{"type":"remote","url":"https://x.dev","headers":{"Authorization":"Bearer sk-abcdefghijklmnopqrstuvwx"}}}}')"
 

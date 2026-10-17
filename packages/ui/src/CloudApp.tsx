@@ -201,6 +201,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         git={gitActions}
         terminal={terminal}
         preview={preview}
+        allowDomain={(domain) => client.addEgressDomain(domain)}
         skills={skillIds}
         agents={agentIds}
         commands={setup.data?.config.commands ?? []}

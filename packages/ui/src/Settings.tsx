@@ -11,6 +11,7 @@ import {
   GitApprovalCard,
   ModelsCard,
   SandboxCard,
+  BrowserCard,
   ShortcutsCard,
 } from "./SettingsPages";
 
@@ -77,7 +78,17 @@ export function CloudSettings({
         </>
       ),
     },
-    { id: "sandbox", title: "Sandbox", description: "Limits for cloud sandboxes and the state of this project's.", body: <SandboxCard account={client} project={project} /> },
+    {
+      id: "sandbox",
+      title: "Sandbox",
+      description: "Limits for cloud sandboxes, the state of this project's, and the agent's browser.",
+      body: (
+        <>
+          <SandboxCard account={client} project={project} />
+          <BrowserCard store={store} />
+        </>
+      ),
+    },
     { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
     { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
     {

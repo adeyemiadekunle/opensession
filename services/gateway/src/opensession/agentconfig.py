@@ -154,6 +154,9 @@ class AgentConfig(BaseModel):
     default_agent: str | None = Field(default=None, pattern=ID_RE, max_length=64)
     # The agent's own `git commit` / `git push` wait for the user's approval.
     git_approval: bool = True
+    # Cloud: a browser in the sandbox the agent can drive (Playwright MCP; see
+    # services/sandbox/browser-mcp.sh). It reaches only the allowed domains.
+    browser: bool = True
 
     @field_validator("mcp")
     @classmethod
@@ -228,7 +231,7 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
         oc["update"] = "disable"  # the image pins the OpenCode version
     if cfg.skills:
         oc["skills"] = [f"{CLOUD_CONFIG_DIR}/{SKILLS_DIR}" if cloud else f"~/.config/opencode/{SKILLS_DIR}"]
-    guard = GIT_APPROVAL_RULES if cfg.git_approval else []
+    guard = (GIT_APPROVAL_RULES if cfg.git_approval else []) + (NETWORK_APPROVAL_RULES if cloud else [])
     if cfg.agents:
         oc["agents"] = {a.id: agent_entry(a, guard) for a in cfg.agents}
     if guard:
@@ -244,8 +247,13 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
         # OpenCode uses the last matching rule, and agent rules come after global
         # ones: the approval rules go last in both, so no "allow" can skip them.
         oc["permissions"] = [r.model_dump() for r in cfg.permissions] + guard
+    servers: dict[str, dict] = {}
+    if cloud:
+        # Built into the sandbox image; a user's server with the same name replaces it.
+        servers[NETWORK_MCP] = {"type": "local", "command": ["node", "/usr/local/lib/opensession/network-mcp.mjs"]}
+        if cfg.browser:
+            servers[BROWSER_MCP] = {"type": "local", "command": ["opensession-browser"]}
     if cfg.mcp:
-        servers = {}
         for name, srv in cfg.mcp.items():
             d = srv.model_dump(exclude_none=True)
             if not d.get("environment"):
@@ -257,6 +265,7 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
             if not d.get("disabled"):
                 d.pop("disabled", None)
             servers[name] = d
+    if servers:
         oc["mcp"] = {"servers": servers}
     if cfg.plugins:
         oc["plugins"] = list(cfg.plugins)
@@ -265,6 +274,14 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
     files["opencode.json"] = json.dumps(oc, indent=2) + "\n"
     return files
 
+
+# MCP servers built into the cloud sandbox image. OpenCode names an MCP tool's
+# permission action "<server>_<tool>".
+NETWORK_MCP = "network"
+BROWSER_MCP = "sandbox"
+# Asking for a new domain always waits for the user; approving it adds the domain to
+# their allowed domains (the app does that before it replies).
+NETWORK_APPROVAL_RULES = [{"action": f"{NETWORK_MCP}_request_access", "resource": "*", "effect": "ask"}]
 
 # Shell commands the agent may only run after the user approves them (git_approval).
 GIT_APPROVAL_RULES = [

@@ -97,7 +97,10 @@ const handlers: Record<string, unknown> = {
   listSessions: async () => (new URLSearchParams(location.search).has("empty") ? [] : sessions),
   messages: async (id: string) => messages[id] ?? [],
   listPermissions: async (id: string) =>
-    id === "s1" && !new URLSearchParams(location.search).has("noperm")
+    // ?domain: the agent asks to reach a domain (the sandbox's network tool).
+    id === "s1" && new URLSearchParams(location.search).has("domain")
+      ? [{ id: "p2", action: "network_request_access", resources: ["*"], metadata: { input: { domain: "https://docs.stripe.com/api", reason: "Read the Stripe API reference for the webhook payload." } } }]
+      : id === "s1" && !new URLSearchParams(location.search).has("noperm")
       ? [{ id: "p1", action: "shell", resources: ["pnpm test:smoke -- --section terminal"], message: "Runs the terminal section of the smoke test." }]
       : [],
   listForms: async () => [],
