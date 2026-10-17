@@ -112,11 +112,14 @@ FILES=$(docker exec "$(sandbox_of alice)" sh -c 'cd ~/.config/opencode && find .
 CFG=$(docker exec "$(sandbox_of alice)" cat /home/agent/.config/opencode/opencode.json)
 [[ "$CFG" == *'"greet"'* && "$CFG" == *'"reviewer"'* && "$CFG" == *opensession-skills* ]] && ok "opencode.json has agents, commands, skills" || bad "opencode.json: $CFG"
 echo "== browser"
-[[ "$CFG" == *opensession-browser* && "$CFG" == *network_request_access* ]] && ok "browser and network tools configured" || bad "opencode.json: $CFG"
-NET=$(docker exec "$(sandbox_of alice)" sh -c 'printf "%s\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}" | node /usr/local/lib/opensession/network-mcp.mjs')
-[[ "$NET" == *request_access* ]] && ok "network tool answers" || bad "network tool: $NET"
+[[ "$CFG" == *opensession-browser* && "$CFG" == *opensession_request_access* ]] && ok "browser and user tools configured" || bad "opencode.json: $CFG"
+NET=$(docker exec "$(sandbox_of alice)" sh -c 'printf "%s\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}" | node /usr/local/lib/opensession/opensession-mcp.mjs')
+[[ "$NET" == *request_access* && "$NET" == *hand_over* ]] && ok "user tools answer" || bad "user tools: $NET"
 BROWSER=$(docker exec "$(sandbox_of alice)" sh -c 'opensession-browser </dev/null >/dev/null 2>&1; curl -fs http://127.0.0.1:9222/json/version' || true)
 [[ "$BROWSER" == *Chrome* ]] && ok "Chromium starts in the sandbox" || bad "browser: $BROWSER $(docker exec "$(sandbox_of alice)" tail -c 600 /home/agent/.cache/browser.log 2>&1)"
+VIEW=$(docker exec "$(sandbox_of alice)" sh -c 'a=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9223/health); b=$(curl -s -o /dev/null -w "%{http_code}" -u "opencode:$OPENCODE_SERVER_PASSWORD" http://127.0.0.1:9223/health); echo "$a $b"')
+[[ "$VIEW" == "401 200" ]] && ok "browser view needs the sandbox password ($VIEW)" || bad "browser view: $VIEW $(docker exec "$(sandbox_of alice)" tail -c 400 /home/agent/.cache/browser-view.log 2>&1)"
+check "browser view ticket" 200 "$(api POST alice /browser/ticket)"
 check "secret stored" 200 "$(api PUT alice /secrets/DOCS_TOKEN '{"value":"smoke-value"}')"
 check "literal token in MCP refused" 422 "$(api PUT alice /agent-config '{"mcp":{"x":{"type":"remote","url":"https://x.dev","headers":{"Authorization":"Bearer sk-abcdefghijklmnopqrstuvwx"}}}}')"
 

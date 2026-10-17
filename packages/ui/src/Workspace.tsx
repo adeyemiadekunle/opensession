@@ -405,6 +405,10 @@ export function Workspace({
   const send = async () => {
     const t = text.trim();
     if (!t) return;
+    // Telling the agent you're done ("signed in, go on") finishes a hand-over it is waiting on;
+    // the message then reaches it as usual.
+    const handOverWaiting = perms.find((p) => p.action === "opensession_hand_over");
+    if (active && handOverWaiting) await client.replyPermission(active, handOverWaiting.id, "once").catch(() => {});
     try {
       setErr(null);
       let id = active;
@@ -494,6 +498,12 @@ export function Workspace({
   const available = (id: DockPanelId) => (id !== "terminal" || Boolean(terminal)) && (id !== "browser" || Boolean(preview));
   // A dock card opened in full screen takes the conversation's place until it is docked again.
   const [full, setFull] = useState<DockPanelId | null>(null);
+  // Bumped when the agent hands the browser over: the Browser card opens with control of its tab.
+  const [handOver, setHandOver] = useState(0);
+  const openBrowserForHandOver = () => {
+    setDock((d) => (d.stack.includes("browser") ? d : { ...d, stack: [...d.stack, "browser"] }));
+    setHandOver((n) => n + 1);
+  };
   const togglePanel = (id: DockPanelId) => {
     if (full === id) setFull(null);
     setDock((d) => {
@@ -562,7 +572,7 @@ export function Workspace({
     ) : id === "terminal" && terminal ? (
       <TerminalPanel api={terminal} />
     ) : id === "browser" && preview ? (
-      <BrowserPanel preview={preview} />
+      <BrowserPanel preview={preview} handOver={handOver} waiting={perms.some((p) => p.action === "opensession_hand_over")} />
     ) : (
       <GitPanel client={client} actions={git} refreshKey={refreshKey} />
     );
@@ -848,7 +858,15 @@ export function Workspace({
 
           <div className="relative shrink-0 pb-4 pl-10 pr-7">
             {active ? (
-              <Requests client={client} sessionId={active} permissions={perms} forms={forms} onDone={refresh} allowDomain={allowDomain} />
+              <Requests
+                client={client}
+                sessionId={active}
+                permissions={perms}
+                forms={forms}
+                onDone={refresh}
+                allowDomain={allowDomain}
+                openBrowser={preview?.live ? openBrowserForHandOver : undefined}
+              />
             ) : null}
             {!online && !perms.length && !forms.length ? (
               <div

@@ -25,4 +25,11 @@ fi
 # a temp folder in the container's own filesystem instead.
 export TMPDIR="$HOME/.cache/tmp" BUN_TMPDIR="$HOME/.cache/tmp"
 mkdir -p "$TMPDIR" && chmod 700 "$TMPDIR"
+# The Browser card's way into the sandbox's Chromium (browser-view.mjs). Restarted with
+# OpenCode so it has the current password; it starts Chromium only when the card opens.
+if [ -f /usr/local/lib/opensession/browser-view.mjs ]; then
+  pkill -f /usr/local/lib/opensession/browser-view.mjs 2>/dev/null || true
+  mkdir -p "$HOME/.cache"
+  nohup node /usr/local/lib/opensession/browser-view.mjs >"$HOME/.cache/browser-view.log" 2>&1 &
+fi
 exec opencode serve --hostname 0.0.0.0 --port 4096

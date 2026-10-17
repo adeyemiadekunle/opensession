@@ -250,7 +250,7 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
     servers: dict[str, dict] = {}
     if cloud:
         # Built into the sandbox image; a user's server with the same name replaces it.
-        servers[NETWORK_MCP] = {"type": "local", "command": ["node", "/usr/local/lib/opensession/network-mcp.mjs"]}
+        servers[USER_MCP] = {"type": "local", "command": ["node", "/usr/local/lib/opensession/opensession-mcp.mjs"]}
         if cfg.browser:
             servers[BROWSER_MCP] = {"type": "local", "command": ["opensession-browser"]}
     if cfg.mcp:
@@ -277,11 +277,15 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
 
 # MCP servers built into the cloud sandbox image. OpenCode names an MCP tool's
 # permission action "<server>_<tool>".
-NETWORK_MCP = "network"
+USER_MCP = "opensession"
 BROWSER_MCP = "sandbox"
-# Asking for a new domain always waits for the user; approving it adds the domain to
-# their allowed domains (the app does that before it replies).
-NETWORK_APPROVAL_RULES = [{"action": f"{NETWORK_MCP}_request_access", "resource": "*", "effect": "ask"}]
+# The tools that need the user always wait for them: asking for a new domain (approving
+# adds it to their allowed domains; the app does that before it replies) and handing the
+# browser over for a step only they can do (the call returns when they click Done).
+NETWORK_APPROVAL_RULES = [
+    {"action": f"{USER_MCP}_request_access", "resource": "*", "effect": "ask"},
+    {"action": f"{USER_MCP}_hand_over", "resource": "*", "effect": "ask"},
+]
 
 # Shell commands the agent may only run after the user approves them (git_approval).
 GIT_APPROVAL_RULES = [

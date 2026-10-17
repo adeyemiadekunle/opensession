@@ -30,6 +30,7 @@ export function Requests({
   forms,
   onDone,
   allowDomain,
+  openBrowser,
 }: {
   client: OpenSessionClient;
   sessionId: string;
@@ -38,6 +39,8 @@ export function Requests({
   onDone: () => void;
   /** Cloud: adds a domain to the sandbox's allowed domains (for the agent's network requests). */
   allowDomain?: (domain: string) => Promise<unknown>;
+  /** Cloud: opens the Browser card with control of the agent's tab (for a hand-over). */
+  openBrowser?: () => void;
 }) {
   const [err, setErr] = useState<string | null>(null);
   const act = async (f: () => Promise<void>) => {
@@ -55,7 +58,15 @@ export function Requests({
     <div aria-live="polite" aria-label="Approvals" className="absolute inset-x-0 bottom-full z-10 flex max-w-[640px] flex-col gap-2 pb-2 pl-10 pr-7">
       {err ? <div className="os-error">{err}</div> : null}
       {permissions.map((p) =>
-        p.action === NETWORK_ACTION && allowDomain ? (
+        p.action === HAND_OVER_ACTION ? (
+          <HandOverCard
+            key={p.id}
+            request={p}
+            onOpen={openBrowser}
+            onDone={() => act(() => client.replyPermission(sessionId, p.id, "once"))}
+            onCant={() => act(() => client.replyPermission(sessionId, p.id, "reject", "The user could not do it."))}
+          />
+        ) : p.action === NETWORK_ACTION && allowDomain ? (
           <DomainCard
             key={p.id}
             request={p}
@@ -122,8 +133,9 @@ function PermissionCard({
   );
 }
 
-/** The sandbox's network tool (services/sandbox/network-mcp.mjs) asking for a domain. */
-const NETWORK_ACTION = "network_request_access";
+/** The sandbox's tools that need the user (services/sandbox/opensession-mcp.mjs). */
+const NETWORK_ACTION = "opensession_request_access";
+const HAND_OVER_ACTION = "opensession_hand_over";
 const DOMAIN_RE = /^(?=.{1,253}$)(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
 /** "https://Docs.Stripe.com/api" -> "docs.stripe.com"; null for anything that isn't a host name. */
@@ -175,6 +187,51 @@ function DomainCard({ request, onAllow, onDeny }: { request: PermissionRequest; 
             Allow {domain}
           </Button>
         ) : null}
+      </div>
+    </section>
+  );
+}
+
+/** The agent hands the browser over for a step only the user can do (sign in, 2FA, CAPTCHA). */
+function HandOverCard({
+  request,
+  onOpen,
+  onDone,
+  onCant,
+}: {
+  request: PermissionRequest;
+  onOpen?: () => void;
+  onDone: () => void;
+  onCant: () => void;
+}) {
+  const input = ((request.metadata as { input?: { task?: unknown; url?: unknown } } | undefined)?.input ?? {}) as { task?: unknown; url?: unknown };
+  const task = typeof input.task === "string" && input.task.trim() ? input.task.trim() : "The agent needs you to do a step in the browser.";
+  const url = typeof input.url === "string" ? input.url.trim() : "";
+  return (
+    <section className={CARD} aria-labelledby={`perm-${request.id}`}>
+      <div className="flex items-center gap-2.5">
+        <span aria-hidden="true" className="size-2 rounded-full bg-warning" />
+        <h2 id={`perm-${request.id}`} className="text-sm font-semibold">
+          The agent needs you in the browser
+        </h2>
+      </div>
+      <div className="text-[13.5px] text-foreground">{task}</div>
+      {url ? <div className="truncate font-mono text-xs text-faint">{url}</div> : null}
+      <div className="text-xs text-faint">
+        It's waiting on its tab. Do it there yourself (it never sees what you type), then click Done or just tell it in the chat, and it carries on.
+      </div>
+      <div className="flex flex-wrap items-center justify-end gap-2.5">
+        <Button variant="ghost" onClick={onCant}>
+          I can't do it
+        </Button>
+        {onOpen ? (
+          <Button variant="outline" onClick={onOpen}>
+            Open the browser
+          </Button>
+        ) : null}
+        <Button variant="default" onClick={onDone}>
+          Done
+        </Button>
       </div>
     </section>
   );

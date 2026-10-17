@@ -97,9 +97,12 @@ const handlers: Record<string, unknown> = {
   listSessions: async () => (new URLSearchParams(location.search).has("empty") ? [] : sessions),
   messages: async (id: string) => messages[id] ?? [],
   listPermissions: async (id: string) =>
-    // ?domain: the agent asks to reach a domain (the sandbox's network tool).
-    id === "s1" && new URLSearchParams(location.search).has("domain")
-      ? [{ id: "p2", action: "network_request_access", resources: ["*"], metadata: { input: { domain: "https://docs.stripe.com/api", reason: "Read the Stripe API reference for the webhook payload." } } }]
+    // ?handover: the agent hands the browser over for a sign-in.
+    id === "s1" && new URLSearchParams(location.search).has("handover")
+      ? [{ id: "p3", action: "opensession_hand_over", resources: ["*"], metadata: { input: { task: "Sign in to the staging dashboard with your account, then I'll finish setting up the webhook.", url: "http://localhost:8765/" } } }]
+      : // ?domain: the agent asks to reach a domain (the sandbox's network tool).
+        id === "s1" && new URLSearchParams(location.search).has("domain")
+      ? [{ id: "p2", action: "opensession_request_access", resources: ["*"], metadata: { input: { domain: "https://docs.stripe.com/api", reason: "Read the Stripe API reference for the webhook payload." } } }]
       : id === "s1" && !new URLSearchParams(location.search).has("noperm")
       ? [{ id: "p1", action: "shell", resources: ["pnpm test:smoke -- --section terminal"], message: "Runs the terminal section of the smoke test." }]
       : [],
@@ -162,6 +165,8 @@ const handlers: Record<string, unknown> = {
   setModel: reply,
   setAgent: reply,
   prompt: reply,
+  // Recorded for tests (window.__replies).
+  replyPermission: async (...args: unknown[]) => void ((window as unknown as { __replies: unknown[] }).__replies ??= []).push(args),
   interrupt: reply,
 };
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "./components/ui/button";
 import { errText, storageGet, storageSet } from "./hooks";
 import { NamedIcon } from "./icons";
+import { LiveBrowser, type LiveBrowserApi } from "./LiveBrowser";
 
 /** What the Browser card can show (desktop: this computer's localhost; cloud: a port of the project's sandbox). */
 export interface PreviewApi {
@@ -13,6 +14,8 @@ export interface PreviewApi {
   hint: string;
   /** Remembers the last address (per project). */
   storageKey: string;
+  /** Cloud: the sandbox's own browser, shown live (the agent's browser), instead of a preview frame. */
+  live?: LiveBrowserApi;
 }
 
 /** Turns "5173", "localhost:5173/x" or "http://127.0.0.1:3000" into a port and path, for sandbox previews. */
@@ -44,7 +47,12 @@ export function localPreview(storageKey: string): PreviewApi {
 }
 
 /** Browser card (design: Browser pane): an address field, reload, open outside, and the page. */
-export function BrowserPanel({ preview }: { preview: PreviewApi }) {
+export function BrowserPanel({ preview, handOver, waiting }: { preview: PreviewApi; handOver?: number; waiting?: boolean }) {
+  return preview.live ? <LiveBrowser api={preview.live} handOver={handOver} waiting={waiting} /> : <PreviewFrame preview={preview} />;
+}
+
+/** Desktop: the page at an address on this computer, in a frame. */
+function PreviewFrame({ preview }: { preview: PreviewApi }) {
   const [target, setTarget] = useState(() => storageGet(preview.storageKey) ?? "");
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
