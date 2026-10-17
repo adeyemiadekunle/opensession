@@ -18,6 +18,8 @@ COPY packages/api-client packages/api-client
 COPY packages/ui packages/ui
 ARG VITE_CLERK_PUBLISHABLE_KEY
 ARG VITE_GATEWAY_URL
+# Optional: the GitHub repository with the releases (Download page). Default in App.tsx.
+ARG VITE_RELEASES_REPO
 RUN test -n "$VITE_CLERK_PUBLISHABLE_KEY" && test -n "$VITE_GATEWAY_URL" \
     || (echo "set VITE_CLERK_PUBLISHABLE_KEY and VITE_GATEWAY_URL" >&2; exit 1)
 RUN pnpm --filter @opensession/web build

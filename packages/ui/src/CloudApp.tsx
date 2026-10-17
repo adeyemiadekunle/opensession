@@ -1,6 +1,7 @@
 import type { CiChecks, CloudClient } from "@opensession/api-client";
 import { useEffect, useMemo, useState } from "react";
 import { AdminPage } from "./AdminPage";
+import { DownloadPage } from "./DownloadPage";
 import { AgentSetup, type SecretsApi } from "./AgentSetup";
 import { parsePortTarget, type PreviewApi } from "./BrowserPanel";
 import { ProfilePages } from "./AccountPages";
@@ -37,6 +38,9 @@ export interface CloudAppProps {
   sectionsAfter?: SidebarSection[];
   /** Desktop app (shows its own preferences in Settings, and is "this device" in Profile). */
   desktop?: boolean;
+  /** Web: where the Download page sends people (GitHub repository with the releases) and
+   *  the API address the CLI should use. */
+  downloads?: { repo: string; gatewayUrl: string };
   /** Called when CI on the open project's branch changes (desktop: OS notification). */
   onCi?: (messages: string[], ci: CiChecks) => void;
 }
@@ -47,7 +51,7 @@ const PROJECT_KEY = "opensession.project";
  *  The same component runs in the web app and in the desktop app's cloud mode, so
  *  both show the same projects and sessions. The workspace fills the window (design);
  *  projects are in its sidebar and the other pages are in the account menu. */
-export function CloudApp({ client, path, go, account, sectionsAfter, desktop, onCi }: CloudAppProps) {
+export function CloudApp({ client, path, go, account, sectionsAfter, desktop, onCi, downloads }: CloudAppProps) {
   const store = useMemo(() => client.agentConfigStore(), [client]);
   const secrets = useMemo<SecretsApi>(
     () => ({ list: () => client.listSecrets(), set: (n, v) => client.setSecret(n, v), remove: (n) => client.deleteSecret(n) }),
@@ -153,11 +157,14 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
     { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => go("/settings") },
     { id: "agent", label: "Agent setup", onSelect: () => go("/agent") },
     { id: "projects", label: "Projects", onSelect: () => go("/projects") },
+    ...(downloads ? [{ id: "download", label: "Download apps", onSelect: () => go("/download") }] : []),
     ...(me.data?.admin ? [{ id: "admin", label: "Admin", onSelect: () => go("/admin") }] : []),
     ...(account?.items ?? []),
   ];
 
   if (path === "/admin") return <AdminPage client={client} onBack={back} />;
+  if (path === "/download" && downloads)
+    return <DownloadPage repo={downloads.repo} gatewayUrl={downloads.gatewayUrl} origin={window.location.origin} onBack={back} />;
   if (path === "/sessions") {
     return (
       <CloudSessions

@@ -26,6 +26,7 @@ services:
       args:
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
         VITE_GATEWAY_URL: ${VITE_GATEWAY_URL}
+        VITE_RELEASES_REPO: ${VITE_RELEASES_REPO:-}
     restart: unless-stopped
     expose:
       - "80"

@@ -30,7 +30,7 @@
   "build": {
     "appId": "dev.opensession.desktop",
     "productName": "OpenSession",
-    "artifactName": "OpenSession-${version}-${os}-${arch}.${ext}",
+    "artifactName": "OpenSession-${os}-${arch}.${ext}",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -44,7 +44,7 @@
         "provider": "github",
         "owner": "adeyemiadekunle",
         "repo": "opensession",
-        "releaseType": "draft"
+        "releaseType": "release"
       }
     ],
     "mac": {
@@ -83,7 +83,8 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "buildUniversalInstaller": false
     },
     "linux": {
       "target": [

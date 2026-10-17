@@ -18,6 +18,7 @@ export { SandboxGate } from "./SandboxGate";
 export { CloudApp } from "./CloudApp";
 export { CloudSessions } from "./CloudSessions";
 export { AdminPage } from "./AdminPage";
+export { DownloadPage } from "./DownloadPage";
 export type { CloudAppProps, CloudAccount } from "./CloudApp";
 export { useCiWatch } from "./ciWatch";
 export { ReviewView } from "./ReviewView";
