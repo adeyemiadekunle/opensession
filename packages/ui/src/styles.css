@@ -160,17 +160,10 @@
   /* Approval requests above the composer (Requests.tsx) */
   .os-requests { display: flex; flex-direction: column; gap: 8px; padding: 0 28px 0 40px; flex: none; }
   .os-requests > * { max-width: 640px; }
-  .os-request {
-    border: 1px solid var(--os-accent); border-radius: var(--os-radius); padding: 10px 12px; background: var(--os-panel);
-    display: flex; gap: 12px; justify-content: space-between; align-items: center; flex-wrap: wrap;
-  }
-  .os-form { flex-direction: column; align-items: stretch; }
 
   .os-add { color: var(--os-add); }
   .os-del { color: var(--os-del); }
 
-  /* Settings */
-  .os-settings { max-width: 760px; margin: 0 auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 16px; }
   .os-card { background: var(--os-panel); border: 1px solid var(--os-border); border-radius: var(--os-radius); padding: 16px 18px; }
   .os-card h2 { margin: 0 0 4px; font-size: 16px; }
   .os-card p { margin: 0 0 10px; }

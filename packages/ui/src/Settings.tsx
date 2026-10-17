@@ -16,12 +16,37 @@ const PROVIDER_NAMES: Record<string, string> = {
 
 /** Cloud account settings: model API keys, allowed domains, CLI/desktop access tokens. */
 export function CloudSettings({ client }: { client: CloudClient }) {
+  // Design: a header, a section nav on the left and one card per section.
+  const sections = [
+    { id: "keys", title: "Model API keys", body: <ApiKeys client={client} /> },
+    { id: "github", title: "GitHub", body: <GithubCard client={client} /> },
+    { id: "domains", title: "Allowed domains", body: <AllowedDomains client={client} /> },
+    { id: "tokens", title: "Access tokens", body: <AccessTokens client={client} /> },
+  ];
   return (
-    <div className="os-settings">
-      <ApiKeys client={client} />
-      <GithubCard client={client} />
-      <AllowedDomains client={client} />
-      <AccessTokens client={client} />
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <header className="flex h-14 shrink-0 items-center gap-3.5 border-b border-border bg-sidebar px-6">
+        <span className="text-[15px] font-semibold">Settings</span>
+        <span className="ml-auto text-[13px] text-faint">Applies to your cloud account</span>
+      </header>
+      <div className="flex min-h-0 flex-1">
+        <nav aria-label="Settings sections" className="flex w-[232px] shrink-0 flex-col gap-0.5 border-r border-border bg-sidebar p-3 text-sm">
+          {sections.map((sec) => (
+            <a key={sec.id} href={`#${sec.id}`} className="flex h-[34px] items-center rounded-md px-2.5 text-muted-foreground no-underline hover:bg-sunken hover:text-foreground">
+              {sec.title}
+            </a>
+          ))}
+        </nav>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-auto p-7">
+          <div className="flex max-w-[760px] flex-col gap-4">
+            {sections.map((sec) => (
+              <div key={sec.id} id={sec.id} className="scroll-mt-7">
+                {sec.body}
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

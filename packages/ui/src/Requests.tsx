@@ -1,6 +1,9 @@
 import { useState } from "react";
 import type { FormRequest, OpenSessionClient, PermissionRequest } from "@opensession/api-client";
 import { errText } from "./hooks";
+import { Button } from "./components/ui/button";
+import { Select } from "./components/ui/select";
+import { cn } from "./lib/utils";
 
 type Field = {
   key: string;
@@ -44,32 +47,61 @@ export function Requests({
     }
   };
   if (!permissions.length && !forms.length) return null;
+  // Design: approvals float above the composer, so they stay visible while typing.
   return (
-    <div className="os-requests">
+    <div aria-live="polite" aria-label="Approvals" className="absolute inset-x-0 bottom-full z-10 flex max-w-[640px] flex-col gap-2 pb-2 pl-10 pr-7">
       {err ? <div className="os-error">{err}</div> : null}
-      {permissions.map((p) => {
-        const resources = (p.resources as string[] | undefined)?.join(", ");
-        return (
-          <div key={p.id} className="os-request">
-            <div>
-              <strong>Allow {String(p.action ?? "this action")}?</strong>
-              {resources ? <div className="os-path">{resources}</div> : null}
-              {p.message ? <div className="os-muted">{String(p.message)}</div> : null}
-            </div>
-            <div className="os-row">
-              <button onClick={() => act(() => client.replyPermission(sessionId, p.id, "once"))}>Allow once</button>
-              <button onClick={() => act(() => client.replyPermission(sessionId, p.id, "always"))}>Always</button>
-              <button className="os-danger" onClick={() => act(() => client.replyPermission(sessionId, p.id, "reject"))}>
-                Deny
-              </button>
-            </div>
-          </div>
-        );
-      })}
+      {permissions.map((p) => (
+        <PermissionCard
+          key={p.id}
+          request={p}
+          onAllow={(always) => act(() => client.replyPermission(sessionId, p.id, always ? "always" : "once"))}
+          onDeny={() => act(() => client.replyPermission(sessionId, p.id, "reject"))}
+        />
+      ))}
       {forms.map((f) => (
         <FormCard key={f.id} form={f} onSubmit={(answer) => act(() => client.replyForm(sessionId, f.id, answer))} />
       ))}
     </div>
+  );
+}
+
+const CARD = "flex flex-col gap-2.5 rounded-xl border border-input bg-card p-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.45)]";
+
+function PermissionCard({
+  request,
+  onAllow,
+  onDeny,
+}: {
+  request: PermissionRequest;
+  onAllow: (always: boolean) => void;
+  onDeny: () => void;
+}) {
+  const [always, setAlways] = useState(false);
+  const resources = (request.resources as string[] | undefined)?.join(", ");
+  return (
+    <section className={CARD} aria-labelledby={`perm-${request.id}`}>
+      <div className="flex items-center gap-2.5">
+        <span aria-hidden="true" className="size-2 rounded-full bg-primary" />
+        <h2 id={`perm-${request.id}`} className="text-sm font-semibold">
+          Allow {String(request.action ?? "this action")}?
+        </h2>
+      </div>
+      {resources ? <pre className="os-pre whitespace-pre-wrap">{resources}</pre> : null}
+      {request.message ? <div className="text-[13px] text-muted-foreground">{String(request.message)}</div> : null}
+      <div className="flex items-center gap-2.5">
+        <label className="flex flex-1 items-center gap-2 text-xs text-faint">
+          <input type="checkbox" className="accent-primary" checked={always} onChange={(e) => setAlways(e.target.checked)} />
+          Always allow
+        </label>
+        <Button variant="outline" onClick={onDeny}>
+          Deny
+        </Button>
+        <Button variant="default" onClick={() => onAllow(always)}>
+          Allow once
+        </Button>
+      </div>
+    </section>
   );
 }
 
@@ -81,7 +113,7 @@ function FormCard({ form, onSubmit }: { form: FormRequest; onSubmit: (a: Record<
   const set = (k: string, v: unknown) => setVals((s) => ({ ...s, [k]: v }));
   return (
     <form
-      className="os-request os-form"
+      className={cn(CARD, "gap-3")}
       onSubmit={(e) => {
         e.preventDefault();
         const out: Record<string, unknown> = {};
@@ -92,15 +124,16 @@ function FormCard({ form, onSubmit }: { form: FormRequest; onSubmit: (a: Record<
         onSubmit(out);
       }}
     >
-      <strong>{form.title ?? "The agent has a question"}</strong>
+      <h2 className="text-sm font-semibold">{form.title ?? "The agent has a question"}</h2>
       {fields.map((f) => (
-        <label key={f.key} className="os-field">
+        <label key={f.key} className="flex flex-col gap-1 text-xs text-muted-foreground">
           <span>{f.title ?? f.key}</span>
-          {f.description ? <span className="os-muted">{f.description}</span> : null}
+          {f.description ? <span className="text-faint">{f.description}</span> : null}
           {f.type === "boolean" ? (
             <input type="checkbox" checked={Boolean(vals[f.key])} onChange={(e) => set(f.key, e.target.checked)} />
           ) : f.options?.length ? (
-            <select
+            <Select
+              className="h-auto text-sm"
               multiple={f.type === "array"}
               value={vals[f.key] as string | string[]}
               onChange={(e) =>
@@ -113,9 +146,10 @@ function FormCard({ form, onSubmit }: { form: FormRequest; onSubmit: (a: Record<
                   {optLabel(o)}
                 </option>
               ))}
-            </select>
+            </Select>
           ) : (
             <input
+              className="h-8 rounded-md border border-input bg-card px-2.5 text-sm text-foreground"
               type={f.type === "number" || f.type === "integer" ? "number" : "text"}
               value={String(vals[f.key] ?? "")}
               required={f.required}
@@ -124,8 +158,10 @@ function FormCard({ form, onSubmit }: { form: FormRequest; onSubmit: (a: Record<
           )}
         </label>
       ))}
-      <div className="os-row">
-        <button type="submit">Answer</button>
+      <div className="flex justify-end">
+        <Button type="submit" variant="default">
+          Answer
+        </Button>
       </div>
     </form>
   );

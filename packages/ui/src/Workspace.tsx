@@ -350,9 +350,6 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
             <MessageView key={m.id} m={m} />
           ))}
         </div>
-        {active ? (
-          <Requests client={client} sessionId={active} permissions={perms} forms={forms} onDone={refresh} />
-        ) : null}
         {err ? <div className="os-error px-10">{err}</div> : null}
         {commandHints.length || skillHints.length ? (
           <ul className="os-suggest os-requests">
@@ -373,7 +370,10 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
           </ul>
         ) : null}
 
-        <div className="shrink-0 pb-4 pl-10 pr-7">
+        <div className="relative shrink-0 pb-4 pl-10 pr-7">
+          {active ? (
+            <Requests client={client} sessionId={active} permissions={perms} forms={forms} onDone={refresh} />
+          ) : null}
           <div className="flex max-w-[640px] flex-col gap-2.5 rounded-lg border border-input bg-card px-3.5 pb-2.5 pt-3 focus-within:border-muted-foreground">
             <textarea
               className="min-h-11 max-h-60 w-full resize-none border-0 bg-transparent p-0 text-[14px] text-foreground outline-none placeholder:text-faint"
