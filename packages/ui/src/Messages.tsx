@@ -173,7 +173,7 @@ type StructuredError = { type?: string; message?: string; status?: number; respo
 /**
  * Whether a turn stopped on the model's limits. OpenCode classifies provider errors itself:
  * `provider.rate-limit` (a throttle it has already retried about ten times before giving up)
- * and `provider.quota` (a spend cap or plan usage limit, never retried). Older servers send no
+ * and `provider.quota` (the API key's account is out of credit or over its spend cap, never retried). Older servers send no
  * type, so status and wording are checked too.
  */
 export function usageLimit(error: StructuredError | undefined): "rate" | "quota" | null {
@@ -188,7 +188,7 @@ function LimitCard({ error, kind, model, onResume }: { error: StructuredError; k
   return (
     <Card
       tone="warning"
-      title={kind === "quota" ? "Model usage limit reached" : "Model rate limit reached"}
+      title={kind === "quota" ? "Out of API credit" : "Model rate limit reached"}
       action={
         onResume ? (
           <div>
@@ -201,8 +201,9 @@ function LimitCard({ error, kind, model, onResume }: { error: StructuredError; k
     >
       <p className="m-0 text-muted-foreground">
         {model ? `${model} ` : "The model "}stopped before finishing
-        {kind === "rate" ? " after OpenCode retried it for about a minute" : ""}. Nothing was lost: resume picks up where it stopped, or
-        switch model in the composer to carry on now.
+        {kind === "quota"
+          ? ": the provider account behind this API key has run out of credit. Nothing was lost. Add credit with the provider, or switch model in the composer, then resume."
+          : " after OpenCode retried it for about a minute. Nothing was lost: resume picks up where it stopped, or switch model in the composer to carry on now."}
       </p>
       {error.message ? <p className="m-0 font-mono text-xs text-faint">{error.message}</p> : null}
     </Card>
