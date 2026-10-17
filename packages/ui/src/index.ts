@@ -12,6 +12,7 @@ export { GithubCard, ProjectsPage } from "./Projects";
 export { TerminalPanel } from "./TerminalPanel";
 export { SandboxGate } from "./SandboxGate";
 export { CloudApp } from "./CloudApp";
+export { CloudSessions } from "./CloudSessions";
 export type { CloudAppProps, CloudAccount } from "./CloudApp";
 export { useCiWatch } from "./ciWatch";
 export { ReviewView } from "./ReviewView";

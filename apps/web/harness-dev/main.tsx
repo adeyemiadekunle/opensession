@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { CloudSettings, LocalSettings, ProfilePages, ReviewView, SandboxGate, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
+import { CloudSessions, CloudSettings, LocalSettings, ProfilePages, ReviewView, SandboxGate, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
 import "@opensession/ui/styles.css";
 import { gitActions, mock } from "./mock";
 
@@ -47,7 +47,9 @@ const account: Account = {
 
 createRoot(document.getElementById("root")!).render(
   <div style={{ height: "100vh", position: "relative" }}>
-    {q.get("gate") ? (
+    {q.has("sessions") ? (
+      <CloudSessions client={mock} project="default" open={noop} go={noop} accountName="Adeyemi Adekunle" />
+    ) : q.get("gate") ? (
       <SandboxGate client={mock} projectName={() => "opensession"}>
         <div />
       </SandboxGate>

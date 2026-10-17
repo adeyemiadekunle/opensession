@@ -222,6 +222,7 @@ export interface OpenSessionClient {
   gitInfo(): Promise<GitInfo>;
   listModels(): Promise<Model[]>;
   listSessions(): Promise<Session[]>;
+  activeSessions(): Promise<string[]>;
   createSession(opts: { model: ModelRef; agent?: string }): Promise<Session>;
   deleteSession(sessionId: string): Promise<void>;
   prompt(sessionId: string, text: string, delivery?: "queue" | "steer", opts?: { skills?: string[] }): Promise<void>;

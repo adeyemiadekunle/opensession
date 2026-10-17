@@ -1055,7 +1055,7 @@ export function Workspace({
 }
 
 /** "3 min ago" style label for the session list. */
-function relativeTime(ms: number | undefined): string {
+export function relativeTime(ms: number | undefined): string {
   if (!ms) return "";
   const min = Math.round((Date.now() - ms) / 60000);
   if (min < 1) return "just now";

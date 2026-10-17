@@ -73,6 +73,10 @@ export abstract class OpenCodeClient implements OpenSessionClient {
   async listSessions(): Promise<Session[]> {
     return unwrap<Session[]>(await this.api.get("/api/session")) ?? [];
   }
+  /** IDs of the sessions the agent is working on right now. */
+  async activeSessions(): Promise<string[]> {
+    return Object.keys(unwrap<Record<string, unknown>>(await this.api.get("/api/session/active")) ?? {});
+  }
   async createSession(opts: { model: ModelRef; agent?: string }): Promise<Session> {
     const body: Record<string, unknown> = { model: opts.model };
     if (opts.agent) body.agent = opts.agent;

@@ -3,13 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { AgentSetup, type SecretsApi } from "./AgentSetup";
 import { ProfilePages } from "./AccountPages";
 import { useCiWatch } from "./ciWatch";
-import { useAsync } from "./hooks";
+import { storageSet, useAsync } from "./hooks";
 import { PageHeader } from "./PageHeader";
 import { ProjectsPage } from "./Projects";
 import { SandboxGate } from "./SandboxGate";
+import { CloudSessions } from "./CloudSessions";
 import { CloudSettings } from "./Settings";
 import type { AccountMenuItem, SidebarSection } from "./Sidebar";
-import { Workspace, type WorkspaceNotice } from "./Workspace";
+import { OPEN_SESSION_KEY, Workspace, type WorkspaceNotice } from "./Workspace";
 
 /** Who is signed in, for the profile footer (web: Clerk; desktop: the access token's user). */
 export interface CloudAccount {
@@ -26,7 +27,7 @@ export interface CloudAccount {
 export interface CloudAppProps {
   /** Signed-in client (web: Clerk session; desktop: access token added by the main process). */
   client: CloudClient;
-  /** Current page ("/", "/projects", "/agent", "/settings") and navigation. */
+  /** Current page ("/", "/sessions", "/projects", "/agent", "/settings") and navigation. */
   path: string;
   go: (to: string) => void;
   account?: CloudAccount;
@@ -118,6 +119,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
       : undefined;
 
   const menu: AccountMenuItem[] = [
+    { id: "sessions", label: "Cloud sessions", onSelect: () => go("/sessions") },
     { id: "profile", label: "Profile", onSelect: () => go("/profile") },
     { id: "usage", label: "Usage and limits", onSelect: () => go("/usage") },
     { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => go("/settings") },
@@ -126,6 +128,21 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
     ...(account?.items ?? []),
   ];
 
+  if (path === "/sessions") {
+    return (
+      <CloudSessions
+        client={client}
+        project={project}
+        go={go}
+        accountName={account?.name}
+        open={(id, session) => {
+          if (session) storageSet(OPEN_SESSION_KEY, session);
+          openProject(id);
+          go("/");
+        }}
+      />
+    );
+  }
   if (path === "/settings") return <CloudSettings client={client} project={projectClient} onBack={back} desktop={desktop} />;
   if (path === "/profile" || path === "/usage") {
     return (

@@ -93,6 +93,7 @@ const handlers: Record<string, unknown> = {
     { providerID: "anthropic", id: "claude-sonnet-5-5", name: "Sonnet 5.5", variants: ["low", "medium", "high"], limit: { context: 200000, output: 32000 } },
   ],
   listCommands: async () => [{ name: "smoke", description: "Run the smoke test" }],
+  activeSessions: async () => ["s1"],
   listSessions: async () => (new URLSearchParams(location.search).has("empty") ? [] : sessions),
   messages: async (id: string) => messages[id] ?? [],
   listPermissions: async (id: string) =>
