@@ -35,7 +35,8 @@ function SignedInApp() {
   const account: CloudAccount = {
     name: user?.fullName || email || "Account",
     detail: email,
-    items: [{ id: "profile", label: "Profile", onSelect: () => clerk.openUserProfile() }],
+    email,
+    onManage: () => clerk.openUserProfile(),
     onSignOut: () => void clerk.signOut(),
   };
   return <CloudApp client={client} path={path} go={go} account={account} />;

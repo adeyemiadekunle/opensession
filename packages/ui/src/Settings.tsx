@@ -136,7 +136,7 @@ export function LocalSettings({
   return <SettingsShell pages={pages} onBack={onBack} aside="Applies to this computer" />;
 }
 
-function ApiKeys({ client }: { client: CloudClient }) {
+export function ApiKeys({ client }: { client: CloudClient }) {
   const providers = useAsync(() => client.providers(), [client]);
   const keys = useAsync(() => client.listKeys(), [client]);
   const [provider, setProvider] = useState("anthropic");

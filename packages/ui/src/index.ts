@@ -22,3 +22,4 @@ export { initTheme, setTheme, getTheme } from "./theme";
 export type { Theme } from "./theme";
 export { NamedIcon } from "./icons";
 export { PREF, readPref, usePref } from "./prefs";
+export { ProfilePages } from "./AccountPages";

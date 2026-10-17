@@ -88,6 +88,11 @@ const handlers: Record<string, unknown> = {
   limits: async () => ({ max_running: 10, disk_mb: 2048, idle_timeout_seconds: 1800, running: ["opensession"] }),
   workspaceStatus: async () => ({ state: "running", busy: false, disk_mb: 1860, disk_limit_mb: 2048, sleeps_in: 1500, idle_timeout_seconds: 1800 }),
   stopWorkspace: async () => undefined,
+  deleteToken: async () => undefined,
+  listProjects: async () => [
+    { id: "default", name: "opensession", repo: "adeyemiadekunle/opensession", branch: "main", cloned: true, state: "running" },
+    { id: "e2b", name: "e2b-provider", repo: null, branch: null, cloned: false, state: "sleeping" },
+  ],
   connectKey: async () => undefined,
   agentConfigStore: () => {
     let config: Record<string, unknown> = { git_approval: true, agents: [], skills: [], commands: [] };
@@ -136,3 +141,6 @@ export const gitActions = {
     pull_request: { number: 4, url: "https://github.com/adeyemiadekunle/opensession/pull/4" },
   }),
 };
+
+/** Every project shares the fixture client. */
+(handlers as Record<string, unknown>).withWorkspace = () => mock;

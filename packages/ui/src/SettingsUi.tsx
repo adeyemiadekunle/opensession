@@ -13,25 +13,42 @@ export interface SettingsPage {
   body: ReactNode;
 }
 
-const PAGE_KEY = "opensession.settingsPage";
-
-/** Settings layout (design): header with "← Workspace", the section nav, the open section. */
-export function SettingsShell({ pages, onBack, aside }: { pages: SettingsPage[]; onBack?: () => void; aside?: string }) {
+/** Settings and Profile layout (design): header with "← Workspace", the section nav, the open section. */
+export function SettingsShell({
+  pages,
+  onBack,
+  aside,
+  title = "Settings",
+  storageKey = "opensession.settingsPage",
+  initial,
+  navNote,
+}: {
+  pages: SettingsPage[];
+  onBack?: () => void;
+  aside?: string;
+  title?: string;
+  /** Remembers the open section. */
+  storageKey?: string;
+  /** Section to open first, instead of the remembered one. */
+  initial?: string;
+  /** Small text at the bottom of the nav. */
+  navNote?: string;
+}) {
   const [active, setActive] = useState(() => {
-    const saved = storageGet(PAGE_KEY);
-    return pages.some((p) => p.id === saved) ? saved! : pages[0]!.id;
+    const want = initial ?? storageGet(storageKey);
+    return pages.some((p) => p.id === want) ? want! : pages[0]!.id;
   });
   const open = (id: string) => {
     setActive(id);
-    storageSet(PAGE_KEY, id);
+    storageSet(storageKey, id);
   };
   const page = pages.find((p) => p.id === active) ?? pages[0]!;
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <PageHeader title="Settings" onBack={onBack} aside={aside} />
+      <PageHeader title={title} onBack={onBack} aside={aside} />
       <div className="flex min-h-0 flex-1 max-[800px]:flex-col">
         <nav
-          aria-label="Settings sections"
+          aria-label={`${title} sections`}
           className="flex w-[232px] shrink-0 flex-col gap-0.5 border-r border-border bg-sidebar px-3 py-4 text-sm max-[800px]:w-auto max-[800px]:flex-row max-[800px]:overflow-x-auto max-[800px]:border-b max-[800px]:border-r-0"
         >
           {pages.map((p) => (
@@ -48,6 +65,7 @@ export function SettingsShell({ pages, onBack, aside }: { pages: SettingsPage[];
               {p.badge ? <span className="text-xs text-warning">{p.badge}</span> : null}
             </button>
           ))}
+          {navNote ? <p className="m-0 mt-auto border-t border-border px-2.5 pt-3 text-[12.5px] text-faint max-[800px]:hidden">{navNote}</p> : null}
         </nav>
         <main aria-label={page.title} className="flex min-h-0 min-w-0 flex-1 flex-col gap-[18px] overflow-auto px-9 py-7 max-[800px]:px-4">
           <div className="flex flex-col gap-1.5">
