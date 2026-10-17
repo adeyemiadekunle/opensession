@@ -218,6 +218,18 @@ See `scripts/build-desktop.mjs` for signing.
   `RATE_LIMIT_<NAME>` (`DEFAULT`, `TOKENS`, `KEYS`, `PROJECTS`, `GITHUB`, `TICKETS`,
   `SESSIONS`, `PROMPT`, `AUTH_FAILURES`; 0 = no limit) or turn them off with
   `RATE_LIMITS=0`.
+- **Model keys and model usage:** users' provider keys never enter a sandbox. A
+  sandbox gets a stand-in token where the key would be, and OpenCode calls the
+  provider through the gateway (`/llm/...`, reached privately on the sandbox's own
+  network). The gateway accepts the token only from that user's sandboxes, adds the
+  real key and streams the answer straight back. That costs about 5 ms, measured
+  against a direct call. So an agent tricked into running `env` (a prompt injection in a repository or web
+  page) finds nothing worth stealing. Each user gets at most 120 model requests a
+  minute (`MODEL_REQUESTS_PER_MINUTE`), 8 at once (`MODEL_MAX_CONCURRENT`) and 50
+  million tokens a day (`MODEL_TOKENS_PER_DAY`, input + output, UTC day; change it
+  per user under **Admin > User limits**); 0 = no limit. The admin page shows today's
+  heaviest users, and an event when someone passes 80% or hits the limit.
+  `MODEL_PROXY=0` turns this off (keys go into sandboxes again; the admin page warns).
 - **One gateway:** run a single gateway container. Terminal, browser and preview
   tickets live in its memory, so two of them would not recognise each other's.
 - **Capacity:** `SANDBOX_MAX_RUNNING` caps awake projects for the whole server and

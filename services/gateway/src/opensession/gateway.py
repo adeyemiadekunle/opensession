@@ -24,8 +24,11 @@ ownership table: a user can only ever reach their own server. Credentials, MCP
 servers, shell and permissions all live inside the user's own sandbox.
 
 Model API keys (bring your own key): users store keys with PUT /keys/{provider}.
-They are encrypted at rest (keystore.py) and injected as env vars into the user's
-sandboxes. Changing or deleting a key recreates the sandbox on its next request;
+They are encrypted at rest (keystore.py) and never enter a sandbox: sandboxes get a
+stand-in token and call providers through the gateway's model proxy (modelproxy.py,
+POST /llm/...), which adds the key and enforces per-user usage limits. (With
+MODEL_PROXY=0, or a sandbox provider that can't reach the gateway privately, the keys
+are injected as env vars instead.) Changing or deleting a key recreates the sandbox on its next request;
 the /workspace volume is kept. Set KEYSTORE_MASTER_KEYS to enable this (generate
 one with `python -m opensession.keystore genkey`); without it the /keys routes return 503.
 
@@ -48,12 +51,13 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field, SecretStr
 
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import agentconfig
+from . import modelproxy as mp
 from . import opencode_proxy as ocp
 from . import preview as pv
 from . import observability as obs
@@ -129,6 +133,28 @@ def production_problems(app) -> list[str]:
     return out
 
 
+async def model_usage_overview(app) -> dict:
+    """Model proxy state and today's heaviest users (admin page)."""
+    proxy: mp.ModelProxy | None = app.state.model_proxy
+    if proxy is None:
+        return {"proxy": False}
+    day = mp.today()
+    top = await asyncio.to_thread(proxy.usage.top, day, 10)
+    for row in top:
+        row["limit"] = proxy.settings.tokens_per_day
+        own = await asyncio.to_thread(proxy.usage.get_limit, row["user"])
+        if own is not None:
+            row["limit"] = own
+        row["active"] = proxy.today_for(row["user"])["active"]
+    s = proxy.settings
+    return {
+        "proxy": True,
+        "day": day,
+        "top": top,
+        "defaults": {"tokens_per_day": s.tokens_per_day, "requests_per_minute": s.requests_per_minute, "max_concurrent": s.max_concurrent},
+    }
+
+
 def config_warnings(app) -> list[dict]:
     """Settings an operator should know about (admin page; startup refuses the serious ones
     on a public deployment, see production_problems)."""
@@ -142,6 +168,9 @@ def config_warnings(app) -> list[dict]:
         out.append({"level": "info", "text": "GitHub App not configured: projects can't clone, push or open pull requests."})
     if not st.egress.enabled:
         out.append({"level": "warning", "text": "Egress filtering is off: sandboxes can reach any address."})
+    if st.keystore is not None and getattr(st, "model_proxy", None) is None:
+        out.append({"level": "warning", "text": "Model proxy is off (MODEL_PROXY=0, or the sandbox provider can't reach the gateway privately): "
+                    "users' provider keys are put in their sandboxes, where the agent can read them."})
     if not _admins():
         out.append({"level": "info", "text": "ADMIN_USER_IDS is empty: nobody can open this page or change limits."})
     return out
@@ -287,6 +316,8 @@ def _admins() -> set[str]:
 class Limits(BaseModel):
     max_running: int | None = Field(None, ge=0, le=100, description="running projects at once; 0 = no limit")
     disk_mb: int | None = Field(None, ge=0, le=10_000_000, description="per project; 0 = no limit")
+    # Only changed when sent (older clients send just the two above).
+    model_tokens_per_day: int | None = Field(None, ge=0, le=10**12, description="model tokens a day; 0 = no limit")
 
 
 def create_app(
@@ -298,6 +329,7 @@ def create_app(
     users: UserStore | None = None,
     egress: EgressRules | None = None,
     github: "GitHubApp | None | object" = _FROM_ENV,
+    model_proxy: "mp.ModelProxy | None | object" = _FROM_ENV,
 ) -> FastAPI:
     """keystore: a KeyStore, None to disable key storage, or (default) from env.
     http_transport: used for outbound key-validation requests (tests pass a mock).
@@ -324,6 +356,16 @@ def create_app(
         metrics: obs.Metrics = app.state.metrics
         mgr.on_event = lambda kind, ref, data: metrics.event(kind, ref.user, ref.workspace, **data)
         app.state.http = httpx.AsyncClient(transport=http_transport)
+        if model_proxy is _FROM_ENV:
+            # Keys stay out of sandboxes when sandboxes can reach the gateway privately.
+            ok = app.state.keystore is not None and mp.enabled_by_env() and mgr.provider.supports_model_proxy
+            app.state.model_proxy = (
+                mp.ModelProxy(app.state.keystore, mp.UsageStore(_db_path()),
+                              on_event=lambda kind, user, **d: metrics.event(kind, user, None, **d))
+                if ok else None
+            )
+        else:
+            app.state.model_proxy = model_proxy
         if github is _FROM_ENV:
             gh_cfg = GitHubAppConfig.from_env()
             app.state.github = GitHubApp(gh_cfg, app.state.http) if gh_cfg else None
@@ -345,6 +387,8 @@ def create_app(
                 task.cancel()
             await mgr.aclose()
             await app.state.http.aclose()
+            if app.state.model_proxy is not None:
+                await app.state.model_proxy.aclose()
 
     app = FastAPI(title="OpenSession gateway", lifespan=lifespan)
     app.state.metrics = obs.Metrics()
@@ -381,7 +425,8 @@ def create_app(
         so a sandbox could otherwise call the gateway API itself."""
         mgr = getattr(request.app.state, "sandboxes", None)
         host = request.client.host if request.client else None
-        if mgr is not None and mgr.is_sandbox_address(host):
+        # The one exception: model calls, which the model proxy checks itself.
+        if mgr is not None and mgr.is_sandbox_address(host) and not request.url.path.startswith("/llm/"):
             from fastapi.responses import JSONResponse
 
             return JSONResponse({"detail": "forbidden"}, status_code=403)
@@ -436,15 +481,28 @@ def create_app(
         change to either recreates the sandbox on its next request (files kept)."""
         ks: KeyStore | None = request.app.state.keystore
         env: dict[str, str] | None = None
+        proxied: dict[str, str] = {}
         if ks is not None:
             try:
-                env = await asyncio.to_thread(ks.env_for, user)
+                if request.app.state.model_proxy is not None:
+                    # The sandbox gets a stand-in token where the keys would go, and
+                    # OpenCode calls those providers through the gateway (modelproxy.py).
+                    token, base = ks.model_token(user), mp.sandbox_base_url()
+                    env = {}
+                    for p in await asyncio.to_thread(ks.providers_for, user):
+                        if p in mp.UPSTREAMS:
+                            env[PROVIDERS[p].env_var] = token
+                            proxied[p] = f"{base}/llm/{p}"
+                else:
+                    env = await asyncio.to_thread(ks.env_for, user)
                 env.update(await asyncio.to_thread(ks.secrets_env_for, user))
             except Exception as e:  # e.g. master key missing; never echo key material
                 raise HTTPException(500, "could not load stored API keys") from e
         raw = await asyncio.to_thread(request.app.state.users.get_agent_config, user)
         # Rendered even without a saved setup: the defaults include git approval.
-        files = agentconfig.render_files(AgentConfig.model_validate(raw) if raw else AgentConfig(), cloud=True)
+        files = agentconfig.render_files(
+            AgentConfig.model_validate(raw) if raw else AgentConfig(), cloud=True, model_proxy=proxied
+        )
         env = dict(env or {})
         env["OPENSESSION_CONFIG_DIGEST"] = agentconfig.digest(files)
         return env, agentconfig.bundle_tar(files)
@@ -527,17 +585,38 @@ def create_app(
             raise HTTPException(403, "platform admins only (ADMIN_USER_IDS)")
         return user
 
+    # ---- model proxy (calls from sandboxes; modelproxy.py) ------------------------------
+
+    @app.api_route("/llm/{provider}/{path:path}", methods=["GET", "POST"], include_in_schema=False)
+    async def model_call(provider: str, path: str, request: Request):
+        proxy: mp.ModelProxy | None = request.app.state.model_proxy
+        host = request.client.host if request.client else None
+        user = request.app.state.sandboxes.user_for_address(host)
+        if proxy is None or user is None:
+            # Only a user's own sandbox may call (with its token); anyone else sees nothing.
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        request.state.user = user
+        return await proxy.handle(request, user, provider, path)
+
     @app.get("/admin/users/{user_id}/limits")
     async def admin_get_limits(user_id: str, request: Request, _: str = Depends(require_admin)):
         if not USER_ID_RE.match(user_id):
             raise HTTPException(400, "invalid user id")
         mgr: SandboxManager = request.app.state.sandboxes
         own = await asyncio.to_thread(request.app.state.users.get_limits, user_id)
-        return {
+        out = {
             "override": own,
             "effective": {"max_running": mgr.max_for(user_id), "disk_mb": mgr.disk_limit_for(user_id)},
             "defaults": {"max_running": mgr.cfg.max_per_user, "disk_mb": mgr.cfg.disk_limit_mb},
         }
+        proxy: mp.ModelProxy | None = request.app.state.model_proxy
+        if proxy is not None:
+            mine = await asyncio.to_thread(proxy.usage.get_limit, user_id)
+            out["override"]["model_tokens_per_day"] = mine
+            out["effective"]["model_tokens_per_day"] = proxy.settings.tokens_per_day if mine is None else mine
+            out["defaults"]["model_tokens_per_day"] = proxy.settings.tokens_per_day
+            out["model_usage_today"] = await asyncio.to_thread(proxy.usage.day, user_id, mp.today())
+        return out
 
     @app.put("/admin/users/{user_id}/limits")
     async def admin_set_limits(user_id: str, body: Limits, request: Request, _: str = Depends(require_admin)):
@@ -548,6 +627,12 @@ def create_app(
         cache = getattr(request.app.state.sandboxes.limits, "cache", None)
         if cache is not None:
             cache.pop(user_id, None)
+        proxy: mp.ModelProxy | None = request.app.state.model_proxy
+        if proxy is not None and "model_tokens_per_day" in body.model_fields_set:
+            await asyncio.to_thread(proxy.usage.set_limit, user_id, body.model_tokens_per_day)
+            proxy.set_limit_cached(user_id, body.model_tokens_per_day)
+        if proxy is not None:
+            out["model_tokens_per_day"] = await asyncio.to_thread(proxy.usage.get_limit, user_id)
         return out
 
     @app.get("/admin/overview")
@@ -578,6 +663,7 @@ def create_app(
             "errors": list(reversed(metrics.errors))[:50],
             "events": list(reversed(metrics.events))[:80],
             "warnings": config_warnings(request.app),
+            "models": await model_usage_overview(request.app),
         }
 
     @app.get("/admin/metrics")

@@ -152,6 +152,9 @@ class SandboxManager:
     def is_sandbox_address(self, host: str | None) -> bool:
         return self.provider.is_sandbox_address(host)
 
+    def user_for_address(self, host: str | None) -> str | None:
+        return self.provider.user_for_address(host)
+
     def user_networks(self) -> list[tuple[str, str]]:
         """(user, subnet) of every sandbox network (Docker provider only; blocking)."""
         fn = getattr(self.provider, "user_networks", None)

@@ -9,8 +9,10 @@ Encrypted storage for users' model provider API keys (bring your own key).
   drop the old key. Generate one with `python -m opensession.keystore genkey`.
 - Storage is the gateway database (db.py): Postgres when DATABASE_URL is set,
   otherwise SQLite. Only ciphertext is stored; master keys never are.
-- Plaintext keys are only returned by env_for(), which the gateway uses to inject
-  them into the user's own sandbox. Listing shows the last 4 characters only.
+- Plaintext keys are only returned by key_for(), which the model proxy (modelproxy.py)
+  uses to call the provider on the sandbox's behalf, and by env_for(), which injects
+  them into the user's sandbox only when the model proxy is off. Listing shows the
+  last 4 characters only.
 
 The env var names match what OpenCode V2.0.0 reads (GET /api/integration in a
 sandbox; scripts/check/integrations.sh). Google also accepts GOOGLE_API_KEY and
@@ -20,6 +22,8 @@ GEMINI_API_KEY.
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -201,6 +205,31 @@ class KeyStore:
             {"provider": p, "last4": l4, "created_at": c, "updated_at": u}
             for p, l4, c, u in rows
         ]
+
+    def key_for(self, user: str, provider: str) -> str | None:
+        """One decrypted provider key (the model proxy adds it to the provider call)."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT key_id, nonce, ciphertext FROM api_keys WHERE user_id=? AND provider=?",
+                (user, provider),
+            ).fetchone()
+        return self._decrypt(user, provider, *row) if row else None
+
+    def providers_for(self, user: str) -> list[str]:
+        """The providers this user has a key for."""
+        with self._lock:
+            rows = self._db.execute("SELECT provider FROM api_keys WHERE user_id=?", (user,)).fetchall()
+        return sorted(p for (p,) in rows if p in PROVIDERS)
+
+    def model_token(self, user: str) -> str:
+        """The stand-in key a user's sandboxes get instead of their real keys (modelproxy.py).
+
+        Derived from the current master key, so it is stable across restarts (the sandbox
+        env doesn't change) and changes when the master key is rotated. On its own it is
+        useless: the gateway accepts it only from that user's sandbox networks."""
+        secret = hmac.new(self._keys[0][1], b"opensession model-proxy token v1", hashlib.sha256).digest()
+        mac = hmac.new(secret, user.encode(), hashlib.sha256).digest()
+        return "osm_" + base64.urlsafe_b64encode(mac).decode().rstrip("=")
 
     def env_for(self, user: str) -> dict[str, str]:
         """Decrypted provider keys as env vars, for injection into the user's sandbox."""

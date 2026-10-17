@@ -70,6 +70,7 @@ except ImportError:  # pragma: no cover
 
 LABEL = "oc.managed"
 PROXY_ALIAS = "opensession-egress"  # the egress proxy's name inside every sandbox network
+GATEWAY_ALIAS = "opensession-gateway"  # the gateway's (modelproxy.py: sandboxes call models through it)
 
 
 class DockerProvider(SandboxProvider):
@@ -78,6 +79,8 @@ class DockerProvider(SandboxProvider):
         self.cfg = cfg
         self._docker = docker_client
         self.sandbox_subnets: set[ipaddress._BaseNetwork] = set()
+        # Which user each sandbox network belongs to (model proxy: who is calling).
+        self.subnet_users: dict[ipaddress._BaseNetwork, str] = {}
         self._helpers: dict[str, str] = {}  # resolved SANDBOX_*_CONTAINER specs
         self._self: Any = None  # the gateway's own container (False: not in one)
 
@@ -214,6 +217,18 @@ class DockerProvider(SandboxProvider):
             return False
         return any(ip in n for n in self.sandbox_subnets)
 
+    def user_for_address(self, host: str | None) -> str | None:
+        try:
+            ip = ipaddress.ip_address(host or "")
+        except ValueError:
+            return None
+        return next((u for n, u in self.subnet_users.items() if ip in n), None)
+
+    @property
+    def supports_model_proxy(self) -> bool:
+        # Sandboxes reach the gateway privately only when it is on their networks.
+        return bool(self.cfg.gateway_container)
+
     async def refresh(self) -> None:
         await asyncio.to_thread(self.refresh_subnets)
 
@@ -311,7 +326,7 @@ class DockerProvider(SandboxProvider):
             )
         gw = self.helper(self.cfg.gateway_container)
         if gw:
-            self._connect(net, gw)
+            self._connect_gateway(net, gw)
         proxy = self.helper(self.cfg.egress_proxy)
         if proxy:
             self._connect(net, proxy, aliases=[PROXY_ALIAS])
@@ -321,11 +336,37 @@ class DockerProvider(SandboxProvider):
     def _record_subnet(self, net: Any) -> None:
         try:
             net.reload()
+            user = (net.attrs.get("Labels") or {}).get("oc.user")
             for cfg in (net.attrs.get("IPAM") or {}).get("Config") or []:
                 if cfg.get("Subnet"):
-                    self.sandbox_subnets.add(ipaddress.ip_network(cfg["Subnet"], strict=False))
+                    subnet = ipaddress.ip_network(cfg["Subnet"], strict=False)
+                    self.sandbox_subnets.add(subnet)
+                    # Docker reuses subnets: the newest network on a subnet decides.
+                    if user:
+                        self.subnet_users[subnet] = user
+                    else:
+                        self.subnet_users.pop(subnet, None)
         except Exception:
             pass
+
+    def _connect_gateway(self, net: Any, gw: str) -> None:
+        """Connect the gateway under its alias. A network it joined before the alias
+        existed (an older gateway) is rejoined once, so sandboxes can resolve it."""
+        try:
+            net.connect(gw, aliases=[GATEWAY_ALIAS])
+            return
+        except APIError as e:
+            if "already" not in str(e).lower():
+                raise
+        try:
+            c = self._d().containers.get(gw)
+            c.reload()
+            aliases = ((c.attrs.get("NetworkSettings") or {}).get("Networks") or {}).get(net.name, {}).get("Aliases") or []
+            if GATEWAY_ALIAS not in aliases:
+                net.disconnect(gw)
+                net.connect(gw, aliases=[GATEWAY_ALIAS])
+        except Exception:
+            pass  # the gateway still reaches the sandbox; only model calls would fail
 
     async def _notify_networks(self) -> None:
         for cb in list(self.network_listeners):
@@ -394,7 +435,8 @@ class DockerProvider(SandboxProvider):
             proxy = f"http://{PROXY_ALIAS}:{self.cfg.egress_proxy_port}"
             for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
                 env[k] = proxy
-            env["NO_PROXY"] = env["no_proxy"] = "localhost,127.0.0.1"
+            # The gateway is on the sandbox network itself (model calls go to it directly).
+            env["NO_PROXY"] = env["no_proxy"] = f"localhost,127.0.0.1,{GATEWAY_ALIAS}"
         env["OPENCODE_SERVER_PASSWORD"] = password  # last, so extra_env can't override it
         kwargs: dict[str, Any] = dict(
             name=self.container_name(ref.key),

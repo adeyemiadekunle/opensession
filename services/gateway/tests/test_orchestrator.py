@@ -358,3 +358,23 @@ def test_sandbox_subnets_are_tracked():
     assert mgr.is_sandbox_address(inside)
     assert not mgr.is_sandbox_address("8.8.8.8")
     assert not mgr.is_sandbox_address("testclient")
+
+
+def test_gateway_alias_and_network_owner_for_the_model_proxy():
+    mgr, docker, _ = make_manager(egress_proxy="egress", gateway_container="gw")
+    assert mgr.provider.supports_model_proxy
+
+    async def go():
+        await mgr.ensure("alice", "default", {})
+        await mgr.ensure("bob", "default", {})
+        nets = {c.kwargs["environment"]["NO_PROXY"] for c in docker.containers.by_name.values()}
+        assert nets == {"localhost,127.0.0.1,opensession-gateway"}  # model calls skip the egress proxy
+        alice, bob = (docker.networks.live[c.kwargs["network"]] for c in docker.containers.by_name.values())
+        assert alice.aliases["gw"] == ["opensession-gateway"]
+        a_ip = alice.attrs["IPAM"]["Config"][0]["Subnet"].replace("0/24", "7")
+        b_ip = bob.attrs["IPAM"]["Config"][0]["Subnet"].replace("0/24", "7")
+        assert (mgr.user_for_address(a_ip), mgr.user_for_address(b_ip)) == ("alice", "bob")
+        assert mgr.user_for_address("10.9.9.9") is None and mgr.user_for_address("testclient") is None
+
+    asyncio.run(go())
+    assert make_manager()[0].provider.supports_model_proxy is False  # no gateway container: keys go in the sandbox

@@ -18,18 +18,22 @@ TABLES = [
     "user_limits",
     "api_keys",
     "secrets",
+    "model_usage",
+    "model_limits",
 ]
 
 
 def migrate(src_spec: str, dst_spec: str) -> dict[str, int]:
     from . import db as dbmod
     from .keystore import SCHEMA as KEY_SCHEMA
+    from .modelproxy import SCHEMA as MODEL_SCHEMA
     from .userstore import SCHEMA as USER_SCHEMA
 
     src, dst = dbmod.Database(src_spec), dbmod.Database(dst_spec)
     for d in (src, dst):
         d.script(USER_SCHEMA)
         d.script(KEY_SCHEMA)
+        d.script(MODEL_SCHEMA)
     counts: dict[str, int] = {}
     with dst:
         for table in TABLES:

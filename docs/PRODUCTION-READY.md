@@ -148,6 +148,11 @@ latest release, so publish one (above) first.
 - **Admin page** (account menu → Admin): requests, errors and latency, every
   sandbox (with Sleep), recent errors and events, server load, memory and disk,
   per-user limits.
+- **Model keys stay out of sandboxes**: sandboxes call providers through the gateway,
+  which adds the key and limits each user (50 million tokens a day, 120 requests a
+  minute, 8 at once by default). Admin shows today's heaviest users; raise or lower
+  one person's daily limit under User limits. If Admin warns "Model proxy is off",
+  fix that before launch.
 - **Rate limits** are on by default (3000 requests a minute per user, tighter for
   costly actions); see DEPLOY-dokploy.md to change them.
 - **Run one gateway container**: terminal, browser and preview tickets live in its

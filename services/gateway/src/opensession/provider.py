@@ -210,6 +210,14 @@ class SandboxProvider(ABC):
         """True if a request to the gateway comes from inside a sandbox."""
         return False
 
+    def user_for_address(self, host: str | None) -> str | None:
+        """The user whose sandbox network an address is in (model proxy)."""
+        return None
+
+    # Whether sandboxes can reach the gateway privately, so model calls can go through
+    # it (modelproxy.py) and provider keys stay out of the sandbox.
+    supports_model_proxy = False
+
     async def refresh(self) -> None:
         """Periodic housekeeping, called by the manager's reaper loop."""
 

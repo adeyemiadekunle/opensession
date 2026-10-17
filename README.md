@@ -9,7 +9,7 @@ An AI coding agent where users bring their own model API key, built on
 |---|---|---|
 | Apps | **desktop app**, **CLI** | **web app** (and the CLI) |
 | Where the agent runs | the user's computer, in their project folder | a private sandbox container per user |
-| API keys | saved by OpenCode on the user's machine | encrypted in the user's OpenSession account |
+| API keys | saved by OpenCode on the user's machine | encrypted in the user's OpenSession account; never inside the sandbox (the gateway adds them to model calls) |
 | Sign-in | none needed | Clerk (web), access token (CLI) |
 
 Local mode is only the desktop app and the CLI; the web app always works in the cloud.

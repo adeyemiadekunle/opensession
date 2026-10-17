@@ -208,14 +208,16 @@ SKILLS_DIR = "opensession-skills"
 CLOUD_CONFIG_DIR = "/home/agent/.config/opencode"
 
 
-def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
+def render_files(cfg: AgentConfig, *, cloud: bool = True, model_proxy: dict[str, str] | None = None) -> dict[str, str]:
     """Relative path (inside OpenCode's config folder) -> file content.
 
     Checked against OpenCode v2.0.0 (scripts/check/run-config-check.bat):
     - agents and commands are defined inline in opencode.json ("agents", "commands"),
     - skills are SKILL.md files in our own folder, listed in opencode.json "skills",
     - permissions, MCP servers, plugins and default_agent are opencode.json keys,
-    - instructions are the global AGENTS.md.
+    - instructions are the global AGENTS.md,
+    - model_proxy ({provider: base URL}) points those providers at the gateway's model
+      proxy: "providers": {id: {"settings": {"baseURL": ...}}} (modelproxy.py).
     """
     files: dict[str, str] = {}
     for s in cfg.skills:
@@ -229,6 +231,8 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True) -> dict[str, str]:
     oc: dict = {"$schema": "https://opencode.ai/config.json"}
     if cloud:
         oc["update"] = "disable"  # the image pins the OpenCode version
+    if model_proxy:
+        oc["providers"] = {p: {"settings": {"baseURL": url}} for p, url in sorted(model_proxy.items())}
     if cfg.skills:
         oc["skills"] = [f"{CLOUD_CONFIG_DIR}/{SKILLS_DIR}" if cloud else f"~/.config/opencode/{SKILLS_DIR}"]
     guard = (GIT_APPROVAL_RULES if cfg.git_approval else []) + (NETWORK_APPROVAL_RULES if cloud else [])
