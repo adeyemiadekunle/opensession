@@ -12,10 +12,10 @@ function toolLabel(p: ContentPart): string {
 function Step({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+      <span className="min-w-0 truncate font-mono text-xs">{children}</span>
       <svg className="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
         <path d="M9 6l6 6-6 6" />
       </svg>
-      <span className="min-w-0 truncate font-mono text-xs">{children}</span>
     </div>
   );
 }

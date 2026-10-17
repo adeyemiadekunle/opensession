@@ -24,6 +24,7 @@ import { Button } from "./components/ui/button";
 import { Select } from "./components/ui/select";
 import { Dialog } from "./components/ui/dialog";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
+import { ReviewView } from "./ReviewView";
 import { cn } from "./lib/utils";
 
 const MODEL_KEY = "opensession.model";
@@ -134,6 +135,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudErr, setCloudErr] = useState<string | null>(null);
   const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
@@ -398,7 +400,7 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => id !== "terminal" || terminal) };
 
   return (
-    <div className="flex h-full min-h-0 bg-background max-[1000px]:flex-col">
+    <div className="relative flex h-full min-h-0 bg-background max-[1000px]:flex-col">
       <aside className="flex w-[248px] shrink-0 flex-col gap-[18px] overflow-auto border-r border-border bg-sidebar px-2.5 py-3.5 max-[1000px]:max-h-[220px] max-[1000px]:w-auto max-[1000px]:border-b max-[1000px]:border-r-0">
         <label className="flex h-[34px] items-center gap-2 rounded-lg border border-border bg-card px-2.5 text-faint">
           <Icon><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></Icon>
@@ -651,6 +653,22 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
           state={shownDock}
           onChange={setDock}
           onClose={togglePanel}
+          headerActions={(id) =>
+            id === "changes" ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-[26px] text-faint"
+                aria-label="Open changes in full view"
+                title="Open in full view"
+                onClick={() => setReviewOpen(true)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
+                </svg>
+              </Button>
+            ) : null
+          }
           renderBody={(id) =>
             id === "files" ? (
               <FilesPanel client={client} refreshKey={refreshKey} />
@@ -785,6 +803,10 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
           </div>
         ) : null}
       </Dialog>
+
+      {reviewOpen ? (
+        <ReviewView client={client} actions={git} refreshKey={refreshKey} onClose={() => setReviewOpen(false)} />
+      ) : null}
 
       <CommandPalette
         open={paletteOpen}

@@ -50,13 +50,15 @@ export interface DockProps {
   onChange: Dispatch<SetStateAction<DockState>>;
   onClose: (id: DockPanelId) => void;
   renderBody: (id: DockPanelId) => ReactNode;
+  /** Extra buttons in a card's header, before its close button. */
+  headerActions?: (id: DockPanelId) => ReactNode;
 }
 
 /**
  * Right-hand dock: floating cards stacked with a gap. Dragging the vertical grip changes the
  * dock's width; dragging a gap between two cards changes the height of the card above it.
  */
-export function Dock({ state, onChange, onClose, renderBody }: DockProps) {
+export function Dock({ state, onChange, onClose, renderBody, headerActions }: DockProps) {
   const stackRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
@@ -140,6 +142,7 @@ export function Dock({ state, onChange, onClose, renderBody }: DockProps) {
               >
                 <header className="flex h-[42px] shrink-0 items-center gap-2 border-b border-border pl-3.5 pr-1.5 text-[13.5px] font-semibold">
                   <span className="min-w-0 flex-1 truncate">{DOCK_TITLES[id]}</span>
+                  {headerActions?.(id)}
                   <Button
                     variant="ghost"
                     size="icon"
