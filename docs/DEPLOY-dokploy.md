@@ -1,5 +1,7 @@
 # Deploy OpenSession on one VPS with Dokploy
 
+Short path for your domain and the go-live checklist: [PRODUCTION-READY.md](PRODUCTION-READY.md).
+
 Everything runs on one Ubuntu 24.04 VPS managed by [Dokploy](https://dokploy.com):
 the web app, the gateway, Postgres, the egress proxy and the sandboxes (one Docker
 container per user and project, created by the gateway). Dokploy's Traefik gives
