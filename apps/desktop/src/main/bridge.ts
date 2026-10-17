@@ -31,7 +31,7 @@ export interface DesktopBridge {
   gitPush(): Promise<{ branch: string }>;
   /** Opens GitHub's "compare & pull request" page for the current branch. */
   gitPullRequest(title: string, body: string): Promise<{ url: string }>;
-  gitCommit(message: string): Promise<{ committed: boolean; head: string | null }>;
+  gitCommit(message: string, paths?: string[]): Promise<{ committed: boolean; head: string | null }>;
   gitOutgoing(): Promise<OutgoingChanges>;
   /** CI for the open folder's branch, through the cloud account (needs sign-in). */
   gitChecks(): Promise<CiChecks>;

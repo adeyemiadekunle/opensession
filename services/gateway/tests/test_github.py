@@ -251,6 +251,16 @@ def test_git_pull_and_commit_for_handoff():
         assert "whoami" not in script[-1]
         docker.containers.exec_handler = lambda cmd: (0, b"NOTHING\n")
         assert c.post("/git/commit", json={"message": "x"}, headers=h).json() == {"committed": False, "head": None}
+
+        # only the chosen paths: the index is reset, then just those paths are staged (quoted)
+        docker.containers.exec_handler = lambda cmd: (0, b"1a2b3c4\n")
+        r = c.post("/git/commit", json={"message": "x", "paths": ["README.md", "docs/a b.md", "$(id).txt"]}, headers=h)
+        assert r.json() == {"committed": True, "head": "1a2b3c4"}
+        script = cont.execs[-1][0][-1]
+        assert "git reset -q" in script and "git add -A -- README.md 'docs/a b.md' '$(id).txt';" in script
+        assert "git add -A;" not in script
+        for bad in (["/etc/passwd"], ["../x"], ["a/../../x"], [""], []):
+            assert c.post("/git/commit", json={"message": "x", "paths": bad}, headers=h).status_code == 422
         docker.containers.exec_handler = lambda cmd: (128, b"fatal: not a git repository\n")
         assert c.post("/git/commit", json={"message": "x"}, headers=A).status_code == 409
 

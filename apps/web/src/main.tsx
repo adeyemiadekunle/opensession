@@ -2,7 +2,10 @@ import { ClerkProvider } from "@clerk/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@opensession/ui/styles.css";
+import { initTheme } from "@opensession/ui";
 import { App } from "./App";
+
+initTheme();
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 const root = createRoot(document.getElementById("root")!);

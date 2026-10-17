@@ -28,6 +28,7 @@ export function ChecksView({ checks, refreshKey }: { checks: () => Promise<CiChe
   if (ci.error) return <div className="text-[13px] text-muted-foreground">CI: {ci.error}</div>;
   const d = ci.data;
   if (!d) return <div className="text-[13px] text-muted-foreground">CI: loading…</div>;
+  const failed = d.checks.filter((c) => checkTone(c) === "failure");
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center justify-between text-[13px]">
@@ -60,6 +61,16 @@ export function ChecksView({ checks, refreshKey }: { checks: () => Promise<CiChe
           );
         })}
       </ul>
+      {failed.length ? (
+        <div role="alert" className="rounded-md border border-destructive/40 bg-del-bg px-3 py-2.5 text-[13px] text-destructive">
+          {failed.map((f) => f.name).join(", ")} failed.{" "}
+          {failed[0]?.url ? (
+            <a className="text-primary underline" href={failed[0].url} target="_blank" rel="noreferrer">
+              View log
+            </a>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

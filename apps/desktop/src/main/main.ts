@@ -309,9 +309,16 @@ ipcMain.handle("git:outgoing", async (): Promise<OutgoingChanges> => {
   const status = await git(["status", "--porcelain"]);
   return { branch, base: upstream || null, commits, uncommitted: status ? status.split("\n").map((l) => l.slice(3)) : [] };
 });
-ipcMain.handle("git:commit", async (_e, message: string) => {
+ipcMain.handle("git:commit", async (_e, message: string, paths?: string[]) => {
   if (typeof message !== "string" || !message.trim()) throw new Error("a commit message is required");
-  await git(["add", "-A"]);
+  if (paths === undefined) await git(["add", "-A"]);
+  else {
+    // Only the chosen paths: start from an empty index, then stage just those (no shell involved).
+    if (!Array.isArray(paths) || !paths.length || paths.some((p) => typeof p !== "string" || !p || p.startsWith("/") || p.split("/").includes("..")))
+      throw new Error("invalid paths to commit");
+    if (await git(["rev-parse", "-q", "--verify", "HEAD"]).catch(() => "")) await git(["reset", "-q"]);
+    await git(["add", "-A", "--", ...paths]);
+  }
   if (!(await git(["diff", "--cached", "--name-only"]))) return { committed: false, head: null };
   await git(["commit", "-q", "-m", message]);
   return { committed: true, head: await git(["rev-parse", "--short", "HEAD"]) };

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { CloudClient, LocalClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { GithubCard } from "./Projects";
+import { PageHeader } from "./PageHeader";
 
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: "Anthropic",
@@ -15,7 +16,7 @@ const PROVIDER_NAMES: Record<string, string> = {
 };
 
 /** Cloud account settings: model API keys, allowed domains, CLI/desktop access tokens. */
-export function CloudSettings({ client }: { client: CloudClient }) {
+export function CloudSettings({ client, onBack }: { client: CloudClient; onBack?: () => void }) {
   // Design: a header, a section nav on the left and one card per section.
   const sections = [
     { id: "keys", title: "Model API keys", body: <ApiKeys client={client} /> },
@@ -25,10 +26,7 @@ export function CloudSettings({ client }: { client: CloudClient }) {
   ];
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex h-14 shrink-0 items-center gap-3.5 border-b border-border bg-sidebar px-6">
-        <span className="text-[15px] font-semibold">Settings</span>
-        <span className="ml-auto text-[13px] text-faint">Applies to your cloud account</span>
-      </header>
+      <PageHeader title="Settings" onBack={onBack} aside="Applies to your cloud account" />
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Settings sections" className="flex w-[232px] shrink-0 flex-col gap-0.5 border-r border-border bg-sidebar p-3 text-sm">
           {sections.map((sec) => (

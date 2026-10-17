@@ -105,6 +105,7 @@
 }
 
 @layer base {
+  *, ::before, ::after { box-sizing: border-box; }
   html, body, #root { height: 100%; margin: 0; }
   body { background: var(--os-bg); color: var(--os-text); font: 14px/1.5 var(--os-sans); }
   button, input, select, textarea { font: inherit; color: inherit; }

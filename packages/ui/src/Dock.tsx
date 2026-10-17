@@ -52,13 +52,15 @@ export interface DockProps {
   renderBody: (id: DockPanelId) => ReactNode;
   /** Extra buttons in a card's header, before its close button. */
   headerActions?: (id: DockPanelId) => ReactNode;
+  /** Cards whose body draws its own header (and close button). */
+  ownHeader?: (id: DockPanelId) => boolean;
 }
 
 /**
  * Right-hand dock: floating cards stacked with a gap. Dragging the vertical grip changes the
  * dock's width; dragging a gap between two cards changes the height of the card above it.
  */
-export function Dock({ state, onChange, onClose, renderBody, headerActions }: DockProps) {
+export function Dock({ state, onChange, onClose, renderBody, headerActions, ownHeader }: DockProps) {
   const stackRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
@@ -140,6 +142,7 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions }: Do
                 )}
                 style={{ flex: pinned ? `0 0 ${heights[id]}px` : "1 1 0" }}
               >
+                {ownHeader?.(id) ? null : (
                 <header className="flex h-[42px] shrink-0 items-center gap-2 border-b border-border pl-3.5 pr-1.5 text-[13.5px] font-semibold">
                   <span className="min-w-0 flex-1 truncate">{DOCK_TITLES[id]}</span>
                   {headerActions?.(id)}
@@ -153,6 +156,7 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions }: Do
                     ×
                   </Button>
                 </header>
+                )}
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{renderBody(id)}</div>
               </section>
             </Fragment>

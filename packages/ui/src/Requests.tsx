@@ -87,7 +87,7 @@ function PermissionCard({
           Allow {String(request.action ?? "this action")}?
         </h2>
       </div>
-      {resources ? <pre className="os-pre whitespace-pre-wrap">{resources}</pre> : null}
+      {resources ? <pre className="os-pre m-0 whitespace-pre-wrap">{resources}</pre> : null}
       {request.message ? <div className="text-[13px] text-muted-foreground">{String(request.message)}</div> : null}
       <div className="flex items-center gap-2.5">
         <label className="flex flex-1 items-center gap-2 text-xs text-faint">

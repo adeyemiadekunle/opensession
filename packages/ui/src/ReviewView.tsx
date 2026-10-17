@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DiffFile, GitActions, GitInfo, OpenSessionClient, OutgoingChanges } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { ChecksView } from "./Checks";
@@ -41,6 +41,37 @@ export function parsePatch(patch: string): DiffLine[] {
 
 type Dialogs = "commit" | "push" | "pr";
 
+interface SplitRow {
+  left?: DiffLine;
+  right?: DiffLine;
+  /** Hunk headers and metadata span both sides. */
+  full?: DiffLine;
+}
+
+/** Side-by-side rows: removed lines on the left beside the lines that replaced them on the right. */
+export function splitRows(lines: DiffLine[]): SplitRow[] {
+  const rows: SplitRow[] = [];
+  let dels: DiffLine[] = [];
+  let adds: DiffLine[] = [];
+  const flush = () => {
+    for (let i = 0; i < Math.max(dels.length, adds.length); i++) rows.push({ left: dels[i], right: adds[i] });
+    dels = [];
+    adds = [];
+  };
+  for (const l of lines) {
+    if (l.kind === "del") {
+      if (adds.length) flush();
+      dels.push(l);
+    } else if (l.kind === "add") adds.push(l);
+    else {
+      flush();
+      rows.push(l.kind === "ctx" ? { left: l, right: l } : { full: l });
+    }
+  }
+  flush();
+  return rows;
+}
+
 /**
  * Full-screen review (design): the changed files, the selected file's diff, and the checks
  * and review steps. Commit, push and pull request each open a confirmation first.
@@ -50,11 +81,14 @@ export function ReviewView({
   actions,
   refreshKey,
   onClose,
+  toolbar,
 }: {
   client: OpenSessionClient;
   actions?: GitActions;
   refreshKey: number;
   onClose: () => void;
+  /** Dock toggles shown in the header, as in the workspace title bar. */
+  toolbar?: ReactNode;
 }) {
   const diff = useAsync<DiffFile[]>(() => client.diff("working"), [client, refreshKey]);
   const git = useAsync<GitInfo>(() => client.gitInfo(), [client, refreshKey]);
@@ -68,8 +102,18 @@ export function ReviewView({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ text: string; url?: string | null } | null>(null);
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
+  const [layout, setLayout] = useState<"unified" | "split">("unified");
 
   const files = diff.data ?? [];
+  const included = files.filter((f) => !excluded.has(f.file));
+  const toggleInclude = (file: string) =>
+    setExcluded((ex) => {
+      const next = new Set(ex);
+      if (next.has(file)) next.delete(file);
+      else next.add(file);
+      return next;
+    });
   const current = files.find((f) => f.file === selected) ?? files[0];
   const lines = useMemo(() => (current ? parsePatch(current.patch) : []), [current]);
   const currentFile = current?.file;
@@ -102,7 +146,8 @@ export function ReviewView({
 
   const approveCommit = () =>
     run(async () => {
-      const c = await actions!.commit!(message.trim());
+      // Only the checked files when some are left out; everything otherwise.
+      const c = await actions!.commit!(message.trim(), excluded.size ? included.map((f) => f.file) : undefined);
       if (c.committed) setMessage("");
       return { text: c.committed ? `Committed ${c.head ?? ""}.` : "Nothing to commit." };
     });
@@ -145,6 +190,7 @@ export function ReviewView({
         <Button size="sm" variant="outline" onClick={onClose}>
           Dock right
         </Button>
+        {toolbar ? <span className="flex items-center gap-1">{toolbar}</span> : null}
         <button
           aria-label="Close review"
           className="size-8 border-0 bg-transparent p-0 text-faint hover:bg-sunken hover:text-foreground"
@@ -175,10 +221,9 @@ export function ReviewView({
                 >
                   <input
                     type="checkbox"
-                    checked
-                    disabled
-                    aria-label={`Include ${f.file}`}
-                    title="Commit includes every changed file"
+                    checked={!excluded.has(f.file)}
+                    onChange={() => toggleInclude(f.file)}
+                    aria-label={`Include ${f.file} in the commit`}
                     className="m-0 accent-primary"
                   />
                   <button
@@ -203,10 +248,58 @@ export function ReviewView({
                 <span className="truncate">{current.file}</span>
                 <span className="text-success">+{current.additions}</span>
                 <span className="text-destructive">-{current.deletions}</span>
-                <span className="ml-auto font-sans text-[13px] text-faint">Unified</span>
+                <span role="radiogroup" aria-label="Diff layout" className="ml-auto flex items-center gap-1 font-sans text-[13px]">
+                  {(["unified", "split"] as const).map((l, i) => (
+                    <span key={l} className="flex items-center gap-1">
+                      {i ? <span aria-hidden="true" className="text-faint">·</span> : null}
+                      <button
+                        role="radio"
+                        aria-checked={layout === l}
+                        className={cn("border-0 bg-transparent p-0", layout === l ? "text-foreground" : "text-faint hover:text-foreground")}
+                        onClick={() => setLayout(l)}
+                      >
+                        {l === "unified" ? "Unified" : "Split"}
+                      </button>
+                    </span>
+                  ))}
+                </span>
               </div>
               <div className="min-h-0 flex-1 overflow-auto py-2 font-mono text-[12.5px] leading-[1.75]">
-                {lines.map((l, i) => (
+                {layout === "split"
+                  ? splitRows(lines).map((r, i) =>
+                      r.full ? (
+                        <div key={i} className="px-4 text-faint">
+                          {r.full.text}
+                        </div>
+                      ) : (
+                        <div key={i} className="grid grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)]">
+                          <span className={cn("pr-3 text-right text-faint/70", r.left?.kind === "del" && "bg-del-bg")}>{r.left?.oldNo ?? ""}</span>
+                          <span
+                            className={cn(
+                              "overflow-hidden whitespace-pre pr-3",
+                              r.left?.kind === "del" && "bg-del-bg text-destructive",
+                              !r.left && "bg-sunken/40",
+                            )}
+                          >
+                            {r.left ? r.left.text || " " : " "}
+                          </span>
+                          <span className={cn("border-l border-border pr-3 text-right text-faint/70", r.right?.kind === "add" && "bg-add-bg")}>
+                            {r.right?.newNo ?? ""}
+                          </span>
+                          <span
+                            className={cn(
+                              "overflow-hidden whitespace-pre pr-3",
+                              r.right?.kind === "add" && "bg-add-bg text-success",
+                              !r.right && "bg-sunken/40",
+                            )}
+                          >
+                            {r.right ? r.right.text || " " : " "}
+                          </span>
+                        </div>
+                      ),
+                    )
+                  : null}
+                {layout === "unified" && lines.map((l, i) => (
                   <div
                     key={i}
                     className={cn(
@@ -264,8 +357,8 @@ export function ReviewView({
               />
             </label>
             <div className="flex gap-2">
-              <Button variant="default" className="flex-1" disabled={!actions?.commit || !files.length || !message.trim() || busy} onClick={() => setDialog("commit")}>
-                Commit {files.length} {files.length === 1 ? "file" : "files"}
+              <Button variant="default" className="flex-1" disabled={!actions?.commit || !included.length || !message.trim() || busy} onClick={() => setDialog("commit")}>
+                Commit {included.length} {included.length === 1 ? "file" : "files"}
               </Button>
               <Button disabled={!actions?.push || busy} onClick={() => setDialog("push")}>
                 Push
@@ -301,7 +394,7 @@ export function ReviewView({
       <Dialog
         open={dialog === "commit"}
         onClose={() => !busy && setDialog(null)}
-        title={`Commit ${files.length} ${files.length === 1 ? "file" : "files"}?`}
+        title={`Commit ${included.length} ${included.length === 1 ? "file" : "files"}?`}
         footer={
           <div className="ml-auto flex gap-2">
             <Button variant="outline" disabled={busy} onClick={() => setDialog(null)}>
@@ -316,10 +409,15 @@ export function ReviewView({
         <p className="text-[13px] text-muted-foreground">On {branch ?? "this branch"} with the message:</p>
         <blockquote className="m-0 rounded-md bg-code px-3 py-2 text-[13.5px]">{message}</blockquote>
         <ul className="m-0 max-h-40 list-none overflow-auto p-0 font-mono text-xs text-muted-foreground">
-          {files.map((f) => (
+          {included.map((f) => (
             <li key={f.file}>{f.file}</li>
           ))}
         </ul>
+        {excluded.size ? (
+          <p className="text-[13px] text-warning">
+            {excluded.size} unchecked {excluded.size === 1 ? "file stays" : "files stay"} uncommitted.
+          </p>
+        ) : null}
       </Dialog>
 
       <Dialog
