@@ -405,6 +405,10 @@ export function Workspace({
   const send = async () => {
     const t = text.trim();
     if (!t) return;
+    // Telling the agent you're done ("signed in, go on") finishes a hand-over it is waiting on;
+    // the message then reaches it as usual.
+    const handOverWaiting = perms.find((p) => p.action === "opensession_hand_over");
+    if (active && handOverWaiting) await client.replyPermission(active, handOverWaiting.id, "once").catch(() => {});
     try {
       setErr(null);
       let id = active;

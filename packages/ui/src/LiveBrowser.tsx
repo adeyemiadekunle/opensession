@@ -64,6 +64,39 @@ export function addressToUrl(input: string): string | null {
   }
 }
 
+/** Title prefix and page alert that tell the agent a tab is the user's (see opensession-mcp.mjs). */
+export const USER_TAB_PREFIX = "[User's tab] ";
+const MARK = `(() => {
+  if (window.__osUserTab) return;
+  const PREFIX = ${JSON.stringify(USER_TAB_PREFIX)};
+  const TEXT = "OpenSession: the user took over this tab. Don't act here: open a new tab (browser_tabs, action new) and continue your task there.";
+  const mark = () => {
+    if (window.__osUserTab?.off || !document.body) return;
+    // In <body>: the agent's page snapshot only covers the body.
+    let d = document.getElementById("__os_user_tab");
+    if (!d) {
+      d = document.createElement("div");
+      d.id = "__os_user_tab";
+      d.setAttribute("role", "alert");
+      d.textContent = TEXT;
+      d.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;pointer-events:none";
+    }
+    if (d.parentNode !== document.body) document.body.appendChild(d);
+    if (!document.title.startsWith(PREFIX)) document.title = PREFIX + document.title;
+  };
+  window.__osUserTab = { timer: setInterval(mark, 1000) };
+  document.addEventListener("DOMContentLoaded", mark);
+  mark();
+})()`;
+const UNMARK = `(() => {
+  const s = window.__osUserTab;
+  if (s) { s.off = true; clearInterval(s.timer); delete window.__osUserTab; }
+  document.getElementById("__os_user_tab")?.remove();
+  const p = ${JSON.stringify(USER_TAB_PREFIX)};
+  if (document.title.startsWith(p)) document.title = document.title.slice(p.length);
+})()`;
+const shownTitle = (t: string) => (t.startsWith(USER_TAB_PREFIX) ? t.slice(USER_TAB_PREFIX.length) : t);
+
 const KEYS: Record<string, number> = {
   Enter: 13, Backspace: 8, Tab: 9, Escape: 27, Delete: 46, Home: 36, End: 35, PageUp: 33, PageDown: 34,
   ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
@@ -251,18 +284,46 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
     if (!waiting) setMode((m) => (m === "handover" ? "watch" : m));
   }, [waiting]);
 
-  /** Your own tab, on the page you were watching, so the agent's tab is left to the agent. */
-  const takeControl = async () => {
+  // Taking a tab over: your first click, scroll or key on the agent's tab makes it yours. The
+  // page is marked (title prefix and a screen-reader alert the agent's snapshots show), and
+  // the agent's instructions say to leave such a tab and carry on in a new one.
+  const marks = useRef(new Map<string, { sessionId: string; script?: string }>());
+  const claim = (): boolean => {
+    if (controlRef.current) return true;
+    const id = activeRef.current;
+    const sid = session.current;
+    if (!id || !sid || !cdp.current) return false;
+    controlRef.current = true;
+    userTabs.current.add(id);
+    setMode("own");
     const client = cdp.current;
+    void (async () => {
+      const r = await client.send<{ identifier: string }>("Page.addScriptToEvaluateOnNewDocument", { source: MARK }, sid).catch(() => null);
+      marks.current.set(id, { sessionId: sid, script: r?.identifier });
+      await client.send("Runtime.evaluate", { expression: MARK }, sid).catch(() => {});
+    })();
+    return true;
+  };
+  /** Gives your tabs back to the agent: removes the marks and returns to watching. */
+  const handBack = async () => {
+    const client = cdp.current;
+    setMode("watch");
     if (!client) return;
-    try {
-      const url = tab?.url && tab.url !== "about:blank" ? tab.url : "about:blank";
-      const { targetId } = await client.send<{ targetId: string }>("Target.createTarget", { url });
-      userTabs.current.add(targetId);
-      setMode("own");
-      setActive(targetId);
-    } catch (e) {
-      setErr(errText(e));
+    for (const id of [...userTabs.current]) {
+      const m = marks.current.get(id);
+      let sid = m && m.sessionId === session.current ? m.sessionId : null;
+      let temp = false;
+      if (!sid) {
+        sid = (await client.send<{ sessionId: string }>("Target.attachToTarget", { targetId: id, flatten: true }).catch(() => null))?.sessionId ?? null;
+        temp = true;
+      }
+      if (sid) {
+        if (m?.script && !temp) await client.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: m.script }, sid).catch(() => {});
+        await client.send("Runtime.evaluate", { expression: UNMARK }, sid).catch(() => {});
+        if (temp) await client.send("Target.detachFromTarget", { sessionId: sid }).catch(() => {});
+      }
+      marks.current.delete(id);
+      userTabs.current.delete(id);
     }
   };
 
@@ -272,13 +333,14 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
     return { x: ((e.clientX - r.left) / r.width) * (frame?.w ?? r.width), y: ((e.clientY - r.top) / r.height) * (frame?.h ?? r.height) };
   };
   const mouse = (type: string, e: MouseEvent<HTMLImageElement>, clickCount = 1) => {
-    if (!control) return;
+    if (!(type === "mousePressed" ? claim() : controlRef.current)) return;
     const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
     void page("Input.dispatchMouseEvent", { type, ...point(e), button: type === "mouseMoved" ? "none" : button, clickCount, modifiers: modifiers(e) });
   };
   const lastMove = useRef(0);
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!control) return;
+    if (e.key === "Tab" && !controlRef.current) return; // keyboard focus moves on, it doesn't take over
+    if (!claim()) return;
     const mods = modifiers(e);
     if (e.key.length === 1 && !(mods & 6)) {
       e.preventDefault();
@@ -307,7 +369,7 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
           >
             <button role="tab" aria-selected={t.id === active} className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left" title={t.url} onClick={() => setActive(t.id)}>
               {userTabs.current.has(t.id) ? <span className="mr-1.5 rounded bg-warning/15 px-1 text-[10.5px] text-warning">You</span> : null}
-              {t.title || t.url || "New tab"}
+              {shownTitle(t.title) || t.url || "New tab"}
             </button>
             <button
               aria-label={`Close ${t.title || "tab"}`}
@@ -389,7 +451,7 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
         aria-label="Page"
         onKeyDown={key}
         onPaste={(e) => {
-          if (!control) return;
+          if (!claim()) return;
           e.preventDefault();
           void page("Input.insertText", { text: e.clipboardData.getData("text") });
         }}
@@ -398,10 +460,10 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
         {frame && tab ? (
           <img
             ref={imgRef}
-            alt={`Page: ${tab.title || tab.url}`}
+            alt={`Page: ${shownTitle(tab.title) || tab.url}`}
             src={frame.src}
             draggable={false}
-            className={cn("block h-auto w-full select-none", control ? "cursor-default" : "cursor-not-allowed")}
+            className="block h-auto w-full cursor-default select-none"
             onMouseDown={(e) => {
               e.currentTarget.parentElement?.focus();
               mouse("mousePressed", e, e.detail || 1);
@@ -414,7 +476,7 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
               mouse("mouseMoved", e);
             }}
             onContextMenu={(e) => control && e.preventDefault()}
-            onWheel={(e) => control && void page("Input.dispatchMouseEvent", { type: "mouseWheel", ...point(e), deltaX: e.deltaX, deltaY: e.deltaY })}
+            onWheel={(e) => claim() && void page("Input.dispatchMouseEvent", { type: "mouseWheel", ...point(e), deltaX: e.deltaX, deltaY: e.deltaY })}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center text-[13px] text-muted-foreground">
@@ -440,20 +502,20 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
         <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", control ? "bg-warning" : "bg-primary")} />
         <span className="min-w-0 flex-1">
           {mode === "handover"
-            ? "The agent is waiting on this tab for you. When you're done, click Done in the chat."
+            ? "The agent is waiting on this tab for you. When you're done, click Done or tell it in the chat."
             : mode === "own"
-              ? "This is your tab: clicks and typing go here. The agent keeps working in its own tabs, and sign-ins are shared."
-              : "Watching the agent's browser. Take control to use a tab of your own; the agent keeps going."}
+              ? "You took over this tab. The agent sees it's yours and carries on in a new tab; sign-ins are shared."
+              : "Watching the agent's browser. Click, scroll or type on the page to take the tab over."}
         </span>
-        {mode === "watch" ? (
-          <Button size="sm" variant="outline" disabled={state !== "live"} onClick={() => void takeControl()}>
-            Take control
+        {mode === "own" ? (
+          <Button size="sm" variant="default" onClick={() => void handBack()}>
+            Hand back
           </Button>
-        ) : (
+        ) : mode === "handover" ? (
           <Button size="sm" variant="default" onClick={() => setMode("watch")}>
-            {mode === "own" ? "Hand back" : "Stop controlling"}
+            Stop controlling
           </Button>
-        )}
+        ) : null}
       </div>
     </div>
   );

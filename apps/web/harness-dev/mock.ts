@@ -165,6 +165,8 @@ const handlers: Record<string, unknown> = {
   setModel: reply,
   setAgent: reply,
   prompt: reply,
+  // Recorded for tests (window.__replies).
+  replyPermission: async (...args: unknown[]) => void ((window as unknown as { __replies: unknown[] }).__replies ??= []).push(args),
   interrupt: reply,
 };
 

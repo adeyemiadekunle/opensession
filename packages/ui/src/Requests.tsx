@@ -218,7 +218,7 @@ function HandOverCard({
       <div className="text-[13.5px] text-foreground">{task}</div>
       {url ? <div className="truncate font-mono text-xs text-faint">{url}</div> : null}
       <div className="text-xs text-faint">
-        It's waiting on its tab. Do it there yourself (it never sees what you type), then click Done and it carries on.
+        It's waiting on its tab. Do it there yourself (it never sees what you type), then click Done or just tell it in the chat, and it carries on.
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2.5">
         <Button variant="ghost" onClick={onCant}>

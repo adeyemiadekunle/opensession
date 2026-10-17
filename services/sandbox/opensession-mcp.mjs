@@ -18,9 +18,9 @@ const DOMAIN_RE = /^(?=.{1,253}$)(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[
 
 const INSTRUCTIONS = `Internet: this sandbox reaches localhost and only the domains the user allowed. When a request fails because a domain is blocked (the proxy answers 403 "Access Denied", or the browser shows ERR_TUNNEL_CONNECTION_FAILED or ERR_PROXY_CONNECTION_FAILED), call request_access with that domain and a one-line reason. If approved, retry; if denied, carry on without it. Ask only for domains the task needs, one per call.
 
-The user: never ask for passwords, codes or card numbers in chat, and never type credentials you were not given. When a step needs the user (signing in, two-factor codes, a CAPTCHA, a payment or consent screen), open that page in the browser first, then call hand_over with what they need to do. It returns once they are done; take a snapshot to see where the page is and continue from there.
+The user: never ask for passwords, codes or card numbers in chat, and never type credentials you were not given. When a step needs the user (signing in, two-factor codes, a CAPTCHA, a payment or consent screen), open that page in the browser first, then call hand_over with what they need to do. It returns once they are done (they click Done or tell you in the chat; any message they send follows); take a snapshot to see where the page is and continue from there.
 
-Browser tabs: the user can open tabs of their own in the same browser. Work in the tabs you opened; leave other tabs alone unless the user asks.`;
+Browser tabs: the user watches this browser and can take a tab over by using it. A tab they took over has a title starting with "[User's tab]" and an alert saying so. Never act in such a tab: open a new tab (browser_tabs, action new), go back to where you were, and continue there, without asking. Leave other tabs you didn't open alone too unless the user asks. Sign-ins are shared across tabs.`;
 
 const TOOLS = [
   {
@@ -80,7 +80,7 @@ export function handle(msg) {
     return {
       protocolVersion: params?.protocolVersion ?? "2025-06-18",
       capabilities: { tools: {} },
-      serverInfo: { name: "opensession", version: "1.1.0" },
+      serverInfo: { name: "opensession", version: "1.2.0" },
       instructions: INSTRUCTIONS,
     };
   }
