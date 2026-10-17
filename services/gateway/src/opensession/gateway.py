@@ -57,6 +57,7 @@ from . import agentconfig
 from . import opencode_proxy as ocp
 from . import preview as pv
 from . import observability as obs
+from . import ratelimit as rl
 from .agentconfig import BUILTIN_AGENTS, BUILTIN_TOOLS, AgentConfig
 from .auth import USER_ID_RE, AuthConfig, Authenticator, Principal
 from . import db as dbmod
@@ -347,6 +348,7 @@ def create_app(
 
     app = FastAPI(title="OpenSession gateway", lifespan=lifespan)
     app.state.metrics = obs.Metrics()
+    app.state.limiter = rl.RateLimiter()
     app.state.ws_connect = _ws_connect
 
     origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
@@ -358,6 +360,20 @@ def create_app(
             allow_headers=["authorization", "content-type", "x-workspace", "last-event-id"],
             allow_credentials=False,
         )
+
+    # Middleware order, outermost first: preview_host, observe, block_sandboxes, rate_limit.
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        """Per-caller and per-action limits, and slowing down failed sign-ins (ratelimit.py)."""
+        limiter: rl.RateLimiter = request.app.state.limiter
+        host = request.client.host if request.client else None
+        over = limiter.check(request.method, request.url.path, request.headers, host)
+        if over:
+            return rl.too_many(*over)
+        response = await call_next(request)
+        if response.status_code == 401:
+            limiter.failed_sign_in(request.headers, host)
+        return response
 
     @app.middleware("http")
     async def block_sandboxes(request: Request, call_next):

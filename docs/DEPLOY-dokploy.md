@@ -204,6 +204,15 @@ variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL` first. See
   rotated (10 MB × 5 per service, 10 MB × 3 per sandbox). Sandboxes are not Dokploy
   services; see them with `docker ps --filter label=oc.managed=true` and
   `docker logs <name>` over SSH.
+- **Rate limits:** each caller (access token or session, else address) gets 3000
+  requests a minute, with tighter limits on costly actions: creating access tokens
+  (10/min), saving model keys (20), new projects (10), GitHub push and pull requests
+  (20), terminal/browser/preview tickets (60), new sessions (30) and prompts (60).
+  More than 30 failed sign-ins a minute from one address slow it down. Over a limit
+  the answer is 429 with `Retry-After`; the admin page counts them. Change one with
+  `RATE_LIMIT_<NAME>` (`DEFAULT`, `TOKENS`, `KEYS`, `PROJECTS`, `GITHUB`, `TICKETS`,
+  `SESSIONS`, `PROMPT`, `AUTH_FAILURES`; 0 = no limit) or turn them off with
+  `RATE_LIMITS=0`.
 - **One gateway:** run a single gateway container. Terminal, browser and preview
   tickets live in its memory, so two of them would not recognise each other's.
 - **Capacity:** `SANDBOX_MAX_RUNNING` caps awake projects for the whole server and
