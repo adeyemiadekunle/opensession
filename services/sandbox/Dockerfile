@@ -15,6 +15,18 @@ RUN apt-get update \
       python3 python3-pip python3-venv build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# Browser for the agent: Playwright MCP attached to one Chromium per sandbox
+# (browser-mcp.sh), and the network tool the agent uses to ask for a domain
+# (network-mcp.mjs). Chromium's system libraries and fonts come with --with-deps.
+ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN mkdir -p /opt/opensession/browser \
+ && npm install --prefix /opt/opensession/browser --no-audit --no-fund "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+ && /opt/opensession/browser/node_modules/.bin/playwright install --with-deps --no-shell chromium \
+ && rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache
+COPY --chmod=755 browser-mcp.sh /usr/local/bin/opensession-browser
+COPY --chmod=644 network-mcp.mjs /usr/local/lib/opensession/network-mcp.mjs
+
 # Non-root user; /workspace is the persistent volume mounted by the orchestrator.
 # The node base image already has a "node" user with UID 1000; rename it to "agent".
 RUN usermod --login agent --home /home/agent --move-home node \

@@ -317,6 +317,8 @@ export interface AgentConfig {
   default_agent?: string | null;
   /** The agent's own `git commit` / `git push` wait for approval (default on). */
   git_approval?: boolean;
+  /** Cloud: a browser in the sandbox the agent can drive (default on). */
+  browser?: boolean;
 }
 
 /** Shell commands the agent may only run after the user approves them (git_approval).

@@ -237,6 +237,44 @@ export function GitApprovalCard({ store }: { store: AgentConfigStore }) {
   );
 }
 
+/** Cloud: the browser the agent drives in the project's sandbox, and how it reaches the internet. */
+export function BrowserCard({ store }: { store: AgentConfigStore }) {
+  const cfg = useAsync(() => store.get(), [store]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const on = cfg.data?.config.browser ?? true;
+  const toggle = async (v: boolean) => {
+    if (!cfg.data) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      await store.save({ ...cfg.data.config, browser: v });
+      await cfg.reload();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <SettingsCard title="Browser">
+      <SettingRow
+        label="Let the agent use a browser"
+        hint="It opens, reads and clicks pages in the project's sandbox, in tabs of its own. Saving restarts sandboxes; files are kept."
+      >
+        <Switch label="Let the agent use a browser" checked={on} disabled={!cfg.data || saving} onChange={(v) => void toggle(v)} />
+      </SettingRow>
+      <SettingRow
+        label="Internet access"
+        hint="The sandbox reaches localhost and your allowed domains (General). When the agent needs another domain, it asks you in the chat; allowing it adds the domain."
+      >
+        <span className="text-[12.5px] text-faint">Ask for new domains</span>
+      </SettingRow>
+      {cfg.error || err ? <div className="text-[13px] text-destructive">{cfg.error ?? err}</div> : null}
+    </SettingsCard>
+  );
+}
+
 export function ShortcutsCard() {
   return (
     <SettingsCard title="Keyboard shortcuts">

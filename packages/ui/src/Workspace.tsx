@@ -88,6 +88,8 @@ export interface WorkspaceProps {
   terminal?: TerminalApi;
   /** What the Browser panel can show (the project's dev server). */
   preview?: PreviewApi;
+  /** Cloud: adds a domain to the allowed domains when the user approves the agent's request. */
+  allowDomain?: (domain: string) => Promise<unknown>;
   /** Branch actions (checkout, push, pull request) for the Git panel. */
   git?: GitActions;
   /** Desktop only: continue a session, or start a new one, in the cloud. */
@@ -116,6 +118,7 @@ export function Workspace({
   git,
   terminal,
   preview,
+  allowDomain,
   moveToCloud,
   projectName,
   sessionsTitle = "Sessions",
@@ -845,7 +848,7 @@ export function Workspace({
 
           <div className="relative shrink-0 pb-4 pl-10 pr-7">
             {active ? (
-              <Requests client={client} sessionId={active} permissions={perms} forms={forms} onDone={refresh} />
+              <Requests client={client} sessionId={active} permissions={perms} forms={forms} onDone={refresh} allowDomain={allowDomain} />
             ) : null}
             {!online && !perms.length && !forms.length ? (
               <div

@@ -43,7 +43,46 @@ const PRESENT: Record<string, string> = {
   "Loaded skill": "Loading skill",
   "Ran code": "Running code",
   "Asked a question": "Asking a question",
+  Opened: "Opening",
+  "Read the page": "Reading the page",
+  Clicked: "Clicking",
+  Typed: "Typing",
+  "Filled a form": "Filling a form",
+  "Took a screenshot": "Taking a screenshot",
+  "Used the browser": "Using the browser",
+  "Asked for internet access": "Asking for internet access",
 };
+
+/** The sandbox's browser (Playwright MCP, server "sandbox") and network tool, in plain words. */
+function browserTitle(tool: string, input: unknown): { verb: string; target?: string } | null {
+  const t = tool.replace(/^sandbox_/, "");
+  if (t === "network_request_access" || t === "request_access") return { verb: "Asked for internet access", target: field(input, "domain") };
+  if (!t.startsWith("browser_")) return null;
+  switch (t.slice("browser_".length)) {
+    case "navigate":
+      return { verb: "Opened", target: field(input, "url") };
+    case "navigate_back":
+      return { verb: "Opened", target: "the previous page" };
+    case "snapshot":
+    case "find":
+      return { verb: "Read the page" };
+    case "click":
+    case "hover":
+      return { verb: "Clicked", target: field(input, "element", "target") };
+    case "type":
+    case "press_key":
+      return { verb: "Typed", target: field(input, "text", "key") };
+    case "fill_form":
+    case "select_option":
+      return { verb: "Filled a form" };
+    case "take_screenshot":
+      return { verb: "Took a screenshot" };
+    case "tabs":
+      return { verb: "Used the browser", target: `tabs: ${field(input, "action") ?? "list"}` };
+    default:
+      return { verb: "Used the browser", target: t.slice("browser_".length).replace(/_/g, " ") };
+  }
+}
 
 function isRunning(p: ContentPart) {
   return ["running", "streaming", "pending"].includes(stateOf(p).status ?? "");
@@ -59,6 +98,8 @@ function pastTitle(p: ContentPart): { verb: string; target?: string } {
   const input = stateOf(p).input;
   const name = p.name ?? "tool";
   const path = field(input, "filePath", "path", "file", "filename");
+  const browser = browserTitle(name, input);
+  if (browser) return browser;
   switch (name) {
     case "read":
       return { verb: "Read", target: path && shortPath(path) };

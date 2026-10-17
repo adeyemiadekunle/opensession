@@ -77,6 +77,7 @@ createRoot(document.getElementById("root")!).render(
         moveToCloud={moveToCloud}
         terminal={terminal}
         preview={localPreview("harness.preview")}
+        allowDomain={async () => undefined}
         projectName="opensession"
         sessionsTitle="This computer"
         sectionsBefore={[projects]}

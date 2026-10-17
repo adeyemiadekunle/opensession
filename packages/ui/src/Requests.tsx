@@ -29,12 +29,15 @@ export function Requests({
   permissions,
   forms,
   onDone,
+  allowDomain,
 }: {
   client: OpenSessionClient;
   sessionId: string;
   permissions: PermissionRequest[];
   forms: FormRequest[];
   onDone: () => void;
+  /** Cloud: adds a domain to the sandbox's allowed domains (for the agent's network requests). */
+  allowDomain?: (domain: string) => Promise<unknown>;
 }) {
   const [err, setErr] = useState<string | null>(null);
   const act = async (f: () => Promise<void>) => {
@@ -51,14 +54,28 @@ export function Requests({
   return (
     <div aria-live="polite" aria-label="Approvals" className="absolute inset-x-0 bottom-full z-10 flex max-w-[640px] flex-col gap-2 pb-2 pl-10 pr-7">
       {err ? <div className="os-error">{err}</div> : null}
-      {permissions.map((p) => (
-        <PermissionCard
-          key={p.id}
-          request={p}
-          onAllow={(always) => act(() => client.replyPermission(sessionId, p.id, always ? "always" : "once"))}
-          onDeny={() => act(() => client.replyPermission(sessionId, p.id, "reject"))}
-        />
-      ))}
+      {permissions.map((p) =>
+        p.action === NETWORK_ACTION && allowDomain ? (
+          <DomainCard
+            key={p.id}
+            request={p}
+            onAllow={(domain) =>
+              act(async () => {
+                await allowDomain(domain); // open first, so the agent's retry works
+                await client.replyPermission(sessionId, p.id, "once");
+              })
+            }
+            onDeny={() => act(() => client.replyPermission(sessionId, p.id, "reject"))}
+          />
+        ) : (
+          <PermissionCard
+            key={p.id}
+            request={p}
+            onAllow={(always) => act(() => client.replyPermission(sessionId, p.id, always ? "always" : "once"))}
+            onDeny={() => act(() => client.replyPermission(sessionId, p.id, "reject"))}
+          />
+        ),
+      )}
       {forms.map((f) => (
         <FormCard key={f.id} form={f} onSubmit={(answer) => act(() => client.replyForm(sessionId, f.id, answer))} />
       ))}
@@ -100,6 +117,64 @@ function PermissionCard({
         <Button variant="default" onClick={() => onAllow(always)}>
           Allow once
         </Button>
+      </div>
+    </section>
+  );
+}
+
+/** The sandbox's network tool (services/sandbox/network-mcp.mjs) asking for a domain. */
+const NETWORK_ACTION = "network_request_access";
+const DOMAIN_RE = /^(?=.{1,253}$)(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/** "https://Docs.Stripe.com/api" -> "docs.stripe.com"; null for anything that isn't a host name. */
+export function requestedDomain(input: unknown): string | null {
+  const d = String(input ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z]+:\/\//, "")
+    .split(/[/?#]/)[0]!
+    .replace(/:\d+$/, "")
+    .replace(/\.$/, "");
+  return DOMAIN_RE.test(d) ? d : null;
+}
+
+/** Design (approvals): the agent asks to reach a domain; allowing it adds the domain for this account. */
+function DomainCard({ request, onAllow, onDeny }: { request: PermissionRequest; onAllow: (domain: string) => void; onDeny: () => void }) {
+  const input = ((request.metadata as { input?: { domain?: unknown; reason?: unknown } } | undefined)?.input ?? {}) as {
+    domain?: unknown;
+    reason?: unknown;
+  };
+  const domain = requestedDomain(input.domain);
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  return (
+    <section className={CARD} aria-labelledby={`perm-${request.id}`}>
+      <div className="flex items-center gap-2.5">
+        <span aria-hidden="true" className="size-2 rounded-full bg-warning" />
+        <h2 id={`perm-${request.id}`} className="text-sm font-semibold">
+          {domain ? (
+            <>
+              Allow internet access to <span className="font-mono">{domain}</span>?
+            </>
+          ) : (
+            "The agent asked for internet access"
+          )}
+        </h2>
+      </div>
+      {reason ? <div className="text-[13px] text-foreground/85">{reason}</div> : null}
+      <div className="text-xs text-faint">
+        {domain
+          ? "The sandbox's shell and browser can then reach it, in every project. Pages there can show the agent text it may act on; allow sites you trust. Remove it any time in Settings."
+          : `"${String(input.domain ?? "")}" isn't a domain name, so it can't be allowed.`}
+      </div>
+      <div className="flex items-center justify-end gap-2.5">
+        <Button variant="outline" onClick={onDeny}>
+          Deny
+        </Button>
+        {domain ? (
+          <Button variant="default" onClick={() => onAllow(domain)}>
+            Allow {domain}
+          </Button>
+        ) : null}
       </div>
     </section>
   );

@@ -45,6 +45,9 @@ FULL = {
 }
 
 
+GUARD = [*agentconfig.GIT_APPROVAL_RULES, *agentconfig.NETWORK_APPROVAL_RULES]
+
+
 def test_render_files_matches_opencode_v2_layout():
     files = agentconfig.render_files(AgentConfig.model_validate(FULL))
     assert set(files) == {"opensession-skills/git-release/SKILL.md", "AGENTS.md", "opencode.json"}
@@ -58,20 +61,20 @@ def test_render_files_matches_opencode_v2_layout():
         "mode": "subagent",
         "system": "You review code. Do not edit.",
         "model": "anthropic/claude-sonnet-4-5#high",
-        "permissions": [{"action": "edit", "resource": "*", "effect": "deny"}, *agentconfig.GIT_APPROVAL_RULES],
+        "permissions": [{"action": "edit", "resource": "*", "effect": "deny"}, *GUARD],
     }
     assert oc["commands"]["review"] == {"template": "Review $ARGUMENTS.", "description": "Review a file", "agent": "reviewer"}
-    # The user's rules, then git approval last: OpenCode uses the last matching rule.
-    assert oc["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}, *agentconfig.GIT_APPROVAL_RULES]
+    # The user's rules, then the approval rules last: OpenCode uses the last matching rule.
+    assert oc["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}, *GUARD]
     assert {"action": "shell", "resource": "git push *", "effect": "ask"} in oc["permissions"]
     allow_all = AgentConfig(permissions=[{"action": "shell", "resource": "*", "effect": "allow"}])
-    assert json.loads(agentconfig.render_files(allow_all)["opencode.json"])["permissions"][-1]["resource"] == "git push *"
+    assert json.loads(agentconfig.render_files(allow_all)["opencode.json"])["permissions"][-2]["resource"] == "git push *"
     # Built-in agents (build allows tools by default) get the rules appended as well.
-    assert oc["agents"]["build"] == {"permissions": agentconfig.GIT_APPROVAL_RULES}
+    assert oc["agents"]["build"] == {"permissions": GUARD}
     off = json.loads(agentconfig.render_files(AgentConfig.model_validate({**FULL, "git_approval": False}))["opencode.json"])
-    assert "build" not in off["agents"]
-    assert off["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}]
-    assert off["agents"]["reviewer"]["permissions"] == [{"action": "edit", "resource": "*", "effect": "deny"}]
+    assert off["agents"]["build"] == {"permissions": agentconfig.NETWORK_APPROVAL_RULES}
+    assert off["permissions"] == [{"action": "webfetch", "resource": "*", "effect": "deny"}, *agentconfig.NETWORK_APPROVAL_RULES]
+    assert off["agents"]["reviewer"]["permissions"] == [{"action": "edit", "resource": "*", "effect": "deny"}, *agentconfig.NETWORK_APPROVAL_RULES]
     assert oc["mcp"]["servers"]["docs"]["oauth"] is False  # header auth in sandboxes
     assert oc["mcp"]["servers"]["fs"]["command"][0] == "npx"
     assert "headers" not in oc["mcp"]["servers"]["fs"]
@@ -81,6 +84,24 @@ def test_render_files_matches_opencode_v2_layout():
     assert '"opencode/autoinvoke": false' in agentconfig.render_files(hidden)["opensession-skills/x/SKILL.md"]
     local = json.loads(agentconfig.render_files(AgentConfig.model_validate(FULL), cloud=False)["opencode.json"])
     assert local["skills"] == ["~/.config/opencode/opensession-skills"] and "update" not in local
+    assert set(local["mcp"]["servers"]) == {"docs", "fs"} and local["permissions"][-1]["resource"] == "git push *"
+
+
+def test_cloud_sandboxes_get_the_browser_and_the_network_tool():
+    oc = json.loads(agentconfig.render_files(AgentConfig())["opencode.json"])
+    assert oc["mcp"]["servers"] == {
+        "network": {"type": "local", "command": ["node", "/usr/local/lib/opensession/network-mcp.mjs"]},
+        "sandbox": {"type": "local", "command": ["opensession-browser"]},
+    }
+    # Asking for a domain always waits for the user, whatever the user's own rules say.
+    allow_all = AgentConfig(permissions=[{"action": "*", "resource": "*", "effect": "allow"}])
+    rules = json.loads(agentconfig.render_files(allow_all)["opencode.json"])["permissions"]
+    assert rules[-1] == {"action": "network_request_access", "resource": "*", "effect": "ask"}
+    no_browser = json.loads(agentconfig.render_files(AgentConfig(browser=False))["opencode.json"])
+    assert set(no_browser["mcp"]["servers"]) == {"network"}
+    mine = AgentConfig(mcp={"sandbox": {"type": "local", "command": ["my-browser"]}})
+    assert json.loads(agentconfig.render_files(mine)["opencode.json"])["mcp"]["servers"]["sandbox"]["command"] == ["my-browser"]
+    assert "mcp" not in json.loads(agentconfig.render_files(AgentConfig(), cloud=False)["opencode.json"])
 
 
 def test_frontmatter_cannot_be_broken_out_of():
@@ -187,9 +208,9 @@ def test_agent_config_routes_and_sandbox_rebuild(tmp_path):
         assert r["config"]["skills"] == [] and any(t["id"] == "shell" for t in r["builtin_tools"])
         assert c.get("/p/default/api/health", headers=h).status_code == 200
         (first,) = docker.containers.by_name.values()
-        (_, data), = first.archives  # no setup saved yet: the defaults (git approval) are applied
+        (_, data), = first.archives  # no setup saved yet: the defaults (git and network approval) are applied
         default_oc = tarfile.open(fileobj=io.BytesIO(data)).extractfile("incoming/opensession-config/opencode.json").read()
-        assert json.loads(default_oc)["permissions"] == agentconfig.GIT_APPROVAL_RULES
+        assert json.loads(default_oc)["permissions"] == GUARD
 
         assert c.put("/secrets/DOCS_TOKEN", json={"value": "tok-xyz"}, headers=h).status_code == 200
         assert c.get("/secrets", headers=h).json()[0]["name"] == "DOCS_TOKEN"
