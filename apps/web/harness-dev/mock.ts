@@ -42,8 +42,7 @@ const messages: Record<string, unknown[]> = {
       time: q.has("fail") || q.has("limit") ? { created: Date.now() - 60_000, completed: Date.now() - 60_000 } : {},
       model: { providerID: "anthropic", id: "claude-opus-5-5" },
       ...(q.has("fail") ? { error: { type: "provider", message: "The provider returned 529 Overloaded. Nothing was changed." } } : {}),
-      // ?limit: plan usage limit with a reset time; ?limit=rate: OpenCode gave up retrying a throttle;
-      // ?limit=unknown: no reset time. Shapes follow OpenCode's provider.quota / provider.rate-limit errors.
+      // ?limit: plan usage limit; ?limit=rate: OpenCode gave up retrying a throttle. Shapes follow OpenCode's provider.quota / provider.rate-limit errors.
       ...(q.has("limit")
         ? {
             error:
@@ -53,14 +52,7 @@ const messages: Record<string, unknown[]> = {
                     status: 429,
                     message: "Rate limit reached for tokens per min (TPM): Limit 30000, Used 29000, Requested 2000. Please try again in 6m0s.",
                   }
-                : q.get("limit") === "unknown"
-                  ? { type: "provider.quota", status: 429, message: "You exceeded your current quota, please check your plan and billing details." }
-                  : {
-                      type: "provider.quota",
-                      status: 429,
-                      message: "ChatGPT usage limit reached. Check ChatGPT Settings → Usage for details.",
-                      response: { body: '{"error":{"type":"usage_limit_reached","resets_in_seconds":2700}}' },
-                    },
+                : { type: "provider.quota", status: 429, message: "ChatGPT usage limit reached. Check ChatGPT Settings → Usage for details." },
           }
         : {}),
       // ?retrying: OpenCode is waiting to retry a rate-limited call.

@@ -47,11 +47,3 @@ export function storageSet(key: string, value: string) {
     /* private mode etc. */
   }
 }
-
-export function storageRemove(key: string) {
-  try {
-    globalThis.localStorage?.removeItem(key);
-  } catch {
-    /* private mode etc. */
-  }
-}
