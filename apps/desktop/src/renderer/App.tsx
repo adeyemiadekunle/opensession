@@ -1,5 +1,5 @@
 import { CloudClient, LocalClient, type AgentConfigStore, type CiChecks, type GitActions } from "@opensession/api-client";
-import { AgentSetup, CloudApp, LocalKeys, Workspace, useAsync, useCiWatch } from "@opensession/ui";
+import { AgentSetup, CloudApp, LocalKeys, OPEN_SESSION_KEY, Workspace, useAsync, useCiWatch, type MoveToCloudRequest } from "@opensession/ui";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { CloudStatus, DesktopBridge, LocalStatus } from "../main/bridge";
 
@@ -43,7 +43,26 @@ export function App() {
       </button>
     </div>
   );
-  return mode === "cloud" ? <CloudMode switcher={switcher} /> : <LocalMode switcher={switcher} />;
+  /** Move the open folder to the cloud (push its branch), then open the new cloud session. */
+  const moveToCloud = async (req: MoveToCloudRequest) => {
+    const h = await window.opensession.cloudHandoff(req.commit);
+    const st = await window.opensession.cloudStatus();
+    const cloud = new CloudClient({ gatewayUrl: "ocg://cloud", socketBaseUrl: st.gatewayUrl, getToken: () => null }).withWorkspace(h.project);
+    const s = await cloud.createSession({ model: { providerID: req.model.providerID, id: req.model.id }, agent: req.agent });
+    if (req.summary) await cloud.prompt(s.id, req.summary);
+    try {
+      localStorage.setItem("opensession.project", h.project);
+      localStorage.setItem(OPEN_SESSION_KEY, s.id);
+    } catch {
+      /* not fatal: the session is in the project's list */
+    }
+    setMode("cloud");
+  };
+  return mode === "cloud" ? (
+    <CloudMode switcher={switcher} />
+  ) : (
+    <LocalMode switcher={switcher} moveToCloud={moveToCloud} />
+  );
 }
 
 // ---- cloud: the same projects and sessions as the web app ------------------------------
@@ -119,7 +138,7 @@ function CloudMode({ switcher }: { switcher: ReactNode }) {
 
 // ---- this computer: OpenCode in a folder you choose ------------------------------------
 
-function LocalMode({ switcher }: { switcher: ReactNode }) {
+function LocalMode({ switcher, moveToCloud }: { switcher: ReactNode; moveToCloud: (req: MoveToCloudRequest) => Promise<void> }) {
   const [st, setSt] = useState<LocalStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<"workspace" | "settings" | "agent">("workspace");
@@ -225,6 +244,7 @@ function LocalMode({ switcher }: { switcher: ReactNode }) {
             key={gen}
             client={client}
             git={git}
+            moveToCloud={signedIn ? moveToCloud : undefined}
             skills={setup.data?.config.skills.map((s) => s.id) ?? []}
             agents={setup.data?.config.agents.filter((a) => a.mode !== "subagent").map((a) => a.id) ?? []}
             commands={setup.data?.config.commands ?? []}

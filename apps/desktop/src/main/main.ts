@@ -20,10 +20,13 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BUILTIN_AGENTS, BUILTIN_TOOLS, type AgentConfig } from "@opensession/api-client";
+import { BUILTIN_AGENTS, BUILTIN_TOOLS, CloudClient, type AgentConfig } from "@opensession/api-client";
 import {
   browserLogin,
   ensureLocalAgentDefaults,
+  handoffToCloud,
+  systemGit,
+  type HandoffResult,
   loadLocalAgentConfig,
   saveLocalAgentConfig,
   startLocalServer,
@@ -232,6 +235,15 @@ ipcMain.handle("cloud:login", async () => {
     saveSettings({ cloudToken: safeStorage.encryptString(token).toString("base64") });
   } // else: signed in until the app quits; the token is never written in plain text
   return cloudStatus();
+});
+// Move the open folder to the cloud: push its branch (and commit first if asked), then bring
+// it into the cloud project for the same repository. Runs here so the token stays in main.
+ipcMain.handle("cloud:handoff", async (_e, commit?: string): Promise<HandoffResult> => {
+  if (!folder) throw new Error("open a project folder first");
+  if (!cloudToken) throw new Error("sign in to the cloud first");
+  const token = cloudToken;
+  const cloud = new CloudClient({ gatewayUrl: GATEWAY_URL, getToken: () => token });
+  return handoffToCloud(cloud, systemGit, folder, { commit: commit || undefined });
 });
 ipcMain.handle("cloud:logout", () => {
   signOutLocally();

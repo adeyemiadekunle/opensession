@@ -17,6 +17,7 @@ const bridge: DesktopBridge = {
   cloudStatus: () => ipcRenderer.invoke("cloud:status"),
   cloudLogin: () => ipcRenderer.invoke("cloud:login"),
   cloudLogout: () => ipcRenderer.invoke("cloud:logout"),
+  cloudHandoff: (commit) => ipcRenderer.invoke("cloud:handoff", commit),
   notify: (title, body) => ipcRenderer.invoke("notify", title, body),
 };
 contextBridge.exposeInMainWorld("opensession", bridge);

@@ -28,6 +28,30 @@ import { cn } from "./lib/utils";
 
 const MODEL_KEY = "opensession.model";
 const AGENT_KEY = "opensession.agent";
+/** Set by the desktop app before it switches to the cloud, so the moved session opens. */
+export const OPEN_SESSION_KEY = "opensession.openSession";
+
+/** What the desktop app needs to continue a session in the cloud. */
+export interface MoveToCloudRequest {
+  model: ModelRef;
+  agent: string;
+  /** Conversation so far, sent as the first cloud message; empty for a new session. */
+  summary: string;
+  /** Commit message, used only when the folder has uncommitted changes. */
+  commit?: string;
+}
+
+/** The conversation so far, as one message for the cloud session to continue from. */
+async function conversationSummary(client: OpenSessionClient, id: string): Promise<string> {
+  const ms = await client.messages(id, { limit: 200 });
+  const text = ms
+    .flatMap((m) =>
+      m.type === "user" ? [`User: ${m.text}`] : m.type === "assistant" ? (m.content ?? []).filter((p) => p.type === "text").map((p) => `Assistant: ${p.text}`) : [],
+    )
+    .join("\n\n");
+  if (!text) return "";
+  return `This conversation continues from a session on another computer. Earlier messages:\n\n${text.slice(-8000)}\n\nContinue from here.`;
+}
 
 function modelKey(m: ModelRef) {
   return `${m.providerID}/${m.id}`;
@@ -75,10 +99,12 @@ export interface WorkspaceProps {
   terminal?: TerminalApi;
   /** Branch actions (checkout, push, pull request) for the Git panel. */
   git?: GitActions;
+  /** Desktop only: continue a session, or start a new one, in the cloud. */
+  moveToCloud?: (req: MoveToCloudRequest) => Promise<void>;
 }
 
 /** Chat with the agent, plus the workspace's files and changes. Works for cloud and local. */
-export function Workspace({ client, noModels, skills = [], agents = [], commands: setupCommands = [], git, terminal }: WorkspaceProps) {
+export function Workspace({ client, noModels, skills = [], agents = [], commands: setupCommands = [], git, terminal, moveToCloud }: WorkspaceProps) {
   const models = useAsync<Model[]>(() => client.listModels(), [client]);
   const commands = useAsync<CommandInfo[]>(() => client.listCommands().catch(() => []), [client]);
   const agentChoices = useMemo(
@@ -88,7 +114,11 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [agent, setAgent] = useState<string>(() => storageGet(AGENT_KEY) ?? "build");
   const sessions = useAsync<Session[]>(() => client.listSessions(), [client]);
   const [model, setModel] = useState<string>(() => storageGet(MODEL_KEY) ?? "");
-  const [active, setActive] = useState<string | null>(null);
+  const [active, setActive] = useState<string | null>(() => {
+    const id = storageGet(OPEN_SESSION_KEY);
+    if (id) storageSet(OPEN_SESSION_KEY, "");
+    return id || null;
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [perms, setPerms] = useState<PermissionRequest[]>([]);
   const [forms, setForms] = useState<FormRequest[]>([]);
@@ -98,7 +128,12 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   const [dock, setDock] = useState<DockState>(loadDock);
   const [query, setQuery] = useState("");
   const [newOpen, setNewOpen] = useState(false);
-  const [draft, setDraft] = useState({ model: "", agent: "", text: "" });
+  const [draft, setDraft] = useState({ model: "", agent: "", text: "", where: "computer" as "computer" | "cloud" });
+  const [cloudAsk, setCloudAsk] = useState<{ sessionId: string | null; text: string; model: ModelRef; agent: string } | null>(null);
+  const [cloudCommit, setCloudCommit] = useState("");
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudErr, setCloudErr] = useState<string | null>(null);
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
@@ -209,8 +244,35 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
   }, [messages.length]);
 
   const openNew = () => {
-    setDraft({ model: chosen ? modelKey(chosen) : "", agent, text: "" });
+    setDraft({ model: chosen ? modelKey(chosen) : "", agent, text: "", where: "computer" });
     setNewOpen(true);
+  };
+
+  /** Ask before pushing: moving a session to the cloud pushes the folder's branch to GitHub. */
+  const askMoveToCloud = (sessionId: string | null, text = "") => {
+    setRowMenu(null);
+    setCloudCommit("");
+    setCloudErr(null);
+    if (!chosen) {
+      setErr("Choose a model first");
+      return;
+    }
+    setCloudAsk({ sessionId, text, model: chosen, agent });
+  };
+
+  const continueInCloud = async () => {
+    if (!cloudAsk || !moveToCloud) return;
+    setCloudBusy(true);
+    setCloudErr(null);
+    try {
+      const summary = cloudAsk.sessionId ? await conversationSummary(client, cloudAsk.sessionId) : cloudAsk.text;
+      await moveToCloud({ model: cloudAsk.model, agent: cloudAsk.agent, summary, commit: cloudCommit.trim() || undefined });
+      setCloudAsk(null);
+    } catch (e) {
+      setCloudErr(errText(e));
+    } finally {
+      setCloudBusy(false);
+    }
   };
 
   /** Create a session from the New session dialog, and send its first message if one was typed. */
@@ -218,6 +280,13 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
     const m = modelList.find((x) => modelKey(x) === draft.model) ?? chosen;
     if (!m) {
       setErr("Choose a model first");
+      return;
+    }
+    if (draft.where === "cloud") {
+      setNewOpen(false);
+      setCloudAsk({ sessionId: null, text: draft.text.trim(), model: m, agent: draft.agent });
+      setCloudCommit("");
+      setCloudErr(null);
       return;
     }
     try {
@@ -379,6 +448,35 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
                     </span>
                     <span className="text-xs text-faint">{relativeTime(s.time?.updated ?? s.time?.created)}</span>
                   </button>
+                  {moveToCloud ? (
+                    <div className="relative">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          "size-6 text-muted-foreground focus-visible:opacity-100",
+                          isActive || rowMenu === s.id ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                        )}
+                        aria-label="Session actions"
+                        aria-haspopup="menu"
+                        aria-expanded={rowMenu === s.id}
+                        onClick={() => setRowMenu(rowMenu === s.id ? null : s.id)}
+                      >
+                        ⋯
+                      </Button>
+                      {rowMenu === s.id ? (
+                        <div role="menu" className="absolute right-0 top-7 z-20 flex w-44 flex-col rounded-lg border border-input bg-popover p-1 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
+                          <button
+                            role="menuitem"
+                            className="h-8 justify-start border-0 bg-transparent px-2 text-left text-[13px] text-foreground hover:bg-sunken"
+                            onClick={() => askMoveToCloud(s.id)}
+                          >
+                            Move to cloud
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -585,6 +683,28 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
         }
       >
         {modelList.length ? null : <div className="os-hint">{noModels ?? "No models available."}</div>}
+        {moveToCloud ? (
+          <fieldset className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            <legend className="mb-1.5">Where it runs</legend>
+            <div role="radiogroup" aria-label="Where it runs" className="grid grid-cols-2 gap-2">
+              {(["computer", "cloud"] as const).map((w) => (
+                <button
+                  key={w}
+                  role="radio"
+                  aria-checked={draft.where === w}
+                  className={cn(
+                    "flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2.5 text-left",
+                    draft.where === w ? "border-primary bg-selected" : "border-input bg-transparent",
+                  )}
+                  onClick={() => setDraft((d) => ({ ...d, where: w }))}
+                >
+                  <span className="text-[13px] font-semibold text-foreground">{w === "computer" ? "This computer" : "Cloud sandbox"}</span>
+                  <span className="text-xs text-faint">{w === "computer" ? "Edits your project folder directly" : "Runs in an isolated copy"}</span>
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
           Model
           <Select
@@ -624,6 +744,46 @@ export function Workspace({ client, noModels, skills = [], agents = [], commands
             onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
           />
         </label>
+      </Dialog>
+
+      <Dialog
+        open={cloudAsk !== null}
+        onClose={() => !cloudBusy && setCloudAsk(null)}
+        title="Continue in the cloud"
+        footer={
+          <>
+            <span className="text-xs text-faint">Esc to cancel</span>
+            <div className="ml-auto flex gap-2">
+              <Button variant="outline" disabled={cloudBusy} onClick={() => setCloudAsk(null)}>
+                Cancel
+              </Button>
+              <Button variant="default" disabled={cloudBusy} onClick={continueInCloud}>
+                {cloudBusy ? "Moving…" : "Push and continue in cloud"}
+              </Button>
+            </div>
+          </>
+        }
+      >
+        <p className="text-[13px] text-muted-foreground">
+          Pushes this folder's branch to GitHub, then starts a cloud session in the project for the same repository.{" "}
+          {cloudAsk?.sessionId
+            ? "The conversation so far is sent to the cloud session. This computer's session is kept."
+            : "Your first message starts the cloud session."}
+        </p>
+        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+          Commit message <span className="text-faint">(needed only if there are uncommitted changes)</span>
+          <input
+            className="h-9 rounded-md border border-input bg-card px-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            placeholder="Describe the changes"
+            value={cloudCommit}
+            onChange={(e) => setCloudCommit(e.target.value)}
+          />
+        </label>
+        {cloudErr ? (
+          <div role="alert" className="text-[13px] text-destructive">
+            {cloudErr}
+          </div>
+        ) : null}
       </Dialog>
 
       <CommandPalette

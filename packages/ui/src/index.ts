@@ -1,5 +1,6 @@
 export { Workspace } from "./Workspace";
-export type { WorkspaceProps } from "./Workspace";
+export type { WorkspaceProps, MoveToCloudRequest } from "./Workspace";
+export { OPEN_SESSION_KEY } from "./Workspace";
 export { CloudSettings, LocalKeys } from "./Settings";
 export { MessageView } from "./Messages";
 export { FilesPanel, DiffPanel } from "./Panels";

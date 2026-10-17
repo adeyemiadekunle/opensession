@@ -145,3 +145,5 @@ export {
   localAgentConfigPath,
 } from "./agentConfig";
 export { browserLogin, openBrowser } from "./login";
+
+export * from "./handoff";

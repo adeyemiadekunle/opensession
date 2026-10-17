@@ -5,7 +5,7 @@ import { ApiError, CloudClient, LocalClient } from "@opensession/api-client";
 import { emptyAgentConfig, type AgentConfig } from "@opensession/api-client";
 import { ensureLocalAgentDefaults, loadLocalAgentConfig, saveLocalAgentConfig, startLocalServer } from "@opensession/local-runner";
 import { configDir, loadConfig, saveConfig } from "./config";
-import { handoffToCloud, handoffToLocal, systemGit } from "./handoff";
+import { handoffToCloud, handoffToLocal, systemGit } from "@opensession/local-runner";
 import { browserLogin, openBrowser } from "./login";
 import { pickModel, runPrompt } from "./run";
 import type { OpenSessionClient } from "@opensession/api-client";
