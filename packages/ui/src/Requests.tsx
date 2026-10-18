@@ -3,6 +3,7 @@ import type { FormRequest, OpenSessionClient, PermissionRequest } from "@openses
 import { errText } from "./hooks";
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
+import { CopyButton } from "./components/ui/copy-button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { cn } from "./lib/utils";
@@ -54,12 +55,16 @@ export function Requests({
       setErr(errText(e));
     }
   };
-  if (!permissions.length && !forms.length) return null;
-  // Design: approvals float above the composer, so they stay visible while typing.
+  const total = permissions.length + forms.length;
+  if (!total) return null;
+  // Design: approvals float above the composer, so they stay visible while typing. Requests are
+  // answered one at a time, so only the first is shown, with a count of the rest.
+  const [first] = permissions;
+  const form = first ? undefined : forms[0];
   return (
     <div aria-live="polite" aria-label="Approvals" className="absolute inset-x-0 bottom-full z-10 flex flex-col gap-2 pb-2 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] max-sm:px-4 [&>*]:max-w-[572px]">
-      {err ? <div className="os-error">{err}</div> : null}
-      {permissions.map((p) =>
+      {err ? <div className="py-1.5 text-[13px] text-destructive">{err}</div> : null}
+      {[first].filter((p): p is PermissionRequest => Boolean(p)).map((p) =>
         p.action === HAND_OVER_ACTION ? (
           <HandOverCard
             key={p.id}
@@ -89,14 +94,17 @@ export function Requests({
           />
         ),
       )}
-      {forms.map((f) => (
-        <FormCard key={f.id} form={f} onSubmit={(answer) => act(() => client.replyForm(sessionId, f.id, answer))} />
-      ))}
+      {form ? <FormCard key={form.id} form={form} onSubmit={(answer) => act(() => client.replyForm(sessionId, form.id, answer))} /> : null}
+      {total > 1 ? (
+        <div className="px-1 text-xs text-faint">
+          {total - 1} more {total - 1 === 1 ? "request" : "requests"} waiting
+        </div>
+      ) : null}
     </div>
   );
 }
 
-const CARD = "flex flex-col gap-2.5 rounded-xl border border-input bg-card p-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.45)]";
+const CARD = "flex flex-col gap-2.5 rounded-xl border border-input bg-card p-3.5 shadow-pop";
 
 function PermissionCard({
   request,
@@ -117,7 +125,12 @@ function PermissionCard({
           Allow {String(request.action ?? "this action")}?
         </h2>
       </div>
-      {resources ? <pre className="os-pre m-0 whitespace-pre-wrap">{resources}</pre> : null}
+      {resources ? (
+        <div className="group relative">
+          <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-3 py-2 font-mono text-xs leading-[1.6] text-foreground">{resources}</pre>
+          <CopyButton getText={() => resources} className="absolute right-1.5 top-1.5" />
+        </div>
+      ) : null}
       {request.message ? <div className="text-[13px] text-muted-foreground">{String(request.message)}</div> : null}
       <div className="flex items-center gap-2.5">
         <label className="flex flex-1 items-center gap-2 text-xs text-faint">

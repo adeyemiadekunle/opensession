@@ -12,7 +12,7 @@ export function TooltipContent({ className, sideOffset = 6, ...props }: Componen
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          "z-50 max-w-64 animate-pop rounded-md border border-input bg-popover px-2 py-1 text-xs text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.45)]",
+          "z-50 max-w-64 animate-pop rounded-md border border-input bg-popover px-2 py-1 text-xs text-foreground shadow-pop",
           className,
         )}
         {...props}

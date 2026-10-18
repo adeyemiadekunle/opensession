@@ -92,7 +92,6 @@ export function SectionHeader({ title, onAdd, addLabel }: { title: string; onAdd
         <button
           className="grid size-5 place-items-center rounded border-0 bg-transparent p-0 text-faint hover:bg-sunken hover:text-foreground"
           aria-label={addLabel ?? `Add to ${title}`}
-          title={addLabel}
           onClick={onAdd}
         >
           <NamedIcon name="plus" className="size-3.5" />
@@ -121,7 +120,7 @@ export function SidebarRow({ item, actions }: { item: SidebarItem; actions?: Rea
           </span>
           {item.detail ? <span className="w-full truncate font-mono text-xs text-faint">{item.detail}</span> : null}
         </button>
-        {actions ? <div className="flex items-center gap-0.5 pr-1 pt-1.5">{actions}</div> : null}
+        {actions ? <div className="flex items-center gap-0.5 pr-1">{actions}</div> : null}
       </div>
     );
   }
@@ -176,6 +175,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
   return (
     <div className="mt-auto">
       <Separator className="mb-2" />
+      <div className="px-2.5">
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button className="flex w-full items-center gap-2.5 border-0 bg-transparent px-2 pb-2 pt-1 text-left text-foreground">
@@ -236,6 +236,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </div>
   );
 }
@@ -243,6 +244,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
 /** Keyboard shortcuts the workspace handles. */
 export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: "Ctrl K", action: "Search sessions and actions" },
+  { keys: "Ctrl F", action: "Find in this conversation" },
   { keys: "Ctrl /", action: "Show keyboard shortcuts" },
   { keys: "Ctrl ,", action: "Open settings" },
   { keys: "Enter", action: "Send the message" },

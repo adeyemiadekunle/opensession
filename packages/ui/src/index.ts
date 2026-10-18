@@ -26,12 +26,14 @@ export type { Account, AccountMenuItem, SidebarItem, SidebarSection } from "./Si
 export { PageHeader } from "./PageHeader";
 export { Button } from "./components/ui/button";
 export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./components/ui/card";
+export { Alert, type AlertProps } from "./components/ui/alert";
 export { Badge } from "./components/ui/badge";
 export { Kbd } from "./components/ui/kbd";
 export { Separator } from "./components/ui/separator";
 export { Avatar, AvatarImage, AvatarFallback } from "./components/ui/avatar";
 export { Switch } from "./components/ui/switch";
 export { Checkbox } from "./components/ui/checkbox";
+export { CopyButton } from "./components/ui/copy-button";
 export { ScrollArea, ScrollBar } from "./components/ui/scroll-area";
 export { Select, SelectGroup, SelectValue, SelectTrigger, SelectContent, SelectLabel, SelectItem, SelectSeparator } from "./components/ui/select";
 export {

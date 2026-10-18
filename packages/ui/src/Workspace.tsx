@@ -21,6 +21,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { BrowserPanel, type PreviewApi } from "./BrowserPanel";
 import { Requests } from "./Requests";
 import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
+import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { Kbd } from "./components/ui/kbd";
@@ -190,6 +191,12 @@ export function Workspace({
   const [conn, setConn] = useState<{ lost: boolean; retryIn: number }>({ lost: false, retryIn: 0 });
   const retryNow = useRef<(() => void) | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findPos, setFindPos] = useState(0);
+  const [findCount, setFindCount] = useState(0);
+  const findInput = useRef<HTMLInputElement>(null);
+  const findRanges = useRef<Range[]>([]);
   /** When the live stream last delivered an event (the busy poll backs off while it flows). */
   const lastEvent = useRef(0);
 
@@ -226,19 +233,114 @@ export function Workspace({
 
   const onOpenSettingsRef = useRef(onOpenSettings);
   onOpenSettingsRef.current = onOpenSettings;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   useEffect(() => {
     storageSet(SIDEBAR_KEY, sidebarOpen ? "shown" : "hidden");
   }, [sidebarOpen]);
+
+  // Find in conversation (Ctrl F): CSS.highlights paints matches without touching React's DOM,
+  // so it's safe while a reply is still streaming in.
+  const findSupport =
+    (CSS as unknown as { highlights?: Map<string, unknown> }).highlights ??
+    null;
+  const applyFind = useCallback(
+    (pos: number) => {
+      const HighlightCtor = (window as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+      if (!findSupport || !HighlightCtor) return;
+      const ranges = findRanges.current;
+      findSupport.set("find", new HighlightCtor(...ranges));
+      if (ranges[pos]) findSupport.set("find-current", new HighlightCtor(ranges[pos]));
+      else findSupport.delete("find-current");
+    },
+    [findSupport],
+  );
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+  }, []);
+  // Rebuild the match ranges whenever the text or the query changes.
+  useEffect(() => {
+    findSupport?.delete("find");
+    findSupport?.delete("find-current");
+    findRanges.current = [];
+    const root = listRef.current;
+    const q = findQuery.trim().toLowerCase();
+    if (!findOpen || !q || !root) {
+      setFindCount(0);
+      return;
+    }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const skip = (n: Node) => {
+      for (let el = n.parentElement; el && el !== root; el = el.parentElement) {
+        if (el.tagName === "BUTTON" || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+      }
+      return false;
+    };
+    const ranges: Range[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (skip(node)) continue;
+      const text = node.textContent ?? "";
+      const low = text.toLowerCase();
+      for (let i = low.indexOf(q); i !== -1 && q.length; i = low.indexOf(q, i + q.length)) {
+        const r = new Range();
+        r.setStart(node, i);
+        r.setEnd(node, Math.min(i + q.length, text.length));
+        ranges.push(r);
+      }
+    }
+    findRanges.current = ranges;
+    setFindCount(ranges.length);
+    setFindPos(0);
+    applyFind(0);
+    ranges[0]?.startContainer.parentElement?.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, findQuery, messages, findSupport]);
+  // Jump between matches.
+  useEffect(() => {
+    applyFind(findPos);
+    findRanges.current[findPos]?.startContainer.parentElement?.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findPos, applyFind]);
+  useEffect(() => {
+    if (findOpen) {
+      findInput.current?.focus();
+      findInput.current?.select();
+    }
+  }, [findOpen]);
+  // A different conversation: the old matches no longer apply.
+  useEffect(() => setFindOpen(false), [active]);
+  const findCur = findCount ? Math.min(findPos, findCount - 1) : 0;
+  const stepFind = (d: number) => setFindPos((p) => (findCount ? (p + d + findCount) % findCount : 0));
   // The drawer closes once a session is picked, and when the window widens again.
   useEffect(() => setDrawerOpen(false), [active, narrow]);
+  // The drawer takes focus when it opens (its search field) and hands it back to the toggle when it
+  // closes, so keyboard users don't lose their place behind the overlay.
+  const drawerToggle = useRef<HTMLButtonElement>(null);
+  const drawerSearch = useRef<HTMLInputElement>(null);
+  const drawerWasOpen = useRef(false);
+  useEffect(() => {
+    if (drawerOpen) drawerSearch.current?.focus();
+    else if (drawerWasOpen.current && document.activeElement === document.body) drawerToggle.current?.focus();
+    drawerWasOpen.current = drawerOpen;
+  }, [drawerOpen]);
 
-  // Ctrl K opens the palette, Ctrl / the shortcuts, Ctrl , settings; online/offline drive the offline notice.
+  // Ctrl K opens the palette, Ctrl / the shortcuts, Ctrl , settings, Ctrl F finds in the
+  // conversation; online/offline drive the offline notice.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key.toLowerCase() === "k") {
+      const key = e.key.toLowerCase();
+      if (key === "k") {
         e.preventDefault();
         setPaletteOpen(true);
+      } else if (key === "f" && activeRef.current) {
+        e.preventDefault();
+        setFindOpen(true);
+        requestAnimationFrame(() => {
+          findInput.current?.focus();
+          findInput.current?.select();
+        });
       } else if (e.key === "/") {
         e.preventDefault();
         setShortcutsOpen(true);
@@ -579,6 +681,12 @@ export function Workspace({
   /** Header buttons and the palette: on a narrow window a panel takes the conversation's place, one at a time. */
   const showPanel = (id: DockPanelId) => (narrow ? setFull((f) => (f === id ? null : id)) : togglePanel(id));
   const panelShown = (id: DockPanelId) => (narrow ? full === id : dock.stack.includes(id));
+  // A file path from a read/edit tool row: open the Files card (dock, or full on narrow) on that file.
+  const [fileRequest, setFileRequest] = useState<string | null>(null);
+  const openInFiles = (path: string) => {
+    if (!dock.stack.includes("files") && full !== "files") showPanel("files");
+    setFileRequest(path);
+  };
   // Closing a full-screen panel drops it from the dock only if it came from there.
   const closeFull = (id: DockPanelId) => (narrow || !dock.stack.includes(id) ? setFull(null) : togglePanel(id));
 
@@ -633,6 +741,8 @@ export function Workspace({
       <FilesPanel
         client={client}
         refreshKey={refreshKey}
+        requestPath={fileRequest}
+        onRequestHandled={() => setFileRequest(null)}
         onClose={() => (isFull ? closeFull("files") : togglePanel("files"))}
         onExpand={isFull ? undefined : () => setFull("files")}
         onDock={isFull && !narrow ? () => setFull(null) : undefined}
@@ -663,9 +773,13 @@ export function Workspace({
   );
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-background">
+    <div
+      className="relative flex h-full min-h-0 flex-col bg-background"
+      onKeyDown={narrow && drawerOpen ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
+    >
       <header className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border bg-sidebar pl-2.5 pr-2.5">
         <Button
+          ref={drawerToggle}
           variant="ghost"
           size="icon"
           aria-label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
@@ -684,6 +798,20 @@ export function Workspace({
         </button>
         {projectName ? <span className="min-w-0 truncate text-[13px] text-faint max-sm:hidden">{projectName}</span> : null}
         <span className="flex-1" />
+        {active ? (
+          <Tip label="Find in this conversation (Ctrl F)">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Find in this conversation"
+              aria-pressed={findOpen}
+              className="aria-pressed:bg-muted aria-pressed:text-primary"
+              onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
+            >
+              <NamedIcon name="search" />
+            </Button>
+          </Tip>
+        ) : null}
         {togglable.map((id) => toggleButton(id, panelShown(id), () => showPanel(id)))}
       </header>
 
@@ -695,15 +823,15 @@ export function Workspace({
           <aside
             aria-label="Sidebar"
             className={cn(
-              "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar px-2.5 py-3.5",
-              narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-[0_12px_32px_rgba(0,0,0,0.45)]",
+              "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar",
+              narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-pop",
             )}
-            onKeyDown={narrow ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
           >
-            <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-auto">
-              <label className="flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5 text-faint">
+            <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-auto px-2.5">
+              <label className="mt-2.5 flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5 text-faint">
                 <NamedIcon name="search" className="size-3.5" />
                 <input
+                  ref={drawerSearch}
                   className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none placeholder:text-faint"
                   placeholder="Search"
                   aria-label="Search sessions"
@@ -722,11 +850,10 @@ export function Workspace({
               <section className="flex flex-col gap-0.5" aria-label={sessionsTitle}>
                 <SectionHeader title={sessionsTitle} onAdd={openNew} addLabel="New session" />
                 {sessions.loading && !sessions.data ? (
-                  <div className="flex animate-pulse flex-col gap-2 px-2 pt-1 motion-reduce:animate-none" role="status" aria-label="Loading sessions">
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className="flex flex-col gap-1.5">
-                        <div className="h-3 w-[150px] rounded bg-sunken" />
-                        <div className="h-2.5 w-[84px] rounded bg-sunken" />
+                  <div className="flex animate-pulse flex-col motion-reduce:animate-none" role="status" aria-label="Loading sessions">
+                    {[150, 110, 130].map((w) => (
+                      <div key={w} className="flex h-[30px] items-center px-2">
+                        <div className="h-3 rounded bg-sunken" style={{ width: w }} />
                       </div>
                     ))}
                   </div>
@@ -740,7 +867,6 @@ export function Workspace({
                       item={{
                         id: s.id,
                         title: s.title || new Date(s.time?.created ?? 0).toLocaleString(),
-                        detail: projectName ?? when,
                         meta: when,
                         status: isActive && busy ? { tone: "attention", label: "Working" } : undefined,
                         active: isActive,
@@ -775,7 +901,6 @@ export function Workspace({
                               "size-6 text-muted-foreground focus-visible:opacity-100",
                               isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
                             )}
-                            title="Delete session"
                             aria-label="Delete session"
                             onClick={() => remove(s.id)}
                           >
@@ -791,8 +916,8 @@ export function Workspace({
               {sectionsAfter.map((sec) => (
                 <SectionView key={sec.id} section={sec} />
               ))}
-              {models.data && !modelList.length ? <div className="os-hint">{noModels ?? "No models available."}</div> : null}
-              {models.error ? <div className="os-error">{models.error}</div> : null}
+              {models.data && !modelList.length ? <div className="rounded-md bg-sunken px-2.5 py-2 text-[13px] text-muted-foreground">{noModels ?? "No models available."}</div> : null}
+              {models.error ? <div className="py-1.5 text-[13px] text-destructive">{models.error}</div> : null}
             </div>
             {account ? <AccountFooter account={account} onShortcuts={() => setShortcutsOpen(true)} /> : null}
           </aside>
@@ -809,8 +934,8 @@ export function Workspace({
             {full === "files" ? null : (
               <PanelHeader title={DOCK_TITLES[full]} onClose={() => closeFull(full)} closeLabel={`Close ${DOCK_TITLES[full]} panel`}>
                 {!narrow ? (
-                  <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={() => setFull(null)}>
-                    Dock right
+                  <Button variant="ghost" size="icon-sm" className="text-faint" aria-label="Dock right" onClick={() => setFull(null)}>
+                    <NamedIcon name="collapse" />
                   </Button>
                 ) : full === "changes" ? (
                   <Button
@@ -818,7 +943,6 @@ export function Workspace({
                     size="icon-sm"
                     className="text-faint"
                     aria-label="Open changes in full view"
-                    title="Open in full view"
                     onClick={() => setReviewOpen(true)}
                   >
                     <NamedIcon name="expand" className="size-[13px]" />
@@ -829,20 +953,54 @@ export function Workspace({
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{panelBody(full, true)}</div>
           </section>
         ) : null}
-        <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
-          {conn.lost && active ? (
-            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-10 mt-3 flex max-w-[640px] items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
-              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
-              <span className="min-w-0 flex-1">
-                <strong className="font-semibold text-destructive">Lost connection to the agent.</strong>{" "}
-                <span className="text-muted-foreground">
-                  Retrying in {conn.retryIn} s. The session keeps its history and the agent keeps working.
-                </span>
+        <main className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
+          {findOpen ? (
+            <div className="absolute right-[var(--gutter-r,1.75rem)] top-2 z-20 flex h-9 items-center gap-1 rounded-lg border border-border bg-card px-2 shadow-pop max-sm:right-4">
+              <input
+                ref={findInput}
+                value={findQuery}
+                onChange={(e) => setFindQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    stepFind(e.shiftKey ? -1 : 1);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeFind();
+                  }
+                }}
+                placeholder="Find in conversation"
+                aria-label="Find in this conversation"
+                className="h-full w-44 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none placeholder:text-faint"
+              />
+              <span aria-live="polite" className="w-10 shrink-0 text-center text-xs tabular-nums text-faint">
+                {findQuery.trim() ? `${findCount ? findCur + 1 : 0}/${findCount}` : ""}
               </span>
-              <Button size="sm" variant="outline" onClick={() => retryNow.current?.()}>
-                Retry now
+              <Button variant="ghost" size="icon-sm" aria-label="Previous match" disabled={!findCount} onClick={() => stepFind(-1)}>
+                <NamedIcon name="chevronUp" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Next match" disabled={!findCount} onClick={() => stepFind(1)}>
+                <NamedIcon name="chevronDown" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Close find" onClick={closeFind}>
+                <NamedIcon name="close" />
               </Button>
             </div>
+          ) : null}
+          {conn.lost && active ? (
+            <Alert
+              tone="danger"
+              title="Lost connection to the agent."
+              className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,1.75rem)] mt-3 w-auto max-w-[640px] max-sm:mx-4"
+              action={
+                <Button size="sm" variant="outline" onClick={() => retryNow.current?.()}>
+                  Retry now
+                </Button>
+              }
+            >
+              <span className="text-muted-foreground">Retrying in {conn.retryIn} s. The session keeps its history and the agent keeps working.</span>
+            </Alert>
           ) : null}
           <div
             ref={listRef}
@@ -851,7 +1009,7 @@ export function Workspace({
             {!active ? (
               <div className="m-auto flex max-w-[440px] flex-col items-center gap-5 text-center">
                 <span className="grid size-14 place-items-center rounded-[14px] bg-sunken text-primary">
-                  <NamedIcon name="files" className="size-[26px]" />
+                  <NamedIcon name="plus" className="size-[26px]" />
                 </span>
                 <div className="flex flex-col gap-2">
                   <h1 className="text-[22px] font-semibold">Start a session</h1>
@@ -870,49 +1028,55 @@ export function Workspace({
                 <div className="h-[84px] w-full max-w-[600px] rounded-lg border border-border bg-card" />
               </div>
             ) : null}
-            {messages.map((m) => (
-              <MessageView
-                key={m.id}
-                m={m}
-                onRetry={busy ? undefined : () => void retryLast()}
-                onResume={m.id === lastAssistant && !busy ? () => void resume() : undefined}
-              />
-            ))}
+            {messages.map((m, i) => {
+              const prev = messages.slice(0, i).reverse().find((x) => x.type === "assistant" && x.model);
+              const sameModel = Boolean(m.model && prev?.model && modelKey(prev.model) === modelKey(m.model));
+              return (
+                <MessageView
+                  key={m.id}
+                  m={m}
+                  showModel={!sameModel}
+                  onOpenFile={openInFiles}
+                  onRetry={busy ? undefined : () => void retryLast()}
+                  onResume={m.id === lastAssistant && !busy ? () => void resume() : undefined}
+                />
+              );
+            })}
             {notice ? (
-              <div
+              <Alert
                 role="status"
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border px-3.5 py-3 text-[13px]",
-                  notice.tone === "danger" ? "border-destructive/40 bg-del-bg" : "border-warning/40 bg-warning/10",
-                )}
+                tone={notice.tone}
+                title={notice.title}
+                action={
+                  notice.action ? (
+                    <Button size="sm" variant="outline" onClick={notice.action.onClick}>
+                      {notice.action.label}
+                    </Button>
+                  ) : undefined
+                }
               >
-                <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", notice.tone === "danger" ? "bg-destructive" : "bg-warning")} />
-                <span className="min-w-0 flex-1">
-                  <strong className={cn("font-semibold", notice.tone === "danger" ? "text-destructive" : "text-warning")}>{notice.title}</strong>
-                  {notice.detail ? <span className="text-muted-foreground"> {notice.detail}</span> : null}
-                </span>
-                {notice.action ? (
-                  <Button size="sm" variant="outline" onClick={notice.action.onClick}>
-                    {notice.action.label}
-                  </Button>
-                ) : null}
-              </div>
+                {notice.detail ? <span className="text-muted-foreground">{notice.detail}</span> : null}
+              </Alert>
             ) : null}
           </div>
           {err ? (
-            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,2.5rem)] mt-3 flex items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
-              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
-              <span className="min-w-0 flex-1 text-destructive">{err}</span>
-              <Button size="sm" variant="outline" onClick={() => setErr(null)}>
-                Dismiss
-              </Button>
-            </div>
+            <Alert
+              tone="danger"
+              className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,1.75rem)] mt-3 w-auto max-w-[640px] max-sm:mx-4"
+              action={
+                <Button size="sm" variant="outline" onClick={() => setErr(null)}>
+                  Dismiss
+                </Button>
+              }
+            >
+              <span className="text-destructive">{err}</span>
+            </Alert>
           ) : null}
           {commandHints.length || skillHints.length ? (
-            <ul className="os-suggest os-requests pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)]">
+            <ul className="m-0 flex shrink-0 list-none flex-wrap gap-1.5 py-1 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] max-sm:px-4">
               {commandHints.map((c) => (
                 <li key={c.name}>
-                  <Button size="sm" variant="outline" title={c.description} onClick={() => setText(`/${c.name} `)}>
+                  <Button size="sm" variant="outline" aria-label={c.description} onClick={() => setText(`/${c.name} `)}>
                     /{c.name}
                   </Button>
                 </li>
@@ -943,14 +1107,14 @@ export function Workspace({
               />
             ) : null}
             {!online && !perms.length && !forms.length ? (
-              <div
+              <Alert
                 role="status"
                 aria-live="polite"
-                className="absolute left-[var(--gutter-l,2.5rem)] right-10 bottom-full max-sm:inset-x-4 z-10 mb-2 flex max-w-[640px] items-center gap-2.5 rounded-lg border border-warning/40 bg-card px-3.5 py-2.5 text-[13px] text-warning shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
+                tone="warning"
+                className="absolute bottom-full left-[var(--gutter-l,2.5rem)] right-[var(--gutter-r,1.75rem)] z-10 mb-2 w-auto max-w-[640px] bg-card text-warning shadow-pop max-sm:inset-x-4"
               >
-                <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-warning" />
                 You're offline. Your message will send when the connection is back.
-              </div>
+              </Alert>
             ) : null}
             <Composer
               text={text}
@@ -984,7 +1148,6 @@ export function Workspace({
                   size="icon-sm"
                   className="text-faint"
                   aria-label="Open changes in full view"
-                  title="Open in full view"
                   onClick={() => setReviewOpen(true)}
                 >
                   <NamedIcon name="expand" className="size-[13px]" />
@@ -995,7 +1158,6 @@ export function Workspace({
                   size="icon-sm"
                   className="text-faint"
                   aria-label={`Open ${DOCK_TITLES[id].toLowerCase()} in full screen`}
-                  title="Open in full screen"
                   onClick={() => setFull(id)}
                 >
                   <NamedIcon name="expand" className="size-[13px]" />
@@ -1025,7 +1187,7 @@ export function Workspace({
           </>
         }
       >
-        {modelList.length ? null : <div className="os-hint">{noModels ?? "No models available."}</div>}
+        {modelList.length ? null : <div className="rounded-md bg-sunken px-2.5 py-2 text-[13px] text-muted-foreground">{noModels ?? "No models available."}</div>}
         {moveToCloud ? (
           <fieldset className="flex flex-col gap-1.5 text-xs text-muted-foreground">
             <legend className="mb-1.5">Where it runs</legend>

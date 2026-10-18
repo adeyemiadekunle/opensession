@@ -56,11 +56,14 @@ function ContextRing({ use }: { use: ContextUse }) {
   const c = 2 * Math.PI * 5.5;
   const text = `Context used ${pct}% (${k(use.used)} of ${k(use.limit)} tokens)`;
   return (
-    <svg role="img" aria-label={text} className={cn("size-[15px] shrink-0 -rotate-90", tone)} viewBox="0 0 14 14">
-      <title>{text}</title>
-      <circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--os-border-strong)" strokeWidth="2" />
-      <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray={`${ratio * c} ${c}`} />
-    </svg>
+    <span className={cn("flex shrink-0 items-center gap-1.5 pl-1", tone)}>
+      <svg role="img" aria-label={text} className="size-[15px] shrink-0 -rotate-90" viewBox="0 0 14 14">
+        <title>{text}</title>
+        <circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--os-border-strong)" strokeWidth="2" />
+        <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray={`${ratio * c} ${c}`} />
+      </svg>
+      {ratio >= 0.7 ? <span className="text-xs font-medium tabular-nums">{pct}%</span> : null}
+    </span>
   );
 }
 
@@ -137,7 +140,7 @@ export function Composer(p: ComposerProps) {
       </div>
       <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
         <Select value={p.agent} onValueChange={p.onAgent}>
-          <SelectTrigger variant="ghost" aria-label="Agent" className="bg-sunken text-foreground">
+          <SelectTrigger variant="ghost" aria-label="Agent" className="text-foreground">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

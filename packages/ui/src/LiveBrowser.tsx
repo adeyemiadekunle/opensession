@@ -373,7 +373,7 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
               t.id === active ? "border-border bg-card text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
-            <button role="tab" aria-selected={t.id === active} className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left" title={t.url} onClick={() => setActive(t.id)}>
+            <button role="tab" aria-selected={t.id === active} className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left" onClick={() => setActive(t.id)}>
               {userTabs.current.has(t.id) ? <span className="mr-1.5 rounded bg-warning/15 px-1 text-[10.5px] text-warning">You</span> : null}
               {shownTitle(t.title) || t.url || "New tab"}
             </button>
@@ -433,7 +433,6 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
             size="icon"
             className={iconBtn}
             aria-label="Open in a browser window"
-            title="Open in a browser window"
             disabled={!tab || tab.url === "about:blank"}
             onClick={async () => {
               const w = window.open("about:blank", "_blank");
