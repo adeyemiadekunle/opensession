@@ -69,6 +69,25 @@ export function DownloadPage({ repo, origin, gatewayUrl, onBack }: { repo: strin
     const uad = (navigator as Navigator & { userAgentData?: { getHighEntropyValues(h: string[]): Promise<{ architecture?: string }> } }).userAgentData;
     void uad?.getHighEntropyValues(["architecture"]).then((v) => setIntelMac(v.architecture === "x86")).catch(() => {});
   }, []);
+  // The latest release, so the page doesn't offer links that 404: "none" when nothing is
+  // published yet, null while unknown (also when GitHub can't be asked; the links then show).
+  const [release, setRelease] = useState<{ tag: string; files: Set<string> } | "none" | null>(null);
+  useEffect(() => {
+    let off = false;
+    fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { Accept: "application/vnd.github+json" } })
+      .then(async (r) => {
+        if (off) return;
+        if (r.status === 404) return setRelease("none");
+        if (!r.ok) return;
+        const j = (await r.json()) as { tag_name: string; assets: { name: string }[] };
+        if (!off) setRelease({ tag: j.tag_name, files: new Set(j.assets.map((a) => a.name)) });
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, [repo]);
+  const has = (file: string) => release === null || (release !== "none" && release.files.has(file));
   const base = `https://github.com/${repo}/releases/latest/download`;
   const primary = INSTALLERS.filter((i) => i.os === os)[os === "mac" && intelMac ? 1 : 0]!;
   const host = origin.replace(/\/+$/, "");
@@ -110,35 +129,50 @@ export function DownloadPage({ repo, origin, gatewayUrl, onBack }: { repo: strin
                 The desktop app is for computers: open this page on your Mac, Windows or Linux computer, or pick one below.
               </p>
             ) : null}
-            <a
-              href={`${base}/${primary.file}`}
-              className="inline-flex h-11 w-fit items-center rounded-lg bg-primary px-5 text-[15px] font-semibold text-primary-foreground no-underline hover:opacity-90"
-            >
-              Download for {primary.label}
-            </a>
-            <ul className="m-0 flex list-none flex-col gap-1.5 p-0 text-[13.5px]">
-              {INSTALLERS.filter((i) => i.os === os && i !== primary).map((i) => (
-                <li key={i.file}>
-                  <a className="text-primary" href={`${base}/${i.file}`}>
-                    {i.label}
-                  </a>
-                  {i.note ? <span className="text-faint"> · {i.note}</span> : null}
-                </li>
-              ))}
-              <li>
-                <a className="text-primary" href={`https://github.com/${repo}/releases/latest`}>
-                  All files and release notes
-                </a>
-              </li>
-            </ul>
-            <p className="m-0 text-[13px] text-muted-foreground">
-              {os === "mac"
-                ? "Open the .dmg and drag OpenSession to Applications. If macOS says it can't check the app, right-click it, choose Open, then Open again."
-                : os === "win"
-                  ? "Run the installer. If Windows SmartScreen appears, choose More info, then Run anyway."
-                  : "AppImage: make it executable (chmod +x) and run it. .deb: sudo apt install ./OpenSession-linux-amd64.deb"}{" "}
-              The first time you open a folder, the app downloads the agent runtime (about 100 MB).
-            </p>
+            {release === "none" ? (
+              <p role="status" className="m-0 rounded-md border border-input bg-sunken px-3 py-2 text-[13px] text-muted-foreground">
+                No desktop release has been published yet. Check back soon, or use the CLI below.
+              </p>
+            ) : has(primary.file) ? (
+              <a
+                href={`${base}/${primary.file}`}
+                className="inline-flex h-11 w-fit items-center rounded-lg bg-primary px-5 text-[15px] font-semibold text-primary-foreground no-underline hover:opacity-90"
+              >
+                Download for {primary.label}
+                {release ? <span className="ml-2 text-[13px] font-normal opacity-80">{release.tag}</span> : null}
+              </a>
+            ) : (
+              <p role="status" className="m-0 text-[13px] text-muted-foreground">
+                The latest release has no {primary.label} installer.
+              </p>
+            )}
+            {release === "none" ? null : (
+              <>
+                <ul className="m-0 flex list-none flex-col gap-1.5 p-0 text-[13.5px]">
+                  {INSTALLERS.filter((i) => i.os === os && i !== primary && has(i.file)).map((i) => (
+                    <li key={i.file}>
+                      <a className="text-primary" href={`${base}/${i.file}`}>
+                        {i.label}
+                      </a>
+                      {i.note ? <span className="text-faint"> · {i.note}</span> : null}
+                    </li>
+                  ))}
+                  <li>
+                    <a className="text-primary" href={`https://github.com/${repo}/releases/latest`}>
+                      All files and release notes
+                    </a>
+                  </li>
+                </ul>
+                <p className="m-0 text-[13px] text-muted-foreground">
+                  {os === "mac"
+                    ? "Open the .dmg and drag OpenSession to Applications. If macOS says it can't check the app, right-click it, choose Open, then Open again."
+                    : os === "win"
+                      ? "Run the installer. If Windows SmartScreen appears, choose More info, then Run anyway."
+                      : "AppImage: make it executable (chmod +x) and run it. .deb: sudo apt install ./OpenSession-linux-amd64.deb"}{" "}
+                  The first time you open a folder, the app downloads the agent runtime (about 100 MB).
+                </p>
+              </>
+            )}
           </section>
 
           <section aria-labelledby="dl-cli" className="flex flex-col gap-4 rounded-xl border border-input bg-card p-5">

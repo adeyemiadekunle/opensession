@@ -30,7 +30,7 @@ export interface CloudAccount {
 export interface CloudAppProps {
   /** Signed-in client (web: Clerk session; desktop: access token added by the main process). */
   client: CloudClient;
-  /** Current page ("/", "/sessions", "/projects", "/agent", "/settings", "/admin") and navigation. */
+  /** Current page ("/", "/sessions", "/projects", "/settings/<section>", "/admin") and navigation. */
   path: string;
   go: (to: string) => void;
   account?: CloudAccount;
@@ -179,14 +179,15 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
       />
     );
   }
-  if (path === "/settings" || path === "/agent") {
+  if (path === "/settings" || path.startsWith("/settings/") || path === "/agent") {
     return (
       <CloudSettings
         client={client}
         project={projectClient}
         onBack={back}
         desktop={desktop}
-        initial={path === "/agent" ? "agent" : undefined}
+        section={path === "/agent" ? "agent" : path.split("/")[2]}
+        onSection={(id) => go(`/settings/${id}`)}
         agentSetup={<AgentSetup embedded store={store} secrets={secrets} onSaved={() => setSetupVersion((v) => v + 1)} />}
       />
     );
@@ -242,7 +243,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         noModels={
           <>
             Add a model API key in{" "}
-            <button className="os-link" onClick={() => go("/settings")}>
+            <button className="os-link" onClick={() => go("/settings/models")}>
               Settings
             </button>{" "}
             to get started.

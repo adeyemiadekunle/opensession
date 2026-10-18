@@ -13,7 +13,7 @@ import {
   type Session,
   type TerminalApi,
 } from "@opensession/api-client";
-import { errText, storageGet, storageSet, useAsync } from "./hooks";
+import { errText, storageGet, storageSet, useAsync, useMediaQuery } from "./hooks";
 import { MessageView } from "./Messages";
 import { DiffPanel, FilesPanel } from "./Panels";
 import { GitPanel } from "./GitPanel";
@@ -40,6 +40,7 @@ const CENTERED_GUTTERS = {
   "--gutter-l": "max(2.5rem, calc((100% - 640px) / 2))",
   "--gutter-r": "max(1.75rem, calc((100% - 640px) / 2))",
 } as CSSProperties;
+const NARROW_QUERY = "(max-width: 1000px)";
 /** Set by the desktop app before it switches to the cloud, so the moved session opens. */
 export const OPEN_SESSION_KEY = "opensession.openSession";
 
@@ -176,6 +177,11 @@ export function Workspace({
     }
   });
   const [sidebarOpen, setSidebarOpen] = useState(() => storageGet(SIDEBAR_KEY) !== "hidden");
+  // Narrow windows (the desktop app's pane, phones): the sidebar is a drawer over the content, closed
+  // until asked for, and panels open one at a time in the conversation's place instead of the dock.
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const showSidebar = narrow ? drawerOpen : sidebarOpen;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Live event stream: "lost" with seconds until the next try, so the banner can count down.
   const [conn, setConn] = useState<{ lost: boolean; retryIn: number }>({ lost: false, retryIn: 0 });
@@ -218,6 +224,8 @@ export function Workspace({
   useEffect(() => {
     storageSet(SIDEBAR_KEY, sidebarOpen ? "shown" : "hidden");
   }, [sidebarOpen]);
+  // The drawer closes once a session is picked, and when the window widens again.
+  useEffect(() => setDrawerOpen(false), [active, narrow]);
 
   // Ctrl K opens the palette, Ctrl / the shortcuts, Ctrl , settings; online/offline drive the offline notice.
   useEffect(() => {
@@ -353,6 +361,7 @@ export function Workspace({
   };
 
   const openNew = () => {
+    setDrawerOpen(false);
     setDraft({ model: chosen ? modelKey(chosen) : "", agent, text: "", where: "computer" });
     setNewOpen(true);
   };
@@ -516,9 +525,12 @@ export function Workspace({
   const available = (id: DockPanelId) => (id !== "terminal" || Boolean(terminal)) && (id !== "browser" || Boolean(preview));
   // A dock card opened in full screen takes the conversation's place until it is docked again.
   const [full, setFull] = useState<DockPanelId | null>(null);
+  // Crossing the narrow breakpoint gives the conversation its place back.
+  useEffect(() => setFull(null), [narrow]);
   // Bumped when the agent hands the browser over: the Browser card opens with control of its tab.
   const [handOver, setHandOver] = useState(0);
   const openBrowserForHandOver = () => {
+    if (narrow) setFull("browser");
     setDock((d) => (d.stack.includes("browser") ? d : { ...d, stack: [...d.stack, "browser"] }));
     setHandOver((n) => n + 1);
   };
@@ -531,6 +543,11 @@ export function Workspace({
       return { ...d, heights, stack: open ? d.stack.filter((x) => x !== id) : [...d.stack, id] };
     });
   };
+  /** Header buttons and the palette: on a narrow window a panel takes the conversation's place, one at a time. */
+  const showPanel = (id: DockPanelId) => (narrow ? setFull((f) => (f === id ? null : id)) : togglePanel(id));
+  const panelShown = (id: DockPanelId) => (narrow ? full === id : dock.stack.includes(id));
+  // Closing a full-screen panel drops it from the dock only if it came from there.
+  const closeFull = (id: DockPanelId) => (narrow || !dock.stack.includes(id) ? setFull(null) : togglePanel(id));
 
   const providers = [...new Set(modelList.map((m) => m.providerID))];
   const slash = text.startsWith("/") && !text.includes(" ") ? text.slice(1).toLowerCase() : null;
@@ -557,7 +574,7 @@ export function Workspace({
         id: `toggle-${id}`,
         group: "Actions",
         label: `Toggle ${DOCK_TITLES[id]} panel`,
-        run: () => togglePanel(id),
+        run: () => showPanel(id),
       })),
   ];
   // How full the context window is: the last reply's tokens against the model's context limit.
@@ -575,17 +592,17 @@ export function Workspace({
   const togglable = (["terminal", "changes", "git", "files", "browser"] as DockPanelId[]).filter(available);
   // The terminal and browser can be unavailable, so hide their cards rather than drop them from state.
   const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => available(id) && id !== full) };
-  // With no panel open the conversation and composer sit in a centered column.
-  const centered = shownDock.stack.length === 0;
+  // With no panel beside it (none open, or a narrow window) the conversation and composer sit in a centered column.
+  const centered = narrow || shownDock.stack.length === 0;
 
   const panelBody = (id: DockPanelId, isFull = false) =>
     id === "files" ? (
       <FilesPanel
         client={client}
         refreshKey={refreshKey}
-        onClose={() => togglePanel("files")}
+        onClose={() => (isFull ? closeFull("files") : togglePanel("files"))}
         onExpand={isFull ? undefined : () => setFull("files")}
-        onDock={isFull ? () => setFull(null) : undefined}
+        onDock={isFull && !narrow ? () => setFull(null) : undefined}
       />
     ) : id === "changes" ? (
       <DiffPanel client={client} refreshKey={refreshKey} />
@@ -618,9 +635,9 @@ export function Workspace({
         <Button
           variant="ghost"
           size="icon"
-          aria-label={sidebarOpen ? "Hide the sidebar" : "Show the sidebar"}
-          aria-pressed={sidebarOpen}
-          onClick={() => setSidebarOpen((o) => !o)}
+          aria-label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
+          aria-pressed={showSidebar}
+          onClick={() => (narrow ? setDrawerOpen((o) => !o) : setSidebarOpen((o) => !o))}
         >
           <NamedIcon name="sidebar" />
         </Button>
@@ -632,16 +649,23 @@ export function Workspace({
           <span className="truncate">{activeTitle}</span>
           <NamedIcon name="chevronDown" className="size-3 text-faint" />
         </button>
-        {projectName ? <span className="min-w-0 truncate text-[13px] text-faint">{projectName}</span> : null}
+        {projectName ? <span className="min-w-0 truncate text-[13px] text-faint max-sm:hidden">{projectName}</span> : null}
         <span className="flex-1" />
-        {togglable.map((id) => toggleButton(id, dock.stack.includes(id), () => togglePanel(id)))}
+        {togglable.map((id) => toggleButton(id, panelShown(id), () => showPanel(id)))}
       </header>
 
-      <div className="flex min-h-0 flex-1 max-[1000px]:flex-col">
-        {sidebarOpen ? (
+      <div className="relative flex min-h-0 flex-1">
+        {narrow && drawerOpen ? (
+          <div aria-hidden="true" className="absolute inset-0 z-20 bg-black/40" onClick={() => setDrawerOpen(false)} />
+        ) : null}
+        {showSidebar ? (
           <aside
             aria-label="Sidebar"
-            className="flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar px-2.5 py-3.5 max-[1000px]:max-h-[260px] max-[1000px]:w-auto max-[1000px]:border-b max-[1000px]:border-r-0"
+            className={cn(
+              "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar px-2.5 py-3.5",
+              narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-[0_12px_32px_rgba(0,0,0,0.45)]",
+            )}
+            onKeyDown={narrow ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
           >
             <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-auto">
               <label className="flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5 text-faint">
@@ -759,10 +783,23 @@ export function Workspace({
             )}
           >
             {full === "files" ? null : (
-              <PanelHeader title={DOCK_TITLES[full]} onClose={() => togglePanel(full)} closeLabel={`Close ${DOCK_TITLES[full]} panel`}>
-                <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={() => setFull(null)}>
-                  Dock right
-                </Button>
+              <PanelHeader title={DOCK_TITLES[full]} onClose={() => closeFull(full)} closeLabel={`Close ${DOCK_TITLES[full]} panel`}>
+                {!narrow ? (
+                  <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={() => setFull(null)}>
+                    Dock right
+                  </Button>
+                ) : full === "changes" ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-faint"
+                    aria-label="Open changes in full view"
+                    title="Open in full view"
+                    onClick={() => setReviewOpen(true)}
+                  >
+                    <NamedIcon name="expand" className="size-[13px]" />
+                  </Button>
+                ) : null}
               </PanelHeader>
             )}
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{panelBody(full, true)}</div>
@@ -770,7 +807,7 @@ export function Workspace({
         ) : null}
         <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
           {conn.lost && active ? (
-            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-10 mt-3 flex max-w-[640px] items-center gap-3 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
+            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-10 mt-3 flex max-w-[640px] items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
               <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
               <span className="min-w-0 flex-1">
                 <strong className="font-semibold text-destructive">Lost connection to the agent.</strong>{" "}
@@ -785,7 +822,7 @@ export function Workspace({
           ) : null}
           <div
             ref={listRef}
-            className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] pt-7 [&>*]:max-w-[640px]"
+            className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] pt-7 max-sm:px-4 max-sm:pt-5 [&>*]:max-w-[640px]"
           >
             {!active ? (
               <div className="m-auto flex max-w-[440px] flex-col items-center gap-5 text-center">
@@ -839,7 +876,7 @@ export function Workspace({
             ) : null}
           </div>
           {err ? (
-            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,2.5rem)] mt-3 flex items-center gap-3 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
+            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,2.5rem)] mt-3 flex items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
               <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
               <span className="min-w-0 flex-1 text-destructive">{err}</span>
               <Button size="sm" variant="outline" onClick={() => setErr(null)}>
@@ -867,8 +904,8 @@ export function Workspace({
           ) : null}
 
           <div
-            className="relative shrink-0 pb-4 pl-[var(--gutter-l,2.5rem)]"
-            style={{ paddingRight: `calc(var(--gutter-r, 1.75rem) + ${scrollbar}px)` }}
+            className="relative shrink-0 pb-4 pl-[var(--gutter-l,2.5rem)] pr-[calc(var(--gutter-r,1.75rem)_+_var(--scrollbar,0px))] max-sm:px-4 max-sm:pb-3"
+            style={{ "--scrollbar": `${scrollbar}px` } as CSSProperties}
           >
             {active ? (
               <Requests
@@ -885,7 +922,7 @@ export function Workspace({
               <div
                 role="status"
                 aria-live="polite"
-                className="absolute left-[var(--gutter-l,2.5rem)] right-10 bottom-full z-10 mb-2 flex max-w-[640px] items-center gap-2.5 rounded-lg border border-warning/40 bg-card px-3.5 py-2.5 text-[13px] text-warning shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
+                className="absolute left-[var(--gutter-l,2.5rem)] right-10 bottom-full max-sm:inset-x-4 z-10 mb-2 flex max-w-[640px] items-center gap-2.5 rounded-lg border border-warning/40 bg-card px-3.5 py-2.5 text-[13px] text-warning shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
               >
                 <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-warning" />
                 You're offline. Your message will send when the connection is back.
@@ -910,7 +947,7 @@ export function Workspace({
           </div>
         </main>
 
-        {shownDock.stack.length > 0 ? (
+        {!narrow && shownDock.stack.length > 0 ? (
           <Dock
             state={shownDock}
             onChange={setDock}
@@ -1077,7 +1114,7 @@ export function Workspace({
           toolbar={togglable.map((id) =>
             toggleButton(id, id === "changes", () => {
               setReviewOpen(false);
-              if (!dock.stack.includes(id)) togglePanel(id);
+              if (!panelShown(id)) showPanel(id);
             }),
           )}
         />

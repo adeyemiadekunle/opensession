@@ -22,6 +22,8 @@ export function SettingsShell({
   title = "Settings",
   storageKey = "opensession.settingsPage",
   initial,
+  section,
+  onSection,
   navNote,
 }: {
   pages: SettingsPage[];
@@ -32,16 +34,22 @@ export function SettingsShell({
   storageKey?: string;
   /** Section to open first, instead of the remembered one. */
   initial?: string;
+  /** The open section, when the address decides it (web: /settings/<section>). */
+  section?: string;
+  /** Opening a section; with `section`, the caller changes the address. */
+  onSection?: (id: string) => void;
   /** Small text at the bottom of the nav. */
   navNote?: string;
 }) {
-  const [active, setActive] = useState(() => {
+  const [remembered, setRemembered] = useState(() => {
     const want = initial ?? storageGet(storageKey);
     return pages.some((p) => p.id === want) ? want! : pages[0]!.id;
   });
+  const active = section && pages.some((p) => p.id === section) ? section : remembered;
   const open = (id: string) => {
-    setActive(id);
+    setRemembered(id);
     storageSet(storageKey, id);
+    onSection?.(id);
   };
   const page = pages.find((p) => p.id === active) ?? pages[0]!;
   return (
@@ -58,7 +66,9 @@ export function SettingsShell({
               aria-current={p.id === page.id ? "page" : undefined}
               className={cn(
                 "flex h-[34px] shrink-0 items-center gap-2 rounded-md border-0 px-2.5 text-left",
-                p.id === page.id ? "bg-sunken text-foreground" : "bg-transparent text-muted-foreground hover:bg-sunken hover:text-foreground",
+                p.id === page.id
+                  ? "bg-sunken font-medium text-foreground shadow-[inset_2px_0_0_var(--os-accent)]"
+                  : "bg-transparent text-muted-foreground hover:bg-sunken/50 hover:text-foreground",
               )}
               onClick={() => open(p.id)}
             >
