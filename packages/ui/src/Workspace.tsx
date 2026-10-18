@@ -675,8 +675,9 @@ export function Workspace({
           <NamedIcon name="sidebar" />
         </Button>
         <button
-          className="flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1 text-sm font-semibold text-foreground hover:bg-sunken"
+          className="flex min-w-0 max-w-[min(360px,45vw)] items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1 text-sm font-semibold text-foreground hover:bg-sunken"
           aria-label={`${activeTitle}: switch session`}
+          title={activeTitle}
           onClick={() => setPaletteOpen(true)}
         >
           <span className="truncate">{activeTitle}</span>

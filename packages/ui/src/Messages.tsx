@@ -170,8 +170,10 @@ function ToolRow({ part }: { part: ContentPart }) {
     </>
   );
   const rowClass = "flex h-[30px] w-full items-center gap-2 rounded-md px-2 text-left text-[13px]";
+  // The row's padding is for its hover background; -mx-2 puts its icon on the column's left edge,
+  // in line with the reply text, the "Working" line and the model label.
   return (
-    <div className="flex w-full flex-col">
+    <div className="-mx-2 flex flex-col">
       {output || failed ? (
         <button
           aria-expanded={expanded}
@@ -184,7 +186,7 @@ function ToolRow({ part }: { part: ContentPart }) {
         <div className={cn(rowClass, "text-muted-foreground")}>{line}</div>
       )}
       {expanded && (output || failed) ? (
-        <div className="mb-1.5 ml-5 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
+        <div className="mb-1.5 ml-7 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
           {failed && st.error?.message ? <div className="text-[13px] text-destructive">{st.error.message}</div> : null}
           {output ? <pre className="m-0 max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-[1.7] text-muted-foreground">{output}</pre> : null}
           {failed ? <div className="text-xs text-faint">The agent got this error back and decides what to do next.</div> : null}
