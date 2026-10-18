@@ -232,6 +232,16 @@ export function Workspace({
   }, [sidebarOpen]);
   // The drawer closes once a session is picked, and when the window widens again.
   useEffect(() => setDrawerOpen(false), [active, narrow]);
+  // The drawer takes focus when it opens (its search field) and hands it back to the toggle when it
+  // closes, so keyboard users don't lose their place behind the overlay.
+  const drawerToggle = useRef<HTMLButtonElement>(null);
+  const drawerSearch = useRef<HTMLInputElement>(null);
+  const drawerWasOpen = useRef(false);
+  useEffect(() => {
+    if (drawerOpen) drawerSearch.current?.focus();
+    else if (drawerWasOpen.current && document.activeElement === document.body) drawerToggle.current?.focus();
+    drawerWasOpen.current = drawerOpen;
+  }, [drawerOpen]);
 
   // Ctrl K opens the palette, Ctrl / the shortcuts, Ctrl , settings; online/offline drive the offline notice.
   useEffect(() => {
@@ -664,9 +674,13 @@ export function Workspace({
   );
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-background">
+    <div
+      className="relative flex h-full min-h-0 flex-col bg-background"
+      onKeyDown={narrow && drawerOpen ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
+    >
       <header className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border bg-sidebar pl-2.5 pr-2.5">
         <Button
+          ref={drawerToggle}
           variant="ghost"
           size="icon"
           aria-label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
@@ -699,12 +713,12 @@ export function Workspace({
               "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar",
               narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-pop",
             )}
-            onKeyDown={narrow ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
           >
             <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-auto px-2.5">
               <label className="mt-2.5 flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5 text-faint">
                 <NamedIcon name="search" className="size-3.5" />
                 <input
+                  ref={drawerSearch}
                   className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none placeholder:text-faint"
                   placeholder="Search"
                   aria-label="Search sessions"
@@ -774,7 +788,6 @@ export function Workspace({
                               "size-6 text-muted-foreground focus-visible:opacity-100",
                               isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
                             )}
-                            title="Delete session"
                             aria-label="Delete session"
                             onClick={() => remove(s.id)}
                           >
@@ -817,7 +830,6 @@ export function Workspace({
                     size="icon-sm"
                     className="text-faint"
                     aria-label="Open changes in full view"
-                    title="Open in full view"
                     onClick={() => setReviewOpen(true)}
                   >
                     <NamedIcon name="expand" className="size-[13px]" />
@@ -869,14 +881,19 @@ export function Workspace({
                 <div className="h-[84px] w-full max-w-[600px] rounded-lg border border-border bg-card" />
               </div>
             ) : null}
-            {messages.map((m) => (
-              <MessageView
-                key={m.id}
-                m={m}
-                onRetry={busy ? undefined : () => void retryLast()}
-                onResume={m.id === lastAssistant && !busy ? () => void resume() : undefined}
-              />
-            ))}
+            {messages.map((m, i) => {
+              const prev = messages.slice(0, i).reverse().find((x) => x.type === "assistant" && x.model);
+              const sameModel = Boolean(m.model && prev?.model && modelKey(prev.model) === modelKey(m.model));
+              return (
+                <MessageView
+                  key={m.id}
+                  m={m}
+                  showModel={!sameModel}
+                  onRetry={busy ? undefined : () => void retryLast()}
+                  onResume={m.id === lastAssistant && !busy ? () => void resume() : undefined}
+                />
+              );
+            })}
             {notice ? (
               <Alert
                 role="status"
@@ -983,7 +1000,6 @@ export function Workspace({
                   size="icon-sm"
                   className="text-faint"
                   aria-label="Open changes in full view"
-                  title="Open in full view"
                   onClick={() => setReviewOpen(true)}
                 >
                   <NamedIcon name="expand" className="size-[13px]" />
@@ -994,7 +1010,6 @@ export function Workspace({
                   size="icon-sm"
                   className="text-faint"
                   aria-label={`Open ${DOCK_TITLES[id].toLowerCase()} in full screen`}
-                  title="Open in full screen"
                   onClick={() => setFull(id)}
                 >
                   <NamedIcon name="expand" className="size-[13px]" />

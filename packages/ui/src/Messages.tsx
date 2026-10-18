@@ -281,13 +281,20 @@ function RetryLine({ retry }: { retry: { attempt: number; at: number; error?: St
 }
 
 /** Design: assistant text in a bordered card, tool calls as collapsible rows, user prompts as bubbles. */
-export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: () => void; onResume?: () => void }) {
+export function MessageView({
+  m,
+  onRetry,
+  onResume,
+  showModel = true,
+}: {
+  m: Message;
+  onRetry?: () => void;
+  onResume?: () => void;
+  /** The model line under a reply; the caller hides it when it matches the previous reply's. */
+  showModel?: boolean;
+}) {
   if (m.type === "user") {
-    return (
-      <div className="max-w-[min(85%,640px)] self-end whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-user px-3 py-2">
-        {m.text}
-      </div>
-    );
+    return <Markdown text={m.text ?? ""} className="max-w-[min(85%,640px)] gap-2 self-end rounded-[14px] rounded-br-[4px] bg-user px-3 py-2" />;
   }
   if (m.type === "shell") {
     const exit = typeof m.exit === "number" ? m.exit : null;
@@ -355,7 +362,7 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
             </span>
           </div>
         ) : null}
-        {m.model ? <div className="text-[11px] text-faint">{m.model.providerID}/{m.model.id}</div> : null}
+        {m.model && showModel ? <div className="text-[11px] text-faint">{m.model.providerID}/{m.model.id}</div> : null}
       </div>
     );
   }

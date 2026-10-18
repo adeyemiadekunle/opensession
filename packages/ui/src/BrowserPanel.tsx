@@ -94,7 +94,7 @@ function PreviewFrame({ preview }: { preview: PreviewApi }) {
           void go();
         }}
       >
-        <Button variant="ghost" size="icon" className={iconBtn} aria-label="Reload" title="Reload" disabled={!url} onClick={() => void go()}>
+        <Button variant="ghost" size="icon" className={iconBtn} aria-label="Reload" disabled={!url} onClick={() => void go()}>
           <NamedIcon name="reload" className="size-[14px]" />
         </Button>
         <label className="flex h-[30px] min-w-0 flex-1 items-center gap-2 rounded-full border border-input bg-card px-3 focus-within:ring-2 focus-within:ring-ring">
@@ -115,7 +115,6 @@ function PreviewFrame({ preview }: { preview: PreviewApi }) {
           size="icon"
           className={iconBtn}
           aria-label="Open in a browser window"
-          title="Open in a browser window"
           disabled={!url}
           onClick={() => url && window.open(url, "_blank", "noopener")}
         >

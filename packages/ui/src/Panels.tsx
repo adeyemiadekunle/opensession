@@ -128,7 +128,7 @@ export function FilesPanel({
           <NamedIcon name="search" />
         </Button>
         {onExpand ? (
-          <Button variant="ghost" size="icon-sm" className="text-faint" aria-label="Open files in full screen" title="Open in full screen" onClick={onExpand}>
+          <Button variant="ghost" size="icon-sm" className="text-faint" aria-label="Open files in full screen" onClick={onExpand}>
             <NamedIcon name="expand" />
           </Button>
         ) : null}
