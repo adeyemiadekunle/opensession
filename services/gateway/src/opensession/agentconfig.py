@@ -205,6 +205,21 @@ def _fm(fields: dict) -> str:
 
 
 SKILLS_DIR = "opensession-skills"
+
+# Always the start of a cloud sandbox's AGENTS.md (the user's own instructions follow), so the
+# reply that ends a turn tells the user what actually happened instead of "Done! ... as requested".
+REPLY_GUIDE = """\
+# How to end your turn (OpenSession)
+
+The person reads your last message in a chat panel, often without opening the files. End every turn with a short, concrete wrap-up:
+
+- What you changed: name each file you created, edited or deleted, with its path, and what changed in it in a few words.
+- What you ran or checked (commands, tests, builds) and what came out: the result or the error, not just that you ran it.
+- Anything not done, not verified, or that needs the person's decision, said plainly.
+
+Answer a question directly, and include the actual content the person asked to see (file contents, output, values) rather than describing it. Use plain language, and skip filler like "Perfect!", "Done!" or "as requested". For a turn that changed nothing, just give the answer.
+"""
+
 CLOUD_CONFIG_DIR = "/home/agent/.config/opencode"
 
 
@@ -215,7 +230,7 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True, model_proxy: dict[str,
     - agents and commands are defined inline in opencode.json ("agents", "commands"),
     - skills are SKILL.md files in our own folder, listed in opencode.json "skills",
     - permissions, MCP servers, plugins and default_agent are opencode.json keys,
-    - instructions are the global AGENTS.md,
+    - instructions are the global AGENTS.md (in the cloud, after REPLY_GUIDE),
     - model_proxy ({provider: base URL}) points those providers at the gateway's model
       proxy: "providers": {id: {"settings": {"baseURL": ...}}} (modelproxy.py).
     """
@@ -225,8 +240,12 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True, model_proxy: dict[str,
         if s.hidden:
             fm["metadata"] = {"opencode/autoinvoke": False}
         files[f"{SKILLS_DIR}/{s.id}/SKILL.md"] = _fm(fm) + "\n" + s.body.strip() + "\n"
-    if cfg.instructions.strip():
-        files["AGENTS.md"] = cfg.instructions.strip() + "\n"
+    own = cfg.instructions.strip()
+    if cloud:
+        files["AGENTS.md"] = REPLY_GUIDE + ("\n" + own + "\n" if own else "")
+    elif own:
+        # Local mode writes into the person's own ~/.config/opencode: only what they set.
+        files["AGENTS.md"] = own + "\n"
 
     oc: dict = {"$schema": "https://opencode.ai/config.json"}
     if cloud:
