@@ -5,7 +5,8 @@
 //   node scripts/pack-cli.mjs <version> <out dir>
 //
 // The bundle has no dependencies, so the package is the one file, a README and
-// package.json. The release workflow runs this and then `npm publish` in <out dir>.
+// package.json. Its postinstall downloads OpenCode, only the build for this computer
+// (OpenCode's own npm package would install builds for every CPU variant). The release workflow runs this and then `npm publish` in <out dir>.
 
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -30,6 +31,9 @@ writeFileSync(
       description: "OpenSession CLI: an AI coding agent with your own model keys, in the cloud or on this computer.",
       type: "module",
       bin: { opensession: "opensession.mjs" },
+      // Downloads OpenCode (the agent runtime) for this computer; never fails the install,
+      // and the first local run downloads it if this was skipped (--ignore-scripts).
+      scripts: { postinstall: "node opensession.mjs opencode install --postinstall" },
       files: ["opensession.mjs", "README.md"],
       engines: { node: ">=20" },
       repository: { type: "git", url: "git+https://github.com/adeyemiadekunle/opensession.git" },

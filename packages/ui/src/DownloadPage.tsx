@@ -137,8 +137,7 @@ export function DownloadPage({ repo, origin, gatewayUrl, onBack }: { repo: strin
                 : os === "win"
                   ? "Run the installer. If Windows SmartScreen appears, choose More info, then Run anyway."
                   : "AppImage: make it executable (chmod +x) and run it. .deb: sudo apt install ./OpenSession-linux-amd64.deb"}{" "}
-              To run the agent on this computer, also install OpenCode:{" "}
-              <code className="font-mono text-xs">curl -fsSL https://opencode.ai/v2/install | bash</code>
+              The first time you open a folder, the app downloads the agent runtime (about 100 MB).
             </p>
           </section>
 
@@ -147,15 +146,19 @@ export function DownloadPage({ repo, origin, gatewayUrl, onBack }: { repo: strin
               <h2 id="dl-cli" className="m-0 text-[17px] font-semibold">
                 Command line (CLI)
               </h2>
-              <p className="m-0 text-[13.5px] text-muted-foreground">Needs Node.js 20 or newer. The install script sets it up for this server.</p>
+              <p className="m-0 text-[13.5px] text-muted-foreground">
+                Needs Node.js 20 or newer. Installs the agent runtime too; the install script also sets it up for this server.
+              </p>
             </div>
             <Command label="macOS and Linux" command={`curl -fsSL ${host}/install.sh | sh`} />
             <Command label="Windows (PowerShell)" command={`irm ${host}/install.ps1 | iex`} />
             <Command label="Or with npm, then point it at this server" command="npm install -g opensession-cli" />
             <Command label="" command={`opensession config --gateway ${gatewayUrl.replace(/\/+$/, "")} --web ${host}`} />
             <p className="m-0 text-[13.5px] text-muted-foreground">
-              Then sign in with <code className="font-mono text-xs">opensession login</code> and see{" "}
-              <code className="font-mono text-xs">opensession --help</code>.
+              Then, in a terminal in your project folder, add a model key once with{" "}
+              <code className="font-mono text-xs">opensession local key anthropic</code> and run{" "}
+              <code className="font-mono text-xs">opensession</code> to chat with the agent there. For your cloud projects, sign in with{" "}
+              <code className="font-mono text-xs">opensession login</code>.
             </p>
           </section>
         </div>
