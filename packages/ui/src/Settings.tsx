@@ -174,8 +174,8 @@ export function ApiKeys({ client }: { client: CloudClient }) {
     <section className="os-card">
       <h2>Model API keys</h2>
       <p className="os-muted">
-        Bring your own key. Keys are encrypted at rest and only passed to your own sandbox. We check each key with the
-        provider before saving.
+        Bring your own key. Keys are encrypted at rest and never put inside your sandbox: we add them to your model
+        calls on the way out. We check each key with the provider before saving.
       </p>
       {keys.error ? <div className="os-error">{keys.error}</div> : null}
       <ul className="os-list">
