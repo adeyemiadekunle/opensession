@@ -176,8 +176,10 @@ function ToolRow({ part, onOpenFile }: { part: ContentPart; onOpenFile?: (path: 
     </>
   );
   const rowClass = "flex h-[30px] w-full items-center gap-2 rounded-md px-2 text-left text-[13px]";
+  // The row's padding is for its hover background; -mx-2 puts its icon on the column's left edge,
+  // in line with the reply text, the "Working" line and the model label.
   return (
-    <div className="flex w-full flex-col">
+    <div className="-mx-2 flex flex-col">
       {output || failed ? (
         <button
           aria-expanded={expanded}
@@ -190,7 +192,7 @@ function ToolRow({ part, onOpenFile }: { part: ContentPart; onOpenFile?: (path: 
         <div className={cn(rowClass, "text-muted-foreground")}>{line}</div>
       )}
       {expanded && (output || failed) ? (
-        <div className="group relative mb-1.5 ml-5 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
+        <div className="group relative mb-1.5 ml-7 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
           <div className="absolute right-1.5 top-1.5 flex gap-1">
             {filePath ? (
               <button
@@ -217,7 +219,7 @@ function ToolRow({ part, onOpenFile }: { part: ContentPart; onOpenFile?: (path: 
 function ReasoningRow({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="flex w-full flex-col">
+    <div className="-mx-2 flex flex-col">
       <button
         aria-expanded={open}
         className={cn(
@@ -230,7 +232,7 @@ function ReasoningRow({ text }: { text: string }) {
         <span>Thinking</span>
       </button>
       {open ? (
-        <div className="mb-1.5 ml-5 mt-1 whitespace-pre-wrap break-words rounded-lg border border-border bg-code px-3 py-2.5 text-xs leading-[1.7] text-muted-foreground">{text}</div>
+        <div className="mb-1.5 ml-7 mt-1 whitespace-pre-wrap break-words rounded-lg border border-border bg-code px-3 py-2.5 text-xs leading-[1.7] text-muted-foreground">{text}</div>
       ) : null}
     </div>
   );
@@ -367,7 +369,8 @@ export function MessageView({
         {parts.map((p, i) => {
           if (p.type === "text")
             return p.text?.trim() ? (
-              <Markdown key={i} text={p.text} className="rounded-lg border border-border bg-card px-4 py-3 text-[15px]" />
+              // Plain on the page, like a document; code blocks inside keep their own box.
+              <Markdown key={i} text={p.text} className="py-1 text-[15px] leading-[1.6]" />
             ) : null;
           if (p.type === "reasoning") return p.text?.trim() ? <ReasoningRow key={i} text={p.text} /> : null;
           if (p.type === "tool") return <ToolRow key={i} part={p} onOpenFile={onOpenFile} />;
