@@ -179,6 +179,7 @@
   /* Approval requests above the composer (Requests.tsx) */
   .os-requests { display: flex; flex-direction: column; gap: 8px; padding: 0 28px 0 40px; flex: none; }
   .os-requests > * { max-width: 640px; }
+  @media (max-width: 639px) { .os-requests { padding: 0 16px; } }
 
   .os-add { color: var(--os-add); }
   .os-del { color: var(--os-del); }
