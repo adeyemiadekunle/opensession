@@ -1,6 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { ContentPart, Message } from "@opensession/api-client";
+import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
+import { CopyButton } from "./components/ui/copy-button";
 import { NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
 import { Markdown } from "./Markdown";
@@ -148,12 +150,16 @@ function Spinner({ className }: { className?: string }) {
 /** Design (tool-call rows): one line per action, collapsed; expand to see output.
  *  A running row shows a spinner; a failed one stays open. A tool error goes back to the
  *  model as that call's result, so there is nothing for the user to retry. */
-function ToolRow({ part }: { part: ContentPart }) {
+function ToolRow({ part, onOpenFile }: { part: ContentPart; onOpenFile?: (path: string) => void }) {
   const st = stateOf(part);
   const failed = st.status === "error";
   const running = isRunning(part);
   const [open, setOpen] = useState(false);
   const { verb, target } = toolTitle(part);
+  const filePath =
+    onOpenFile && part.name && ["read", "edit", "write", "patch"].includes(part.name)
+      ? field(st.input, "filePath", "path", "file", "filename")
+      : undefined;
   const output = (st.content ?? [])
     .map((c) => (c.type === "text" ? c.text : c.name ?? c.uri))
     .filter(Boolean)
@@ -186,9 +192,22 @@ function ToolRow({ part }: { part: ContentPart }) {
         <div className={cn(rowClass, "text-muted-foreground")}>{line}</div>
       )}
       {expanded && (output || failed) ? (
-        <div className="mb-1.5 ml-7 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
+        <div className="group relative mb-1.5 ml-7 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
+          <div className="absolute right-1.5 top-1.5 flex gap-1">
+            {filePath ? (
+              <button
+                type="button"
+                aria-label={`Open ${filePath} in Files`}
+                className="grid size-6 place-items-center rounded-md border border-input bg-card text-faint opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                onClick={() => onOpenFile!(filePath)}
+              >
+                <NamedIcon name="files" className="size-3" />
+              </button>
+            ) : null}
+            {output ? <CopyButton getText={() => output} /> : null}
+          </div>
           {failed && st.error?.message ? <div className="text-[13px] text-destructive">{st.error.message}</div> : null}
-          {output ? <pre className="m-0 max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-[1.7] text-muted-foreground">{output}</pre> : null}
+          {output ? <pre className="m-0 max-h-60 overflow-auto whitespace-pre-wrap break-words pr-12 font-mono text-xs leading-[1.7] text-muted-foreground">{output}</pre> : null}
           {failed ? <div className="text-xs text-faint">The agent got this error back and decides what to do next.</div> : null}
         </div>
       ) : null}
@@ -196,26 +215,44 @@ function ToolRow({ part }: { part: ContentPart }) {
   );
 }
 
-function Card({ tone, title, children, action }: { tone: "danger" | "warning"; title: string; children?: ReactNode; action?: ReactNode }) {
+/** The model's reasoning, folded like a tool row so the chrome matches. */
+function ReasoningRow({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      role="alert"
-      className={cn(
-        "flex w-full flex-col gap-2 rounded-lg border px-3.5 py-3 text-[13px]",
-        tone === "danger" ? "border-destructive/40 bg-del-bg" : "border-warning/40 bg-warning/10",
-      )}
-    >
-      <div className="flex items-center gap-2.5">
-        <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", tone === "danger" ? "bg-destructive" : "bg-warning")} />
-        <strong className={cn("font-semibold", tone === "danger" ? "text-destructive" : "text-warning")}>{title}</strong>
-      </div>
-      {children}
-      {action}
+    <div className="-mx-2 flex flex-col">
+      <button
+        aria-expanded={open}
+        className={cn(
+          "flex h-[30px] w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left text-[13px] hover:bg-sunken",
+          open ? "text-foreground" : "text-muted-foreground",
+        )}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <NamedIcon name={open ? "chevronDown" : "chevronRight"} className="size-3" />
+        <span>Thinking</span>
+      </button>
+      {open ? (
+        <div className="mb-1.5 ml-7 mt-1 whitespace-pre-wrap break-words rounded-lg border border-border bg-code px-3 py-2.5 text-xs leading-[1.7] text-muted-foreground">{text}</div>
+      ) : null}
     </div>
   );
 }
 
 type StructuredError = { type?: string; message?: string; status?: number; response?: { body?: string } };
+
+/** Compact token counts: "98k in · 2.1k out · 6k cached". */
+function tokenLine(m: Message): string | null {
+  const t = m.tokens as { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } } | undefined;
+  if (!t) return null;
+  const k = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k`.replace(".0k", "k") : String(n));
+  const parts = [
+    t.input ? `${k(t.input)} in` : null,
+    t.output ? `${k(t.output)} out` : null,
+    t.reasoning ? `${k(t.reasoning)} thinking` : null,
+    t.cache?.read ? `${k(t.cache.read)} cached` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
 
 /**
  * Whether a turn stopped on the model's limits. OpenCode classifies provider errors itself:
@@ -233,7 +270,8 @@ export function usageLimit(error: StructuredError | undefined): "rate" | "quota"
 
 function LimitCard({ error, kind, model, onResume }: { error: StructuredError; kind: "rate" | "quota"; model?: string; onResume?: () => void }) {
   return (
-    <Card
+    <Alert
+      layout="stack"
       tone="warning"
       title={kind === "quota" ? "Out of API credit" : "Model rate limit reached"}
       action={
@@ -253,7 +291,7 @@ function LimitCard({ error, kind, model, onResume }: { error: StructuredError; k
           : " after OpenCode retried it for about a minute. Nothing was lost: resume picks up where it stopped, or switch model in the composer to carry on now."}
       </p>
       {error.message ? <p className="m-0 font-mono text-xs text-faint">{error.message}</p> : null}
-    </Card>
+    </Alert>
   );
 }
 
@@ -269,7 +307,7 @@ function RetryLine({ retry }: { retry: { attempt: number; at: number; error?: St
   return (
     <div role="status" className="flex items-center gap-2.5 text-[13px] text-warning">
       <Spinner />
-      <span className="min-w-0 truncate" title={retry.error?.message}>
+      <span className="min-w-0 truncate">
         {why.length > 80 ? `${why.slice(0, 80)}…` : why} · {secs > 0 ? `retrying in ${secs} s` : "retrying now"} (attempt {retry.attempt})
       </span>
     </div>
@@ -277,13 +315,23 @@ function RetryLine({ retry }: { retry: { attempt: number; at: number; error?: St
 }
 
 /** Design: assistant text in a bordered card, tool calls as collapsible rows, user prompts as bubbles. */
-export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: () => void; onResume?: () => void }) {
+export function MessageView({
+  m,
+  onRetry,
+  onResume,
+  onOpenFile,
+  showModel = true,
+}: {
+  m: Message;
+  onRetry?: () => void;
+  onResume?: () => void;
+  /** Opens a path in the Files card (read/edit/write tool rows). */
+  onOpenFile?: (path: string) => void;
+  /** The model line under a reply; the caller hides it when it matches the previous reply's. */
+  showModel?: boolean;
+}) {
   if (m.type === "user") {
-    return (
-      <div className="max-w-[min(85%,640px)] self-end whitespace-pre-wrap break-words rounded-[14px] rounded-br-[4px] bg-user px-3 py-2">
-        {m.text}
-      </div>
-    );
+    return <Markdown text={m.text ?? ""} className="max-w-[min(85%,640px)] gap-2 self-end rounded-[14px] rounded-br-[4px] bg-user px-3 py-2" />;
   }
   if (m.type === "shell") {
     const exit = typeof m.exit === "number" ? m.exit : null;
@@ -293,7 +341,12 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
           <span className="min-w-0 flex-1 truncate">$ {m.command}</span>
           {exit !== null && exit !== 0 ? <span className="shrink-0 font-sans text-xs text-destructive">Exit {exit}</span> : null}
         </div>
-        {m.output?.output ? <pre className="os-pre m-0">{m.output.output}</pre> : null}
+        {m.output?.output ? (
+          <div className="group relative">
+            <pre className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6]">{m.output.output}</pre>
+            <CopyButton getText={() => m.output?.output ?? ""} className="absolute right-1.5 top-1.5" />
+          </div>
+        ) : null}
         {m.status && m.status !== "exited" ? (
           <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
             {m.status === "running" ? <Spinner /> : null}
@@ -310,6 +363,7 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
     const retry = m.retry as { attempt: number; at: number; error?: StructuredError } | undefined;
     const runningTool = [...parts].reverse().find((p) => p.type === "tool" && ["running", "streaming", "pending"].includes(stateOf(p).status ?? ""));
     const step = runningTool ? toolTitle(runningTool) : null;
+    const footer = [m.model && showModel ? `${m.model.providerID}/${m.model.id}` : null, tokenLine(m)].filter(Boolean).join(" · ");
     return (
       <div className="flex w-full flex-col gap-1.5">
         {parts.map((p, i) => {
@@ -318,20 +372,15 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
               // Plain on the page, like a document; code blocks inside keep their own box.
               <Markdown key={i} text={p.text} className="py-1 text-[15px] leading-[1.6]" />
             ) : null;
-          if (p.type === "reasoning")
-            return (
-              <details key={i} className="text-xs">
-                <summary className="cursor-pointer text-muted-foreground">Thinking</summary>
-                <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{p.text}</div>
-              </details>
-            );
-          if (p.type === "tool") return <ToolRow key={i} part={p} />;
+          if (p.type === "reasoning") return p.text?.trim() ? <ReasoningRow key={i} text={p.text} /> : null;
+          if (p.type === "tool") return <ToolRow key={i} part={p} onOpenFile={onOpenFile} />;
           return null;
         })}
         {error && limit ? (
           <LimitCard error={error} kind={limit} model={m.model?.id} onResume={onResume} />
         ) : error?.message ? (
-          <Card
+          <Alert
+            layout="stack"
             tone="danger"
             title="The agent stopped with an error"
             action={
@@ -345,7 +394,7 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
             }
           >
             <p className="m-0 text-muted-foreground">{error.message}</p>
-          </Card>
+          </Alert>
         ) : null}
         {!m.time?.completed && !error && retry ? (
           <RetryLine retry={retry} />
@@ -357,7 +406,7 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
             </span>
           </div>
         ) : null}
-        {m.model ? <div className="text-[11px] text-faint">{m.model.providerID}/{m.model.id}</div> : null}
+        {footer ? <div className="text-[11px] text-faint">{footer}</div> : null}
       </div>
     );
   }

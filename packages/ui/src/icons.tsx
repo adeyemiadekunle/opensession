@@ -57,11 +57,24 @@ export const icons = {
       <path d="M9 4v16" />
     </>
   ),
+  panelRight: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="8" y="8" width="14" height="14" rx="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </>
+  ),
   chevronDown: <path d="M6 9l6 6 6-6" />,
   chevronUp: <path d="M6 15l6-6 6 6" />,
   check: <path d="M4 12l5 5L20 7" />,
   chevronRight: <path d="M9 6l6 6-6 6" />,
   expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />,
+  collapse: <path d="M20 10h-6V4M4 14h6v6M14 10l7-7M3 21l7-7" />,
   list: <path d="M4 6h2M4 12h2M4 18h2M9 6h11M9 12h11M9 18h11" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
 } satisfies Record<string, ReactNode>;

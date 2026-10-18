@@ -30,6 +30,8 @@
   --os-selected: #e4ddd0;
   --os-radius: 12px;
   --os-radius-md: 8px;
+  --os-shadow-pop: 0 8px 24px rgba(29, 28, 26, 0.12), 0 1px 2px rgba(29, 28, 26, 0.06);
+  --os-shadow-modal: 0 20px 50px rgba(29, 28, 26, 0.18), 0 2px 6px rgba(29, 28, 26, 0.08);
   --os-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --os-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
@@ -57,6 +59,8 @@
     --os-del-bg: rgba(228, 104, 95, 0.14);
     --os-user: #26262a;
     --os-selected: #23231f;
+    --os-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --os-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55);
     color-scheme: dark;
   }
 }
@@ -66,6 +70,7 @@
   --os-accent: #7aa2f7; --os-accent-text: #0d1420; --os-danger: #e4685f; --os-ok: #5cbf8a; --os-warn: #e6b04c;
   --os-add: #5cbf8a; --os-del: #e4685f; --os-add-bg: rgba(92, 191, 138, 0.14); --os-del-bg: rgba(228, 104, 95, 0.14);
   --os-user: #26262a; --os-selected: #23231f; color-scheme: dark;
+  --os-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45); --os-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55);
 }
 
 /* Accent color and code font from Settings > Appearance (blue and JetBrains Mono are the defaults).
@@ -115,6 +120,9 @@
   --color-faint: var(--os-faint);
   --radius-md: var(--os-radius-md);
   --radius-lg: var(--os-radius);
+  /* Floating surfaces: soft in light, deep in dark (set per theme above). */
+  --shadow-pop: var(--os-shadow-pop);
+  --shadow-modal: var(--os-shadow-modal);
   --font-sans: var(--os-sans);
   --font-mono: var(--os-mono);
   /* Popovers, menus and dialogs: quick fade/scale so they feel attached, not teleported. */
@@ -135,12 +143,7 @@
   html, body, #root { height: 100%; margin: 0; }
   body { background: var(--os-bg); color: var(--os-text); font: 14px/1.5 var(--os-sans); }
   button, input, select, textarea { font: inherit; color: inherit; }
-  button {
-    border: 1px solid var(--os-border); background: var(--os-panel); border-radius: var(--os-radius-md);
-    padding: 6px 12px; cursor: pointer;
-  }
-  button:hover:not(:disabled) { border-color: var(--os-muted); }
-  button:disabled { opacity: 0.5; cursor: default; }
+  button, input, select, textarea { font: inherit; color: inherit; }
   input, select, textarea {
     border: 1px solid var(--os-border-strong); background: var(--os-panel); border-radius: var(--os-radius-md); padding: 6px 10px; min-width: 0;
   }
@@ -148,6 +151,9 @@
   code { font-family: var(--os-mono); font-size: 0.92em; }
   /* Thin scrollbars with no track, so they sit on the surface instead of a grey gutter. */
   * { scrollbar-width: thin; scrollbar-color: var(--os-border-strong) transparent; }
+  /* Find-in-conversation matches (CSS Custom Highlight API, no DOM mutation). */
+  ::highlight(find) { background-color: color-mix(in srgb, var(--os-warn) 30%, transparent); }
+  ::highlight(find-current) { background-color: var(--os-warn); color: #1a1a19; }
 }
 
 @layer components {
@@ -155,22 +161,17 @@
   .os-link { border: none; background: none; padding: 0; color: var(--os-accent); }
   .os-error { color: var(--os-danger); padding: 6px 0; }
   .os-ok { color: var(--os-ok); padding: 6px 0; }
-  .os-hint { background: var(--os-sunken); border-radius: var(--os-radius-md); padding: 8px 10px; color: var(--os-muted); }
   .os-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .os-row > input { flex: 1 1 200px; }
-  .os-pre {
-    font-family: var(--os-mono); font-size: 12.5px; background: var(--os-code); border-radius: var(--os-radius-md);
-    padding: 10px; margin: 6px 0 0; overflow: auto; white-space: pre;
-  }
+  /* File-viewer syntax tokens (packages/ui/src/highlight.tsx) */
+  .tok-kw { color: var(--os-accent); }
+  .tok-str { color: var(--os-ok); }
+  .tok-num { color: var(--os-warn); }
+  .tok-com { color: var(--os-faint); font-style: italic; }
 
   /* Brand on the sign-in page */
   .os-brand { font-weight: 650; letter-spacing: -0.01em; }
   .os-brand small { font-weight: 400; color: var(--os-muted); margin-left: 6px; }
-
-  /* Approval requests above the composer (Requests.tsx) */
-  .os-requests { display: flex; flex-direction: column; gap: 8px; padding: 0 28px 0 40px; flex: none; }
-  .os-requests > * { max-width: 640px; }
-  @media (max-width: 639px) { .os-requests { padding: 0 16px; } }
 
   .os-settings { max-width: 760px; margin: 0 auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 16px; }
   .os-card { background: var(--os-panel); border: 1px solid var(--os-border); border-radius: var(--os-radius); padding: 16px 18px; }
@@ -179,10 +180,6 @@
 
   .os-signin { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px 16px; }
   .os-signin .os-brand { font-size: 22px; }
-
-  /* Suggested replies above the composer */
-  .os-suggest { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-wrap: wrap; gap: 6px; }
-  .os-suggest button { font-size: 12px; padding: 2px 8px; }
 
   /* Terminal */
   .os-terminal { display: flex; flex-direction: column; flex: 1; min-height: 320px; height: 100%; background: var(--os-code); border-radius: 6px; overflow: hidden; }

@@ -46,7 +46,7 @@ export function CommandPalette({ open, onClose, items }: { open: boolean; onClos
       <div
         role="dialog"
         aria-label="Command palette"
-        className="relative flex w-[600px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-lg border border-input bg-popover shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
+        className="relative flex w-[600px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-lg border border-input bg-popover shadow-modal"
       >
         <div className="flex h-[52px] items-center gap-2.5 border-b border-border px-4">
           <svg className="size-[15px] shrink-0 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">

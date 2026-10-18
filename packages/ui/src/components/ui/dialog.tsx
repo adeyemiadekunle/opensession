@@ -22,7 +22,7 @@ export function Dialog({ open, onClose, title, footer, className, children }: Di
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={cn(
-            "fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100vh-32px)] w-[540px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 animate-pop flex-col overflow-auto rounded-lg border border-input bg-popover shadow-[0_24px_64px_rgba(0,0,0,0.55)]",
+            "fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100vh-32px)] w-[540px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 animate-pop flex-col overflow-auto rounded-lg border border-input bg-popover shadow-modal",
             className,
           )}
         >

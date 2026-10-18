@@ -1,6 +1,25 @@
+import { useRef, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CopyButton } from "./components/ui/copy-button";
 import { cn } from "./lib/utils";
+
+/** Fenced block with a hover copy button; the text comes from the rendered DOM, so
+ *  markdown inside the fence is copied verbatim. */
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  return (
+    <div className="group relative">
+      <pre
+        ref={ref}
+        className="m-0 max-h-80 overflow-auto rounded-md border border-border bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6] [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[1em]"
+      >
+        {children}
+      </pre>
+      <CopyButton getText={() => ref.current?.textContent ?? ""} className="absolute right-1.5 top-1.5" />
+    </div>
+  );
+}
 
 /** Element styles for the agent's replies: the design tokens, sized for the chat column. Raw HTML
  *  in the text is not rendered (react-markdown's default), so a reply can't inject markup. */
@@ -21,11 +40,7 @@ const components: Components = {
   blockquote: ({ children }) => <blockquote className="m-0 border-l-2 border-input pl-3 text-muted-foreground">{children}</blockquote>,
   hr: () => <hr className="my-1 border-0 border-t border-border" />,
   img: ({ src, alt }) => <img src={src} alt={alt} className="max-w-full rounded-md" />,
-  pre: ({ children }) => (
-    <pre className="m-0 max-h-80 overflow-auto rounded-md border border-border bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6] [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[1em]">
-      {children}
-    </pre>
-  ),
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   code: ({ children, className }) => (
     <code className={cn("rounded bg-sunken px-1 py-px font-mono text-[0.88em]", className)}>{children}</code>
   ),
