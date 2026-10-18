@@ -123,14 +123,19 @@ export abstract class OpenCodeClient implements OpenSessionClient {
       await this.api.get(`/api/session/${enc(id)}/message`, { query: { limit: opts.limit ?? 100, order: opts.order ?? "asc" } }),
     );
   }
+  /** Live events of one session: OpenCode's event bus (`/api/event`), filtered to it. The
+   *  session log (`/api/experimental/session/{id}/log?follow=true`) only sends "log.synced"
+   *  in OpenCode 2.0.0 and then stays quiet, so it can't drive live updates. The first
+   *  event, "server.connected", is passed on too: a (re)connected stream may have missed
+   *  events, so the caller refreshes. `after` is not used by the bus (kept for callers). */
   async *events(id: string, opts: { after?: string; signal?: AbortSignal } = {}): AsyncIterable<LogEvent> {
-    const res: Response = await this.api.get(`/api/experimental/session/${enc(id)}/log`, {
-      query: { follow: "true", after: opts.after },
-      signal: opts.signal,
-      raw: true,
-    });
+    const res: Response = await this.api.get("/api/event", { signal: opts.signal, raw: true });
     if (!res.body) return;
-    yield* parseSSE(res.body, opts.signal);
+    for await (const ev of parseSSE(res.body, opts.signal)) {
+      const d = ev.data as { type?: string; data?: { sessionID?: string }; properties?: { sessionID?: string } } | null;
+      if (!d || typeof d !== "object") continue;
+      if (d.type === "server.connected" || (d.data?.sessionID ?? d.properties?.sessionID) === id) yield ev;
+    }
   }
   async shell(id: string, command: string) {
     await this.api.post(`/api/session/${enc(id)}/shell`, { json: { command } });

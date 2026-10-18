@@ -48,9 +48,18 @@ FULL = {
 GUARD = [*agentconfig.GIT_APPROVAL_RULES, *agentconfig.NETWORK_APPROVAL_RULES]
 
 
+def test_local_mode_writes_only_the_persons_own_instructions():
+    assert "AGENTS.md" not in agentconfig.render_files(AgentConfig.model_validate({}), cloud=False)
+    files = agentconfig.render_files(AgentConfig.model_validate({"instructions": "Use pnpm."}), cloud=False)
+    assert files["AGENTS.md"] == "Use pnpm.\n"
+    assert agentconfig.render_files(AgentConfig.model_validate({}))["AGENTS.md"] == agentconfig.REPLY_GUIDE
+
+
 def test_render_files_matches_opencode_v2_layout():
     files = agentconfig.render_files(AgentConfig.model_validate(FULL))
     assert set(files) == {"opensession-skills/git-release/SKILL.md", "AGENTS.md", "opencode.json"}
+    # The cloud's reply guide comes first, then the person's own instructions, unchanged.
+    assert files["AGENTS.md"] == agentconfig.REPLY_GUIDE + "\nUse pnpm. Write tests.\n"
     skill = files["opensession-skills/git-release/SKILL.md"]
     assert skill.startswith('---\nname: "git-release"\ndescription: "Prepare releases"\n---\n')
     assert skill.endswith("Steps:\n1. bump\n")
@@ -168,7 +177,7 @@ def test_entrypoint_applies_bundle_and_removes_old_files(tmp_path):
     assert not (home / ".state/incoming/opensession-config").exists()
     apply({"skills": [{"id": "other", "description": "d", "body": "b"}]})
     assert not (cfgdir / "opensession-skills/git-release").exists()
-    assert not (cfgdir / "AGENTS.md").exists()
+    assert (cfgdir / "AGENTS.md").read_text() == agentconfig.REPLY_GUIDE  # their instructions are gone
     agents = json.loads((cfgdir / "opencode.json").read_text())["agents"]
     assert "reviewer" not in agents  # removed; only the built-ins' git approval rules remain
     assert set(agents) == {b["id"] for b in agentconfig.BUILTIN_AGENTS}
