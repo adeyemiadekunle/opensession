@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import type { DiffFile, FileEntry, OpenSessionClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { Button } from "./components/ui/button";
+import { Empty } from "./components/ui/empty";
+import { PanelHeader } from "./components/ui/panel";
 import { NamedIcon } from "./icons";
 import { EDITOR_DEFAULTS, PREF, usePref, type EditorPrefs } from "./prefs";
 import { cn } from "./lib/utils";
@@ -61,21 +63,15 @@ export function FilesPanel({
   );
   const open = tabs.find((t) => t.path === activePath) ?? null;
   const lines = open ? open.text.split("\n") : [];
-  const iconBtn = "grid size-[26px] shrink-0 place-items-center rounded-md border-0 bg-transparent p-0 text-faint hover:bg-sunken hover:text-foreground";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-[42px] shrink-0 items-center gap-1.5 border-b border-border pl-2 pr-1.5">
-        <button
-          className={cn(iconBtn, showTree && "text-foreground")}
-          aria-label="Show the file tree"
-          aria-pressed={showTree}
-          onClick={() => setShowTree((v) => !v)}
-        >
-          <NamedIcon name="list" className="size-[13px]" />
-        </button>
-        <div role="tablist" aria-label="Open files" className="flex min-w-0 flex-1 items-end gap-0.5 self-end overflow-x-auto">
-          {tabs.length === 0 ? <span className="px-1 pb-2.5 text-[13.5px] font-semibold">Files</span> : null}
+      <PanelHeader
+        onClose={onClose}
+        closeLabel="Close files panel"
+        title={
+        tabs.length === 0 ? "Files" : (
+        <div role="tablist" aria-label="Open files" className="flex h-[41px] min-w-0 flex-1 items-end gap-0.5 overflow-x-auto font-normal">
           {tabs.map((t) => {
             const name = t.path.split("/").pop() ?? t.path;
             const selected = t.path === activePath;
@@ -107,32 +103,41 @@ export function FilesPanel({
             );
           })}
         </div>
-        <button
-          className={iconBtn}
+        )}
+      >
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className={cn("text-faint", showTree && "text-foreground")}
+          aria-label="Show the file tree"
+          aria-pressed={showTree}
+          onClick={() => setShowTree((v) => !v)}
+        >
+          <NamedIcon name="list" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-faint"
           aria-label="Filter files"
           onClick={() => {
             setShowTree(true);
             setTimeout(() => filterRef.current?.focus());
           }}
         >
-          <NamedIcon name="search" className="size-[13px]" />
-        </button>
+          <NamedIcon name="search" />
+        </Button>
         {onExpand ? (
-          <button className={iconBtn} aria-label="Open files in full screen" title="Open in full screen" onClick={onExpand}>
-            <NamedIcon name="expand" className="size-[13px]" />
-          </button>
+          <Button variant="ghost" size="icon-sm" className="text-faint" aria-label="Open files in full screen" title="Open in full screen" onClick={onExpand}>
+            <NamedIcon name="expand" />
+          </Button>
         ) : null}
         {onDock ? (
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px]" onClick={onDock}>
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={onDock}>
             Dock right
           </Button>
         ) : null}
-        {onClose ? (
-          <button className={iconBtn} aria-label="Close files panel" onClick={onClose}>
-            <NamedIcon name="close" className="size-[14px]" />
-          </button>
-        ) : null}
-      </header>
+      </PanelHeader>
       <div className="flex min-h-0 flex-1">
         {showTree ? (
           <aside aria-label="File tree" className="flex w-[156px] shrink-0 flex-col gap-1.5 overflow-hidden border-r border-border p-2">
@@ -217,10 +222,7 @@ export function DiffPanel({ client, refreshKey }: { client: OpenSessionClient; r
     <div className="flex min-h-0 flex-1 flex-col">
       {diff.error ? <div className="os-error px-3">{diff.error}</div> : null}
       {diff.data && files.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-          <span className="font-semibold">No changes yet</span>
-          <span className="max-w-[280px] text-[13px] text-faint">When the agent edits a file, the diff appears here for you to review before you commit.</span>
-        </div>
+        <Empty title="No changes yet" />
       ) : null}
       {diff.loading && !diff.data ? (
         <div role="status" aria-label="Loading changes" className="flex flex-col gap-3 p-3.5">

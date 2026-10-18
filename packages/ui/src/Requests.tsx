@@ -55,7 +55,7 @@ export function Requests({
   if (!permissions.length && !forms.length) return null;
   // Design: approvals float above the composer, so they stay visible while typing.
   return (
-    <div aria-live="polite" aria-label="Approvals" className="absolute inset-x-0 bottom-full z-10 flex max-w-[640px] flex-col gap-2 pb-2 pl-10 pr-7 max-sm:px-4">
+    <div aria-live="polite" aria-label="Approvals" className="absolute inset-x-0 bottom-full z-10 flex flex-col gap-2 pb-2 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] max-sm:px-4 [&>*]:max-w-[572px]">
       {err ? <div className="os-error">{err}</div> : null}
       {permissions.map((p) =>
         p.action === HAND_OVER_ACTION ? (

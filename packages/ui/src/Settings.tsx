@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { AgentConfigStore, CloudClient, LocalClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { GithubCard } from "./Projects";
@@ -32,6 +32,10 @@ export function CloudSettings({
   project,
   onBack,
   desktop,
+  agentSetup,
+  initial,
+  section,
+  onSection,
 }: {
   client: CloudClient;
   /** The open project, for its sandbox and model list. */
@@ -39,6 +43,13 @@ export function CloudSettings({
   onBack?: () => void;
   /** Desktop app: shows its own preferences (CI notifications). */
   desktop?: boolean;
+  /** The Agent setup section's body (skills, agents, MCP servers…). */
+  agentSetup?: ReactNode;
+  /** Section to open first. */
+  initial?: string;
+  /** The open section, from the address (see SettingsShell). */
+  section?: string;
+  onSection?: (id: string) => void;
 }) {
   const store = useMemo(() => client.agentConfigStore(), [client]);
   // The model list comes from the project's sandbox: read it only when it is already running.
@@ -89,6 +100,7 @@ export function CloudSettings({
         </>
       ),
     },
+    ...agentPage(agentSetup, "Skills, agents, commands, MCP servers and instructions for your cloud workspaces."),
     { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
     { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
     {
@@ -103,7 +115,7 @@ export function CloudSettings({
       ),
     },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} aside="Applies to your cloud account" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} aside="Applies to your cloud account" />;
 }
 
 /** Desktop app, this computer: the same settings pages, with keys and agent setup stored here. */
@@ -112,12 +124,23 @@ export function LocalSettings({
   store,
   onBack,
   onSaved,
+  agentSetup,
+  initial,
+  section,
+  onSection,
 }: {
   client: LocalClient;
   store: AgentConfigStore;
   onBack?: () => void;
   /** After keys change (the workspace remounts to pick up new models). */
   onSaved?: () => void;
+  /** The Agent setup section's body. */
+  agentSetup?: ReactNode;
+  /** Section to open first. */
+  initial?: string;
+  /** The open section, from the address (see SettingsShell). */
+  section?: string;
+  onSection?: (id: string) => void;
 }) {
   const models = useAsync(() => client.listModels(), [client]);
   const pages: SettingsPage[] = [
@@ -141,10 +164,15 @@ export function LocalSettings({
         </>
       ),
     },
+    ...agentPage(agentSetup, "Skills, agents, commands, MCP servers and instructions for OpenCode on this computer."),
     { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
     { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} aside="Applies to this computer" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} aside="Applies to this computer" />;
+}
+
+function agentPage(body: ReactNode, description: string): SettingsPage[] {
+  return body ? [{ id: "agent", title: "Agent setup", description, body }] : [];
 }
 
 export function ApiKeys({ client }: { client: CloudClient }) {
@@ -174,8 +202,8 @@ export function ApiKeys({ client }: { client: CloudClient }) {
     <section className="os-card">
       <h2>Model API keys</h2>
       <p className="os-muted">
-        Bring your own key. Keys are encrypted at rest and only passed to your own sandbox. We check each key with the
-        provider before saving.
+        Bring your own key. Keys are encrypted at rest and never put inside your sandbox: we add them to your model
+        calls on the way out. We check each key with the provider before saving.
       </p>
       {keys.error ? <div className="os-error">{keys.error}</div> : null}
       <ul className="os-list">

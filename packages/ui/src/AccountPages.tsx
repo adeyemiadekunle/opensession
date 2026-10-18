@@ -136,13 +136,13 @@ function UsageCards({ client }: { client: CloudClient }) {
         <section aria-label="Disk" className="flex flex-col gap-3 rounded-lg border border-input bg-card p-4">
           <div className="flex items-baseline gap-2">
             <span className="font-semibold">Disk</span>
-            <span className="ml-auto text-[12.5px] text-faint">{l ? `${l.disk_mb} MB per project` : ""}</span>
+            <span className="ml-auto text-[12.5px] text-faint">{l ? (l.disk_mb ? `${l.disk_mb} MB per project` : "No limit") : ""}</span>
           </div>
           {projects.data ? (
             (() => {
               const used = projects.data.reduce((t, p) => t + (p.status?.disk_mb ?? 0), 0);
               const max = projects.data.reduce((t, p) => t + (p.status?.disk_limit_mb ?? 0), 0);
-              return <Meter label="Disk" value={used} max={max} detail={`${Math.round(used)} of ${max} MB across ${projects.data.length} projects`} />;
+              return <Meter label="Disk" value={used} max={max} detail={`${Math.round(used)}${max ? ` of ${max}` : ""} MB across ${projects.data.length} projects`} />;
             })()
           ) : (
             <span className="text-[13px] text-muted-foreground">{projects.error ?? "Loading…"}</span>
@@ -161,7 +161,7 @@ function UsageCards({ client }: { client: CloudClient }) {
                 {status ? (status.state === "running" ? "Running" : status.state === "sleeping" ? "Asleep" : "Not started") : "…"}
               </span>
               <span className="w-32 text-right font-mono text-[12.5px] text-muted-foreground">
-                {status?.disk_mb != null ? `${Math.round(status.disk_mb)} / ${status.disk_limit_mb} MB` : "—"}
+                {status?.disk_mb != null ? `${Math.round(status.disk_mb)}${status.disk_limit_mb ? ` / ${status.disk_limit_mb}` : ""} MB` : "—"}
               </span>
             </li>
           ))}

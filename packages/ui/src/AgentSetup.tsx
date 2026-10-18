@@ -23,7 +23,18 @@ export interface SecretsApi {
 type Tab = "skills" | "agents" | "commands" | "mcp" | "tools" | "instructions" | "plugins" | "secrets";
 
 /** Edit the agent's skills, agents, commands, MCP servers, tools, instructions and plugins. */
-export function AgentSetup({ store, secrets, onSaved }: { store: AgentConfigStore; secrets?: SecretsApi; onSaved?: () => void }) {
+export function AgentSetup({
+  store,
+  secrets,
+  onSaved,
+  embedded,
+}: {
+  store: AgentConfigStore;
+  secrets?: SecretsApi;
+  onSaved?: () => void;
+  /** Inside Settings, which shows the title and description itself. */
+  embedded?: boolean;
+}) {
   const [saved, setSaved] = useState<AgentConfig | null>(null);
   const [cfg, setCfg] = useState<AgentConfig>(emptyAgentConfig());
   const [tab, setTab] = useState<Tab>("skills");
@@ -77,14 +88,16 @@ export function AgentSetup({ store, secrets, onSaved }: { store: AgentConfigStor
   ];
 
   return (
-    <div className="os-setup">
+    <div className={embedded ? "flex flex-col gap-3" : "os-setup"}>
       <div className="os-setup-bar">
-        <div>
-          <h2>Agent setup</h2>
-          <span className="os-muted">
-            {store.scope === "cloud" ? "Applies to your cloud workspaces." : "Applies to OpenCode on this computer."}
-          </span>
-        </div>
+        {embedded ? null : (
+          <div>
+            <h2>Agent setup</h2>
+            <span className="os-muted">
+              {store.scope === "cloud" ? "Applies to your cloud workspaces." : "Applies to OpenCode on this computer."}
+            </span>
+          </div>
+        )}
         <span className="os-spacer" />
         {dirty ? <span className="os-muted">Unsaved changes</span> : null}
         <button disabled={!dirty || saving} onClick={() => saved && setCfg(saved)}>

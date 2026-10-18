@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from opensession.gateway import create_app
-from opensession.github import GitHubApp, GitHubAppConfig, GitHubError, git_auth_env
+from opensession.github import GitHubApp, GitHubAppConfig, GitHubError, app_slug, git_auth_env
 
 from .fakes import make_manager
 
@@ -104,6 +104,13 @@ def test_state_is_signed_and_expires():
         gh.verify_state(gh.make_state("alice", ttl=-1))
     with pytest.raises(GitHubError):
         gh.verify_state("garbage")
+
+
+def test_app_slug_accepts_the_app_page_url():
+    assert app_slug("opensession-kunemi") == "opensession-kunemi"
+    assert app_slug("https://github.com/apps/opensession-kunemi") == "opensession-kunemi"
+    assert app_slug(" https://github.com/apps/opensession-kunemi/ ") == "opensession-kunemi"
+    assert app_slug("https://github.com/apps/opensession-kunemi/installations/new") == "opensession-kunemi"
 
 
 def test_git_auth_env_keeps_token_off_command_line():

@@ -135,6 +135,8 @@
   }
   input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
   code { font-family: var(--os-mono); font-size: 0.92em; }
+  /* Thin scrollbars with no track, so they sit on the surface instead of a grey gutter. */
+  * { scrollbar-width: thin; scrollbar-color: var(--os-border-strong) transparent; }
 }
 
 @layer components {

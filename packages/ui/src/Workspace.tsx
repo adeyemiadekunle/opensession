@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   BUILTIN_AGENTS,
   eventCursor,
@@ -22,6 +22,7 @@ import { BrowserPanel, type PreviewApi } from "./BrowserPanel";
 import { Requests } from "./Requests";
 import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
 import { Button } from "./components/ui/button";
+import { PanelHeader } from "./components/ui/panel";
 import { Select } from "./components/ui/select";
 import { Dialog } from "./components/ui/dialog";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
@@ -34,6 +35,11 @@ import { MODEL_KEY, PREF, VARIANT_KEY, readPref } from "./prefs";
 
 const AGENT_KEY = "opensession.agent";
 const SIDEBAR_KEY = "opensession.sidebar";
+/** Side gutters that center the 640px conversation column (the defaults are pl-10 / pr-7). */
+const CENTERED_GUTTERS = {
+  "--gutter-l": "max(2.5rem, calc((100% - 640px) / 2))",
+  "--gutter-r": "max(1.75rem, calc((100% - 640px) / 2))",
+} as CSSProperties;
 const NARROW_QUERY = "(max-width: 1000px)";
 /** Set by the desktop app before it switches to the cloud, so the moved session opens. */
 export const OPEN_SESSION_KEY = "opensession.openSession";
@@ -336,6 +342,18 @@ export function Workspace({
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages.length]);
 
+  // The conversation's scrollbar narrows its column; the composer is inset by the same width so their edges line up.
+  const [scrollbar, setScrollbar] = useState(0);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => setScrollbar(el.offsetWidth - el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   /** Settings > General: open the Terminal panel when a session starts. */
   const openTerminalIfWanted = () => {
     if (terminal && readPref(PREF.openTerminal, false))
@@ -574,6 +592,8 @@ export function Workspace({
   const togglable = (["terminal", "changes", "git", "files", "browser"] as DockPanelId[]).filter(available);
   // The terminal and browser can be unavailable, so hide their cards rather than drop them from state.
   const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => available(id) && id !== full) };
+  // With no panel beside it (none open, or a narrow window) the conversation and composer sit in a centered column.
+  const centered = narrow || shownDock.stack.length === 0;
 
   const panelBody = (id: DockPanelId, isFull = false) =>
     id === "files" ? (
@@ -763,8 +783,7 @@ export function Workspace({
             )}
           >
             {full === "files" ? null : (
-              <header className="flex h-[42px] shrink-0 items-center gap-2 border-b border-border pl-3.5 pr-1.5 text-[13.5px] font-semibold">
-                <span className="min-w-0 flex-1 truncate">{DOCK_TITLES[full]}</span>
+              <PanelHeader title={DOCK_TITLES[full]} onClose={() => closeFull(full)} closeLabel={`Close ${DOCK_TITLES[full]} panel`}>
                 {!narrow ? (
                   <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={() => setFull(null)}>
                     Dock right
@@ -772,8 +791,8 @@ export function Workspace({
                 ) : full === "changes" ? (
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-[26px] text-faint"
+                    size="icon-sm"
+                    className="text-faint"
                     aria-label="Open changes in full view"
                     title="Open in full view"
                     onClick={() => setReviewOpen(true)}
@@ -781,23 +800,14 @@ export function Workspace({
                     <NamedIcon name="expand" className="size-[13px]" />
                   </Button>
                 ) : null}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-[26px] text-base text-faint"
-                  aria-label={`Close ${DOCK_TITLES[full]} panel`}
-                  onClick={() => closeFull(full)}
-                >
-                  ×
-                </Button>
-              </header>
+              </PanelHeader>
             )}
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{panelBody(full, true)}</div>
           </section>
         ) : null}
-        <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")}>
+        <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
           {conn.lost && active ? (
-            <div role="alert" className="mx-10 mt-3 flex max-w-[640px] items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
+            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-10 mt-3 flex max-w-[640px] items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
               <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
               <span className="min-w-0 flex-1">
                 <strong className="font-semibold text-destructive">Lost connection to the agent.</strong>{" "}
@@ -812,7 +822,7 @@ export function Workspace({
           ) : null}
           <div
             ref={listRef}
-            className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-10 pr-7 pt-7 max-sm:px-4 max-sm:pt-5 [&>*]:max-w-[640px]"
+            className="flex min-h-0 flex-1 flex-col items-start gap-3 overflow-auto pb-4 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] pt-7 max-sm:px-4 max-sm:pt-5 [&>*]:max-w-[640px]"
           >
             {!active ? (
               <div className="m-auto flex max-w-[440px] flex-col items-center gap-5 text-center">
@@ -866,7 +876,7 @@ export function Workspace({
             ) : null}
           </div>
           {err ? (
-            <div role="alert" className="mx-10 mt-3 flex items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
+            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,2.5rem)] mt-3 flex items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
               <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
               <span className="min-w-0 flex-1 text-destructive">{err}</span>
               <Button size="sm" variant="outline" onClick={() => setErr(null)}>
@@ -875,7 +885,7 @@ export function Workspace({
             </div>
           ) : null}
           {commandHints.length || skillHints.length ? (
-            <ul className="os-suggest os-requests">
+            <ul className="os-suggest os-requests pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)]">
               {commandHints.map((c) => (
                 <li key={c.name}>
                   <Button size="sm" variant="outline" title={c.description} onClick={() => setText(`/${c.name} `)}>
@@ -893,7 +903,10 @@ export function Workspace({
             </ul>
           ) : null}
 
-          <div className="relative shrink-0 pb-4 pl-10 pr-7 max-sm:px-4 max-sm:pb-3">
+          <div
+            className="relative shrink-0 pb-4 pl-[var(--gutter-l,2.5rem)] pr-[calc(var(--gutter-r,1.75rem)_+_var(--scrollbar,0px))] max-sm:px-4 max-sm:pb-3"
+            style={{ "--scrollbar": `${scrollbar}px` } as CSSProperties}
+          >
             {active ? (
               <Requests
                 client={client}
@@ -909,7 +922,7 @@ export function Workspace({
               <div
                 role="status"
                 aria-live="polite"
-                className="absolute inset-x-10 bottom-full max-sm:inset-x-4 z-10 mb-2 flex max-w-[640px] items-center gap-2.5 rounded-lg border border-warning/40 bg-card px-3.5 py-2.5 text-[13px] text-warning shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
+                className="absolute left-[var(--gutter-l,2.5rem)] right-10 bottom-full max-sm:inset-x-4 z-10 mb-2 flex max-w-[640px] items-center gap-2.5 rounded-lg border border-warning/40 bg-card px-3.5 py-2.5 text-[13px] text-warning shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
               >
                 <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-warning" />
                 You're offline. Your message will send when the connection is back.
@@ -944,8 +957,8 @@ export function Workspace({
               id === "changes" ? (
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="size-[26px] text-faint"
+                  size="icon-sm"
+                  className="text-faint"
                   aria-label="Open changes in full view"
                   title="Open in full view"
                   onClick={() => setReviewOpen(true)}
@@ -955,8 +968,8 @@ export function Workspace({
               ) : (
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="size-[26px] text-faint"
+                  size="icon-sm"
+                  className="text-faint"
                   aria-label={`Open ${DOCK_TITLES[id].toLowerCase()} in full screen`}
                   title="Open in full screen"
                   onClick={() => setFull(id)}

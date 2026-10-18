@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type ReactNode, type SetStateAction } from "react";
-import { Button } from "./components/ui/button";
+import { PanelHeader } from "./components/ui/panel";
 import { cn } from "./lib/utils";
 import { storageGet } from "./hooks";
 
@@ -25,7 +25,9 @@ export const DOCK_TITLES: Record<DockPanelId, string> = {
 export const DOCK_KEY = "opensession.dock";
 const DOCK_MIN = 320;
 const DOCK_MAX = 900;
-const DOCK_DEFAULT: DockState = { stack: ["files"], heights: {}, width: 468 };
+/** Narrowest dock that shows two columns of panels. */
+const DOCK_TWO_COLUMNS = 680;
+const DOCK_DEFAULT: DockState = { stack: [], heights: {}, width: 468 };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -87,7 +89,9 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions, ownH
 
   const startWidth = (e: ReactMouseEvent) => {
     e.preventDefault();
-    setDrag({ kind: "width", start: e.clientX, size: state.width });
+    // From the width shown, which two columns can make wider than the saved one.
+    const shown = e.currentTarget.parentElement?.getBoundingClientRect().width ?? state.width;
+    setDrag({ kind: "width", start: e.clientX, size: Math.round(shown) });
   };
 
   const startSplit = (upper: DockPanelId, e: ReactMouseEvent) => {
@@ -97,8 +101,59 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions, ownH
   };
 
   const { stack, heights } = state;
+  // Three or more panels: the first takes a full-height column on the left, the rest stack beside it.
+  const columns = stack.length >= 3 ? [stack.slice(0, 1), stack.slice(1)] : [stack];
+  const width = columns.length > 1 ? Math.max(state.width, DOCK_TWO_COLUMNS) : state.width;
+
+  const card = (id: DockPanelId, pinned: boolean) => (
+    <section
+      data-panel={id}
+      className={cn(
+        "flex min-h-24 flex-col overflow-hidden rounded-lg border border-border bg-sidebar",
+        id === "terminal" && "bg-code",
+      )}
+      style={{ flex: pinned ? `0 0 ${heights[id]}px` : "1 1 0" }}
+    >
+      {ownHeader?.(id) ? null : (
+        <PanelHeader title={DOCK_TITLES[id]} onClose={() => onClose(id)} closeLabel={`Close ${DOCK_TITLES[id]} panel`}>
+          {headerActions?.(id)}
+        </PanelHeader>
+      )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{renderBody(id)}</div>
+    </section>
+  );
+
+  const column = (ids: DockPanelId[]) => (
+    <div key={ids[0]} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {ids.map((id, i) => {
+        const above = ids[i - 1];
+        return (
+          <Fragment key={id}>
+            {above ? (
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label={`Resize ${DOCK_TITLES[above]} panel height`}
+                onMouseDown={(e) => startSplit(above, e)}
+                className="group flex h-3 shrink-0 cursor-row-resize items-center justify-center"
+              >
+                <span
+                  className={cn(
+                    "h-[3px] w-9 rounded-sm bg-input group-hover:bg-primary",
+                    drag?.kind === "split" && drag.panel === above && "bg-primary",
+                  )}
+                />
+              </div>
+            ) : null}
+            {card(id, i < ids.length - 1 && heights[id] !== undefined)}
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div className="flex min-w-0 shrink-0" style={{ width: state.width }}>
+    <div className="flex min-w-0 shrink-0" style={{ width }}>
       <div
         role="separator"
         aria-orientation="vertical"
@@ -113,56 +168,11 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions, ownH
           )}
         />
       </div>
-      <div ref={stackRef} className="flex min-w-0 flex-1 flex-col py-2.5 pr-2.5">
-        {stack.map((id, i) => {
-          const above = stack[i - 1];
-          const pinned = i < stack.length - 1 && heights[id] !== undefined;
-          return (
-            <Fragment key={id}>
-              {above ? (
-                <div
-                  role="separator"
-                  aria-orientation="horizontal"
-                  aria-label={`Resize ${DOCK_TITLES[above]} panel height`}
-                  onMouseDown={(e) => startSplit(above, e)}
-                  className="group flex h-3 shrink-0 cursor-row-resize items-center justify-center"
-                >
-                  <span
-                    className={cn(
-                      "h-[3px] w-9 rounded-sm bg-input group-hover:bg-primary",
-                      drag?.kind === "split" && drag.panel === above && "bg-primary",
-                    )}
-                  />
-                </div>
-              ) : null}
-              <section
-                data-panel={id}
-                className={cn(
-                  "flex min-h-24 flex-col overflow-hidden rounded-lg border border-border bg-sidebar",
-                  id === "terminal" && "bg-code",
-                )}
-                style={{ flex: pinned ? `0 0 ${heights[id]}px` : "1 1 0" }}
-              >
-                {ownHeader?.(id) ? null : (
-                <header className="flex h-[42px] shrink-0 items-center gap-2 border-b border-border pl-3.5 pr-1.5 text-[13.5px] font-semibold">
-                  <span className="min-w-0 flex-1 truncate">{DOCK_TITLES[id]}</span>
-                  {headerActions?.(id)}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-[26px] text-base text-faint"
-                    aria-label={`Close ${DOCK_TITLES[id]} panel`}
-                    onClick={() => onClose(id)}
-                  >
-                    ×
-                  </Button>
-                </header>
-                )}
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{renderBody(id)}</div>
-              </section>
-            </Fragment>
-          );
-        })}
+      <div
+        ref={stackRef}
+        className="flex min-w-0 flex-1 gap-2.5 py-2.5 pr-2.5"
+      >
+        {columns.map(column)}
       </div>
     </div>
   );

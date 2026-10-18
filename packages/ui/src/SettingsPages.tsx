@@ -332,7 +332,7 @@ export function SandboxCard({ account, project }: { account: CloudClient; projec
         </SettingRow>
         <SettingRow label="Disk used">
           <span className="font-mono text-[12.5px] text-muted-foreground">
-            {st ? (st.disk_mb == null ? "unknown" : `${Math.round(st.disk_mb)} of ${st.disk_limit_mb} MB`) : "…"}
+            {st ? (st.disk_mb == null ? "unknown" : `${Math.round(st.disk_mb)} MB${st.disk_limit_mb ? ` of ${st.disk_limit_mb} MB` : ""}`) : "…"}
           </span>
         </SettingRow>
         {st?.state === "running" && st.sleeps_in != null ? (
@@ -352,7 +352,7 @@ export function SandboxCard({ account, project }: { account: CloudClient; projec
               <span className="font-mono text-[12.5px] text-muted-foreground">{limits.data.max_running}</span>
             </SettingRow>
             <SettingRow label="Disk per project">
-              <span className="font-mono text-[12.5px] text-muted-foreground">{limits.data.disk_mb} MB</span>
+              <span className="font-mono text-[12.5px] text-muted-foreground">{limits.data.disk_mb ? `${limits.data.disk_mb} MB` : "No limit"}</span>
             </SettingRow>
           </>
         ) : (
