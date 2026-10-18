@@ -119,7 +119,7 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions, ownH
           {headerActions?.(id)}
         </PanelHeader>
       )}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{renderBody(id)}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.terminal-panel]:min-h-0">{renderBody(id)}</div>
     </section>
   );
 

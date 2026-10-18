@@ -245,7 +245,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
 export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: "Ctrl K", action: "Search sessions and actions" },
   { keys: "Ctrl F", action: "Find in this conversation" },
-  { keys: "Ctrl /", action: "Show keyboard shortcuts" },
+  { keys: "Ctrl / or ?", action: "Show keyboard shortcuts" },
   { keys: "Ctrl ,", action: "Open settings" },
   { keys: "Enter", action: "Send the message" },
   { keys: "Shift Enter", action: "New line in the message" },

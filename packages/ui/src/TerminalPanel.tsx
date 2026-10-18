@@ -123,16 +123,16 @@ export function TerminalPanel({ api }: { api: TerminalApi }) {
   }, [api, gen]);
 
   return (
-    <div className="os-terminal">
+    <div className="terminal-panel">
       {status ? (
-        <div className="os-terminal-status">
+        <div className="terminal-status">
           {status}
           {status === "The shell has exited." ? (
             <button onClick={() => setGen((g) => g + 1)}>New shell</button>
           ) : null}
         </div>
       ) : null}
-      <div className="os-terminal-host" ref={host} />
+      <div className="terminal-host" ref={host} />
     </div>
   );
 }
