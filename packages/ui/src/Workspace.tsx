@@ -187,6 +187,8 @@ export function Workspace({
   const [conn, setConn] = useState<{ lost: boolean; retryIn: number }>({ lost: false, retryIn: 0 });
   const retryNow = useRef<(() => void) | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  /** When the live stream last delivered an event (the busy poll backs off while it flows). */
+  const lastEvent = useRef(0);
 
   const modelList = models.data ?? [];
   const chosen = useMemo(
@@ -320,6 +322,7 @@ export function Workspace({
         try {
           for await (const ev of client.events(active, { after: cursor, signal: ctl.signal })) {
             cursor = eventCursor(ev) ?? cursor;
+            lastEvent.current = Date.now();
             backoff = 2;
             setConn((c) => (c.lost ? { lost: false, retryIn: 0 } : c));
             kick();
@@ -342,8 +345,8 @@ export function Workspace({
     };
   }, [client, active, refresh]);
 
-  // While the agent works, poll too: in the sandbox, OpenCode's log stream can stay quiet after
-  // its first "synced" event, and the reply (or its error) would only show on a reload.
+  // While the agent works, poll as well whenever the live stream has been quiet for a few
+  // seconds (a stalled proxy, a dropped connection), so a reply or its error still shows.
   const wasBusy = useRef(false);
   useEffect(() => {
     if (!active || !busy) {
@@ -352,7 +355,9 @@ export function Workspace({
       return;
     }
     wasBusy.current = true;
-    const t = setInterval(() => void refresh(), 2000);
+    const t = setInterval(() => {
+      if (Date.now() - lastEvent.current > 4000) void refresh();
+    }, 2000);
     return () => clearInterval(t);
   }, [active, busy, refresh]);
 
