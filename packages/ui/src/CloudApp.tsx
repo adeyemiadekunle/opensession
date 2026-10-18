@@ -233,6 +233,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         skills={skillIds}
         agents={agentIds}
         commands={setup.data?.config.commands ?? []}
+        agentContext={setup.data?.config}
         projectName={current?.name}
         sessionsTitle="Cloud"
         sectionsBefore={[projectsSection]}
@@ -243,7 +244,7 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         noModels={
           <>
             Add a model API key in{" "}
-            <button className="os-link" onClick={() => go("/settings/models")}>
+            <button className="border-0 bg-transparent p-0 text-primary hover:underline underline-offset-2" onClick={() => go("/settings/models")}>
               Settings
             </button>{" "}
             to get started.

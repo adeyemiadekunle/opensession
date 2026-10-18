@@ -51,6 +51,7 @@ export {
   DropdownMenuPortal,
 } from "./components/ui/dropdown-menu";
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, Tip } from "./components/ui/tooltip";
+export { Toaster, toast } from "./components/ui/toast";
 export { initTheme, setTheme, getTheme } from "./theme";
 export type { Theme } from "./theme";
 export { NamedIcon } from "./icons";

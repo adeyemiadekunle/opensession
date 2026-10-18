@@ -57,12 +57,13 @@ export function Requests({
   };
   const total = permissions.length + forms.length;
   if (!total) return null;
-  // Design: approvals float above the composer, so they stay visible while typing. Requests are
-  // answered one at a time, so only the first is shown, with a count of the rest.
+  // Design: approvals float bottom-right as notifications, so they stay visible while typing and
+  // don't take space in the conversation column. Requests are answered one at a time, so only the
+  // first is shown, with a count of the rest.
   const [first] = permissions;
   const form = first ? undefined : forms[0];
   return (
-    <div aria-live="polite" aria-label="Approvals" className="absolute inset-x-0 bottom-full z-10 flex flex-col gap-2 pb-2 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] max-sm:px-4 [&>*]:max-w-[572px]">
+    <div aria-live="polite" aria-label="Approvals" className="flex w-full flex-col gap-2">
       {err ? <div className="py-1.5 text-[13px] text-destructive">{err}</div> : null}
       {[first].filter((p): p is PermissionRequest => Boolean(p)).map((p) =>
         p.action === HAND_OVER_ACTION ? (

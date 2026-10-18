@@ -79,9 +79,30 @@ createRoot(document.getElementById("root")!).render(
     ) : (
       <Workspace
         client={mock}
-        agents={["build"]}
-        skills={[]}
-        commands={[]}
+        agents={["build", "debugger"]}
+        skills={["pr-review"]}
+        commands={[{ name: "deploy", description: "Deploy to staging" }]}
+        agentContext={{
+          skills: [{ id: "pr-review", name: null, description: "Review a pull request for correctness", body: "", hidden: false }],
+          agents: [
+            {
+              id: "debugger",
+              description: "Reproduces failures and narrows down causes",
+              mode: "primary",
+              model: null,
+              body: "",
+              permissions: [],
+              steps: null,
+            },
+          ],
+          commands: [{ name: "deploy", description: "Deploy to staging", agent: null, model: null, subagent: null, template: "Ship it." }],
+          mcp: { "project-docs": { type: "remote", url: "https://docs.example.com/mcp" } },
+          permissions: [{ action: "shell", resource: "rm -rf *", effect: "deny" }],
+          instructions: "Use pnpm, not npm.\nTests live in packages/*/tests — run them before claiming a fix.",
+          plugins: [],
+          default_agent: null,
+          git_approval: true,
+        }}
         git={gitActions}
         moveToCloud={moveToCloud}
         terminal={terminal}

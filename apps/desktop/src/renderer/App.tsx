@@ -374,6 +374,7 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       skills={setup.data?.config.skills.map((s) => s.id) ?? []}
       agents={setup.data?.config.agents.filter((a) => a.mode !== "subagent").map((a) => a.id) ?? []}
       commands={setup.data?.config.commands ?? []}
+      agentContext={setup.data?.config}
       projectName={name}
       sessionsTitle="This computer"
       sectionsBefore={[projects]}
@@ -392,7 +393,7 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       noModels={
         <>
           Add a model API key in{" "}
-          <button className="os-link" onClick={() => setPage("models")}>
+          <button className="border-0 bg-transparent p-0 text-primary hover:underline underline-offset-2" onClick={() => setPage("models")}>
             Settings
           </button>
           .

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiffFile, FileEntry, OpenSessionClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { Button } from "./components/ui/button";
+import { toast } from "./components/ui/toast";
 import { Empty } from "./components/ui/empty";
 import { PanelHeader } from "./components/ui/panel";
 import { NamedIcon } from "./icons";
@@ -342,13 +343,131 @@ export function FilesPanel({
   );
 }
 
-/** Changes card (design): one row per changed file with +/- counts, and the selected file's patch below. */
-export function DiffPanel({ client, refreshKey }: { client: OpenSessionClient; refreshKey: number }) {
+/** A file's status letter, GitHub-style (A added, M modified, D deleted, R renamed). */
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  added: { label: "A", cls: "text-success" },
+  deleted: { label: "D", cls: "text-destructive" },
+  renamed: { label: "R", cls: "text-warning" },
+};
+
+interface Hunk {
+  header: string;
+  /** -OLD_START / +NEW_START parsed from the @@ header. */
+  oldStart: number;
+  newStart: number;
+  lines: string[];
+}
+
+/** Splits a unified patch into file-header lines and @@ hunks. */
+function parsePatch(patch: string): { head: string[]; hunks: Hunk[] } {
+  const head: string[] = [];
+  const hunks: Hunk[] = [];
+  for (const l of patch.split("\n")) {
+    const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+    if (m) hunks.push({ header: l, oldStart: Number(m[1]), newStart: Number(m[2]), lines: [] });
+    else if (hunks.length) hunks[hunks.length - 1]!.lines.push(l);
+    else head.push(l);
+  }
+  return { head: head.filter((l) => l.trim()), hunks };
+}
+
+/** One file's patch: file headers faint, each hunk collapsible, with old/new line numbers and an
+ *  optional per-hunk revert. */
+function PatchView({ patch, fontSize, onRevert }: { patch: string; fontSize: number; onRevert?: (patchText: string) => void }) {
+  const [closed, setClosed] = useState<Set<number>>(new Set());
+  const { head, hunks } = useMemo(() => parsePatch(patch), [patch]);
+  return (
+    <div className="min-h-0 flex-1 overflow-auto border-t border-border py-2 font-mono leading-[1.7]" style={{ fontSize }}>
+      {head.map((l, i) => (
+        <div key={`h${i}`} className="truncate whitespace-pre px-4 text-faint">
+          {l}
+        </div>
+      ))}
+      {hunks.map((h, hi) => {
+        const isClosed = closed.has(hi);
+        let oldNo = h.oldStart;
+        let newNo = h.newStart;
+        return (
+          <div key={hi} className="mt-1.5 first:mt-0">
+            <div className="flex items-center border-y border-border bg-sunken/50 pr-1.5">
+              <button
+                aria-expanded={!isClosed}
+                className="flex min-w-0 flex-1 items-center gap-2 border-0 bg-transparent px-3 py-1 text-left text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() =>
+                  setClosed((s) => {
+                    const next = new Set(s);
+                    if (next.has(hi)) next.delete(hi);
+                    else next.add(hi);
+                    return next;
+                  })
+                }
+              >
+                <NamedIcon name={isClosed ? "chevronRight" : "chevronDown"} className="size-3 shrink-0" />
+                <span className="truncate">{h.header}</span>
+                <span className="ml-auto shrink-0 text-faint">{h.lines.length} lines</span>
+              </button>
+              {onRevert ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0 text-faint"
+                  aria-label="Revert this hunk (discard its changes)"
+                  onClick={() => onRevert([...head, h.header, ...h.lines].join("\n") + "\n")}
+                >
+                  <NamedIcon name="undo" className="size-3.5" />
+                </Button>
+              ) : null}
+            </div>
+            {isClosed
+              ? null
+              : h.lines.map((l, i) => {
+                  const add = l.startsWith("+") && !l.startsWith("+++");
+                  const del = l.startsWith("-") && !l.startsWith("---");
+                  const meta = l.startsWith("\\");
+                  const ctx = !add && !del && !meta;
+                  const oldCell = del || ctx ? String(oldNo++) : "";
+                  const newCell = add || ctx ? String(newNo++) : "";
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "grid grid-cols-[3ch_3ch_1fr] gap-2 whitespace-pre px-2",
+                        add && "bg-add-bg text-success",
+                        del && "bg-del-bg text-destructive",
+                      )}
+                    >
+                      <span className="select-none pr-1 text-right text-faint/60">{oldCell}</span>
+                      <span className="select-none pr-1 text-right text-faint/60">{newCell}</span>
+                      <span className="min-w-0">{l || " "}</span>
+                    </div>
+                  );
+                })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Changes card (design): one row per changed file with status letter and +/- counts, and the
+ *  selected file's patch below (collapsible hunks, old/new line numbers). */
+export function DiffPanel({ client, refreshKey, sessionId }: { client: OpenSessionClient; refreshKey: number; sessionId?: string }) {
   const [editor] = usePref<EditorPrefs>(PREF.editor, EDITOR_DEFAULTS);
   const diff = useAsync<DiffFile[]>(() => client.diff("working"), [client, refreshKey]);
   const [selected, setSelected] = useState<string | null>(null);
   const files = diff.data ?? [];
   const current = files.find((d) => d.file === selected) ?? files[0];
+  /** Reverting a hunk runs `git apply -R` through the session shell (visible in the transcript). */
+  const revert = sessionId
+    ? (patchText: string) => {
+        if (!(globalThis.confirm?.("Revert this hunk? Its changes are discarded.") ?? true)) return;
+        void client
+          .shell(sessionId, `git apply --reverse <<'__OS_PATCH__'\n${patchText}__OS_PATCH__`)
+          .then(() => toast.success("Revert sent to the session shell"))
+          .catch((e) => toast.error(errText(e)));
+        setTimeout(() => void diff.reload(), 1500);
+      }
+    : undefined;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -367,39 +486,28 @@ export function DiffPanel({ client, refreshKey }: { client: OpenSessionClient; r
         </div>
       ) : null}
       <ul className="m-0 flex list-none flex-col gap-0.5 p-2 text-[13px]">
-        {files.map((d) => (
-          <li key={d.file}>
-            <button
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left",
-                current?.file === d.file && "bg-muted",
-              )}
-              onClick={() => setSelected(d.file)}
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{d.file}</span>
-              <span className="font-mono text-xs">
-                <span className="text-success">+{d.additions}</span> <span className="text-destructive">-{d.deletions}</span>
-              </span>
-            </button>
-          </li>
-        ))}
+        {files.map((d) => {
+          const badge = STATUS_BADGE[d.status] ?? { label: "M", cls: "text-muted-foreground" };
+          return (
+            <li key={d.file}>
+              <button
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left",
+                  current?.file === d.file && "bg-muted",
+                )}
+                onClick={() => setSelected(d.file)}
+              >
+                <span className={cn("w-4 shrink-0 text-center font-mono text-xs font-semibold", badge.cls)}>{badge.label}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{d.file}</span>
+                <span className="font-mono text-xs">
+                  <span className="text-success">+{d.additions}</span> <span className="text-destructive">-{d.deletions}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
-      {current ? (
-        <div className="min-h-0 flex-1 overflow-auto border-t border-border py-2.5 font-mono leading-[1.7]" style={{ fontSize: editor.fontSize }}>
-          {current.patch.split("\n").map((l, i) => (
-            <div
-              key={i}
-              className={cn(
-                "whitespace-pre px-4",
-                l.startsWith("+") && "bg-add-bg text-success",
-                l.startsWith("-") && "bg-del-bg text-destructive",
-              )}
-            >
-              {l || " "}
-            </div>
-          ))}
-        </div>
-      ) : null}
+      {current ? <PatchView key={current.file} patch={current.patch} fontSize={editor.fontSize} onRevert={revert} /> : null}
     </div>
   );
 }

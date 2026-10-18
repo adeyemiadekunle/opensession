@@ -76,6 +76,19 @@ export const icons = {
   expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />,
   collapse: <path d="M20 10h-6V4M4 14h6v6M14 10l7-7M3 21l7-7" />,
   list: <path d="M4 6h2M4 12h2M4 18h2M9 6h11M9 12h11M9 18h11" />,
+  info: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4M12 8h.01" />
+    </>
+  ),
+  chat: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
+  undo: (
+    <>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </>
+  ),
   close: <path d="M6 6l12 12M18 6L6 18" />,
 } satisfies Record<string, ReactNode>;
 

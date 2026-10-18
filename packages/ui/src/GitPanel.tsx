@@ -6,6 +6,7 @@ import { Button } from "./components/ui/button";
 import { Empty } from "./components/ui/empty";
 import { Input, Textarea } from "./components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
+import { toast } from "./components/ui/toast";
 
 /** A pending commit, push or pull request, shown for approval before it runs. */
 export interface Review {
@@ -23,18 +24,16 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
   const [bump, setBump] = useState(0);
   const git = useAsync<GitInfo>(() => client.gitInfo(), [client, refreshKey, bump]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string; url?: string } | null>(null);
   const [newBranch, setNewBranch] = useState("");
   const [review, setReview] = useState<Review | null>(null);
 
   const openReview = async (kind: "push" | "pr") => {
     if (!actions?.outgoing) return setReview({ kind, message: "", title: "", body: "" });
     setBusy("review");
-    setMsg(null);
     try {
       setReview({ kind, out: await actions.outgoing(), message: "", title: "", body: "" });
     } catch (e) {
-      setMsg({ ok: false, text: errText(e) });
+      toast.error(errText(e));
     } finally {
       setBusy(null);
     }
@@ -59,13 +58,13 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
 
   const run = async (label: string, f: () => Promise<{ text: string; url?: string } | void>) => {
     setBusy(label);
-    setMsg(null);
     try {
       const r = await f();
-      if (r) setMsg({ ok: true, ...r });
+      if (r)
+        toast.success(r.text, r.url ? { action: { label: "View on GitHub", onClick: () => window.open(r.url, "_blank") } } : undefined);
       setBump((b) => b + 1);
     } catch (e) {
-      setMsg({ ok: false, text: errText(e) });
+      toast.error(errText(e));
     } finally {
       setBusy(null);
     }
@@ -161,16 +160,6 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
       ) : null}
 
       {actions?.checks ? <ChecksView checks={actions.checks} refreshKey={bump + refreshKey} /> : null}
-      {msg ? (
-        <div className={msg.ok ? "text-success" : "text-destructive"}>
-          {msg.text}{" "}
-          {msg.url ? (
-            <a href={msg.url} target="_blank" rel="noreferrer" className="text-primary">
-              View on GitHub
-            </a>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

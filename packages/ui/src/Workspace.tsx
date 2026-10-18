@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import {
   BUILTIN_AGENTS,
   eventCursor,
+  type AgentConfig,
   type CommandInfo,
   type FormRequest,
   type GitActions,
@@ -28,8 +29,10 @@ import { Kbd } from "./components/ui/kbd";
 import { PanelHeader } from "./components/ui/panel";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Tip } from "./components/ui/tooltip";
+import { ToastStack, toast } from "./components/ui/toast";
 import { Dialog } from "./components/ui/dialog";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
+import { SessionSearch } from "./SessionSearch";
 import { ReviewView } from "./ReviewView";
 import { Composer, modelKey, type ContextUse } from "./Composer";
 import { AccountFooter, SectionHeader, SectionView, ShortcutList, SidebarRow, type Account, type SidebarSection } from "./Sidebar";
@@ -95,6 +98,8 @@ export interface WorkspaceProps {
   agents?: string[];
   /** Commands from the agent setup; shown even before OpenCode has listed them. */
   commands?: { name: string; description?: string | null }[];
+  /** The agent setup (instructions, agents, skills, MCP…). Adds an inspector to the composer. */
+  agentContext?: AgentConfig;
   /** A shell in the cloud sandbox (Terminal panel). */
   terminal?: TerminalApi;
   /** What the Browser panel can show (the project's dev server). */
@@ -126,6 +131,7 @@ export function Workspace({
   skills = [],
   agents = [],
   commands: setupCommands = [],
+  agentContext,
   git,
   terminal,
   preview,
@@ -145,6 +151,14 @@ export function Workspace({
     () => [...new Set([...BUILTIN_AGENTS.filter((a) => a.mode === "primary").map((a) => a.id), ...agents])],
     [agents],
   );
+  // Description per agent id: built-ins plus the agents defined in the setup.
+  const agentInfo = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const a of BUILTIN_AGENTS) m[a.id] = a.description;
+    for (const a of agentContext?.agents ?? []) m[a.id] = a.description || "Custom agent";
+    return m;
+  }, [agentContext]);
+  const [ctxOpen, setCtxOpen] = useState(false);
   const [agent, setAgent] = useState<string>(() => storageGet(AGENT_KEY) ?? "build");
   const sessions = useAsync<Session[]>(() => client.listSessions(), [client]);
   const [model, setModel] = useState<string>(() => storageGet(MODEL_KEY) ?? "");
@@ -170,6 +184,7 @@ export function Workspace({
   const [rowMenu, setRowMenu] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchAll, setSearchAll] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [refreshKey, setRefreshKey] = useState(0);
@@ -640,20 +655,25 @@ export function Workspace({
     setVariants(next);
     storageSet(VARIANT_KEY, JSON.stringify(next));
     const ref: ModelRef = v ? { providerID: chosen.providerID, id: chosen.id, variant: v } : { providerID: chosen.providerID, id: chosen.id };
-    if (active) await client.setModel(active, ref).catch((e) => setErr(errText(e)));
+    if (active) await client.setModel(active, ref).catch((e) => toast.error(errText(e)));
   };
 
   const remove = async (id: string) => {
     if (!confirmDelete()) return;
-    await client.deleteSession(id).catch((e) => setErr(errText(e)));
-    if (active === id) setActive(null);
+    try {
+      await client.deleteSession(id);
+      if (active === id) setActive(null);
+      toast.success("Session deleted");
+    } catch (e) {
+      toast.error(errText(e));
+    }
     void sessions.reload();
   };
 
   const pickAgent = async (a: string) => {
     setAgent(a);
     storageSet(AGENT_KEY, a);
-    if (active) await client.setAgent(active, a).catch((e) => setErr(errText(e)));
+    if (active) await client.setAgent(active, a).catch((e) => toast.error(errText(e)));
   };
 
   /** Panels this workspace can show: the terminal and browser need their backends. */
@@ -678,17 +698,29 @@ export function Workspace({
       return { ...d, heights, stack: open ? d.stack.filter((x) => x !== id) : [...d.stack, id] };
     });
   };
-  /** Header buttons and the palette: on a narrow window a panel takes the conversation's place, one at a time. */
-  const showPanel = (id: DockPanelId) => (narrow ? setFull((f) => (f === id ? null : id)) : togglePanel(id));
+  /** Header buttons and the palette: on a narrow window a panel takes the conversation's place,
+   *  tracked in the dock stack so the bottom tab bar can switch between them. */
+  const showPanel = (id: DockPanelId) => {
+    if (!narrow) return togglePanel(id);
+    setDock((d) => (d.stack.includes(id) ? d : { ...d, stack: [...d.stack, id] }));
+    setFull((f) => (f === id ? null : id));
+  };
   const panelShown = (id: DockPanelId) => (narrow ? full === id : dock.stack.includes(id));
   // A file path from a read/edit tool row: open the Files card (dock, or full on narrow) on that file.
   const [fileRequest, setFileRequest] = useState<string | null>(null);
   const openInFiles = (path: string) => {
-    if (!dock.stack.includes("files") && full !== "files") showPanel("files");
+    if (narrow ? full !== "files" : !dock.stack.includes("files")) showPanel("files");
     setFileRequest(path);
   };
-  // Closing a full-screen panel drops it from the dock only if it came from there.
-  const closeFull = (id: DockPanelId) => (narrow || !dock.stack.includes(id) ? setFull(null) : togglePanel(id));
+  // Closing a full-screen panel: on narrow it leaves the tab bar too; on wide it drops out of the
+  // dock only if it came from there.
+  const closeFull = (id: DockPanelId) => {
+    if (narrow) {
+      setDock((d) => ({ ...d, stack: d.stack.filter((x) => x !== id) }));
+      setFull(null);
+    } else if (!dock.stack.includes(id)) setFull(null);
+    else togglePanel(id);
+  };
 
   const providers = [...new Set(modelList.map((m) => m.providerID))];
   const slash = text.startsWith("/") && !text.includes(" ") ? text.slice(1).toLowerCase() : null;
@@ -709,6 +741,7 @@ export function Workspace({
       run: () => setActive(s.id),
     })),
     { id: "new", group: "Actions", label: "New session", run: openNew },
+    { id: "search-all", group: "Actions", label: "Search all sessions", hint: "message text", run: () => setSearchAll(true) },
     ...(["changes", "git", "files", "terminal", "browser"] as DockPanelId[])
       .filter(available)
       .map((id) => ({
@@ -748,7 +781,7 @@ export function Workspace({
         onDock={isFull && !narrow ? () => setFull(null) : undefined}
       />
     ) : id === "changes" ? (
-      <DiffPanel client={client} refreshKey={refreshKey} />
+      <DiffPanel client={client} refreshKey={refreshKey} sessionId={active ?? undefined} />
     ) : id === "terminal" && terminal ? (
       <TerminalPanel api={terminal} />
     ) : id === "browser" && preview ? (
@@ -777,6 +810,25 @@ export function Workspace({
       className="relative flex h-full min-h-0 flex-col bg-background"
       onKeyDown={narrow && drawerOpen ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
     >
+      {/* Approvals and toasts share one notification column, bottom-right (design). */}
+      <div
+        role="region"
+        aria-label="Notifications"
+        className="pointer-events-none fixed right-4 bottom-4 z-[90] flex w-[min(22rem,calc(100vw-2rem))] flex-col items-end gap-2 [&>*]:pointer-events-auto"
+      >
+        {active ? (
+          <Requests
+            client={client}
+            sessionId={active}
+            permissions={perms}
+            forms={forms}
+            onDone={refresh}
+            allowDomain={allowDomain}
+            openBrowser={preview?.live ? openBrowserForHandOver : undefined}
+          />
+        ) : null}
+        <ToastStack />
+      </div>
       <header className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border bg-sidebar pl-2.5 pr-2.5">
         <Button
           ref={drawerToggle}
@@ -1096,17 +1148,6 @@ export function Workspace({
             className="relative shrink-0 pb-4 pl-[var(--gutter-l,2.5rem)] pr-[calc(var(--gutter-r,1.75rem)_+_var(--scrollbar,0px))] max-sm:px-4 max-sm:pb-3"
             style={{ "--scrollbar": `${scrollbar}px` } as CSSProperties}
           >
-            {active ? (
-              <Requests
-                client={client}
-                sessionId={active}
-                permissions={perms}
-                forms={forms}
-                onDone={refresh}
-                allowDomain={allowDomain}
-                openBrowser={preview?.live ? openBrowserForHandOver : undefined}
-              />
-            ) : null}
             {!online && !perms.length && !forms.length ? (
               <Alert
                 role="status"
@@ -1122,10 +1163,12 @@ export function Workspace({
               onText={setText}
               busy={busy}
               onSend={() => void send()}
-              onStop={active ? () => void client.interrupt(active).then(refresh).catch((e) => setErr(errText(e))) : undefined}
+              onStop={active ? () => void client.interrupt(active).then(refresh).catch((e) => toast.error(errText(e))) : undefined}
               agent={agent}
               agents={agentChoices}
+              agentInfo={agentInfo}
               onAgent={(a) => void pickAgent(a)}
+              onInspectContext={agentContext ? () => setCtxOpen(true) : undefined}
               models={modelList}
               model={chosen}
               onModel={(k) => void pickModel(k)}
@@ -1169,6 +1212,52 @@ export function Workspace({
           />
         ) : null}
       </div>
+
+      {/* Narrow windows: open panels become tabs along the bottom (Chat returns to the conversation). */}
+      {narrow && dock.stack.filter(available).length ? (
+        <nav aria-label="Open panels" className="flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-t border-border bg-sidebar px-2">
+          <button
+            aria-current={!full ? "page" : undefined}
+            className={cn(
+              "flex h-8 shrink-0 items-center gap-1.5 rounded-md border-0 px-2.5 text-[13px]",
+              !full ? "bg-muted text-foreground" : "bg-transparent text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setFull(null)}
+          >
+            <Icon className="size-3.5">{icons.chat}</Icon>
+            Chat
+          </button>
+          {dock.stack.filter(available).map((id) => (
+            <button
+              key={id}
+              aria-current={full === id ? "page" : undefined}
+              className={cn(
+                "flex h-8 shrink-0 items-center gap-1.5 rounded-md border-0 px-2.5 text-[13px]",
+                full === id ? "bg-muted text-foreground" : "bg-transparent text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setFull(id)}
+            >
+              <Icon className="size-3.5">{icons[id]}</Icon>
+              {DOCK_TITLES[id]}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
+      <SessionSearch
+        client={client}
+        sessions={sessionList}
+        open={searchAll}
+        onClose={() => setSearchAll(false)}
+        onOpen={(sid, q) => {
+          setActive(sid);
+          // Switching sessions resets the find bar; reopen it on the query once it has switched.
+          setTimeout(() => {
+            setFindQuery(q);
+            setFindOpen(true);
+          }, 100);
+        }}
+      />
 
       <Dialog
         open={newOpen}
@@ -1241,7 +1330,7 @@ export function Workspace({
             </SelectTrigger>
             <SelectContent>
               {agentChoices.map((a) => (
-                <SelectItem key={a} value={a}>
+                <SelectItem key={a} value={a} description={agentInfo[a]}>
                   {a}
                 </SelectItem>
               ))}
@@ -1257,6 +1346,86 @@ export function Workspace({
             onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
           />
         </label>
+      </Dialog>
+
+      <Dialog
+        open={ctxOpen}
+        onClose={() => setCtxOpen(false)}
+        title="Agent context"
+        footer={
+          onOpenSettings ? (
+            <Button variant="outline" onClick={() => { setCtxOpen(false); onOpenSettings(); }}>
+              Open agent setup
+            </Button>
+          ) : undefined
+        }
+      >
+        {agentContext ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <div className="text-xs font-medium text-faint">Agent</div>
+              <div className="text-[13px]">
+                <span className="font-medium text-foreground">{agent.charAt(0).toUpperCase() + agent.slice(1)}</span>
+                {agentInfo[agent] ? <span className="text-muted-foreground"> — {agentInfo[agent]}</span> : null}
+              </div>
+              <div className="text-[12px] text-faint">
+                {agentContext.git_approval === false
+                  ? "Commits and pushes run without asking."
+                  : "Commits and pushes wait for your approval."}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="text-xs font-medium text-faint">Instructions (AGENTS.md)</div>
+              {agentContext.instructions.trim() ? (
+                <pre className="max-h-32 overflow-auto rounded-md border border-border bg-code p-2.5 font-mono text-[12px] whitespace-pre-wrap text-foreground">
+                  {agentContext.instructions}
+                </pre>
+              ) : (
+                <div className="text-[13px] text-muted-foreground">The default reply guide only.</div>
+              )}
+            </div>
+            {agentContext.skills.length ? (
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-faint">Skills</div>
+                {agentContext.skills.map((s) => (
+                  <div key={s.id} className="text-[13px]">
+                    <span className="font-mono text-foreground">@{s.id}</span>
+                    <span className="text-muted-foreground"> — {s.description}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {agentContext.commands.length ? (
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-faint">Commands</div>
+                {agentContext.commands.map((c) => (
+                  <div key={c.name} className="text-[13px]">
+                    <span className="font-mono text-foreground">/{c.name}</span>
+                    {c.description ? <span className="text-muted-foreground"> — {c.description}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {Object.keys(agentContext.mcp).length ? (
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-faint">MCP servers</div>
+                {Object.entries(agentContext.mcp).map(([name, s]) => (
+                  <div key={name} className="text-[13px]">
+                    <span className="font-mono text-foreground">{name}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      — {s.type}
+                      {s.disabled ? ", disabled" : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {agentContext.permissions.length ? (
+              <div className="text-[12px] text-faint">{agentContext.permissions.length} custom permission rules apply.</div>
+            ) : null}
+          </>
+        ) : null}
       </Dialog>
 
       <Dialog
