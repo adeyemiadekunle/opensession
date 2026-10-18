@@ -98,13 +98,13 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions, ownH
 
   const { stack, heights } = state;
   return (
-    <div className="flex min-w-0 shrink-0 max-[1000px]:w-full!" style={{ width: state.width }}>
+    <div className="flex min-w-0 shrink-0" style={{ width: state.width }}>
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize panels"
         onMouseDown={startWidth}
-        className="group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center max-[1000px]:hidden"
+        className="group flex w-2.5 shrink-0 cursor-col-resize items-center justify-center"
       >
         <span
           className={cn(
@@ -113,7 +113,7 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions, ownH
           )}
         />
       </div>
-      <div ref={stackRef} className="flex min-w-0 flex-1 flex-col py-2.5 pr-2.5 max-[1000px]:px-2.5 max-[1000px]:pb-2.5 max-[1000px]:pt-0">
+      <div ref={stackRef} className="flex min-w-0 flex-1 flex-col py-2.5 pr-2.5">
         {stack.map((id, i) => {
           const above = stack[i - 1];
           const pinned = i < stack.length - 1 && heights[id] !== undefined;
@@ -125,7 +125,7 @@ export function Dock({ state, onChange, onClose, renderBody, headerActions, ownH
                   aria-orientation="horizontal"
                   aria-label={`Resize ${DOCK_TITLES[above]} panel height`}
                   onMouseDown={(e) => startSplit(above, e)}
-                  className="group flex h-3 shrink-0 cursor-row-resize items-center justify-center max-[1000px]:hidden"
+                  className="group flex h-3 shrink-0 cursor-row-resize items-center justify-center"
                 >
                   <span
                     className={cn(
