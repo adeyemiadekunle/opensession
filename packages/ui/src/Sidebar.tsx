@@ -9,6 +9,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
 import { Kbd } from "./components/ui/kbd";
@@ -218,14 +221,21 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
             <DropdownMenuShortcut>Ctrl /</DropdownMenuShortcut>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuLabel className="px-2.5 py-1">Theme</DropdownMenuLabel>
-          <DropdownMenuRadioGroup value={theme} onValueChange={pickTheme}>
-            {THEMES.map((t) => (
-              <DropdownMenuRadioItem key={t.id} value={t.id}>
-                {t.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="h-9 text-sm">
+              <span className="flex-1">Appearance</span>
+              <DropdownMenuShortcut>{THEMES.find((t) => t.id === theme)?.label}</DropdownMenuShortcut>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup value={theme} onValueChange={pickTheme}>
+                {THEMES.map((t) => (
+                  <DropdownMenuRadioItem key={t.id} value={t.id}>
+                    {t.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           {account.onSignOut ? (
             <>
               <DropdownMenuSeparator />
