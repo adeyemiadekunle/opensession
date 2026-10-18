@@ -268,8 +268,11 @@ export function Workspace({
       setPerms(p);
       setForms(f);
       const last = m[m.length - 1];
-      // A reply that stopped with an error has no completed time, but the agent is done.
-      setBusy(Boolean(last && (last.type === "user" || (last.type === "assistant" && !last.time?.completed && !last.error))));
+      // A reply that stopped with an error has no completed time, but the agent is done; one that
+      // ended to call tools (finish "tool-calls") is followed by another, so the agent still works.
+      const working =
+        last?.type === "assistant" && ((!last.time?.completed && !last.error) || (last as { finish?: string }).finish === "tool-calls");
+      setBusy(Boolean(last && (last.type === "user" || working)));
     } catch (e) {
       setLoadingMessages(false);
       setErr(errText(e));
