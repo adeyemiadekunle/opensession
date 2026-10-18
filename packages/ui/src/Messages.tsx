@@ -313,7 +313,8 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
         {parts.map((p, i) => {
           if (p.type === "text")
             return p.text?.trim() ? (
-              <Markdown key={i} text={p.text} className="rounded-lg border border-border bg-card px-4 py-3 text-[15px]" />
+              // Plain on the page, like a document; code blocks inside keep their own box.
+              <Markdown key={i} text={p.text} className="py-1 text-[15px] leading-[1.6]" />
             ) : null;
           if (p.type === "reasoning")
             return (
