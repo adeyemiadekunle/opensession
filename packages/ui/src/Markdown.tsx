@@ -20,8 +20,9 @@ const components: Components = {
   ),
   blockquote: ({ children }) => <blockquote className="m-0 border-l-2 border-input pl-3 text-muted-foreground">{children}</blockquote>,
   hr: () => <hr className="my-1 border-0 border-t border-border" />,
+  img: ({ src, alt }) => <img src={src} alt={alt} className="max-w-full rounded-md" />,
   pre: ({ children }) => (
-    <pre className="m-0 max-h-80 overflow-auto rounded-md border border-border bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6] [&>code]:bg-transparent [&>code]:p-0">
+    <pre className="m-0 max-h-80 overflow-auto rounded-md border border-border bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6] [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[1em]">
       {children}
     </pre>
   ),
