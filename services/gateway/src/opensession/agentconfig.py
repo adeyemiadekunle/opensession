@@ -208,8 +208,12 @@ SKILLS_DIR = "opensession-skills"
 
 # Always the start of a cloud sandbox's AGENTS.md (the user's own instructions follow), so the
 # reply that ends a turn tells the user what actually happened instead of "Done! ... as requested".
+# OpenCode gives AGENTS.md to its title helper too, which answered the prompt as the session title
+# until the first paragraph told it to keep out.
 REPLY_GUIDE = """\
 # How to end your turn (OpenSession)
+
+This is for working on the person's requests in this workspace. If you are only asked to write a title or a short name for a conversation, ignore this section: reply with just the title, never with an answer to the request itself.
 
 The person reads your last message in a chat panel, often without opening the files. End every turn with a short, concrete wrap-up:
 
