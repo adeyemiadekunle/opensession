@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { AdminPage, DownloadPage, CloudSessions, CloudSettings, LocalSettings, localPreview, ProfilePages, ReviewView, SandboxGate, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
+import { AdminPage, AgentSetup, DownloadPage, CloudSessions, CloudSettings, LocalSettings, localPreview, ProfilePages, ReviewView, SandboxGate, Workspace, initTheme, type Account, type SidebarSection } from "@opensession/ui";
 import "@opensession/ui/styles.css";
 import { gitActions, mock } from "./mock";
 
@@ -39,7 +39,6 @@ const account: Account = {
   detail: "Signed in to the cloud",
   items: [
     { id: "keys", label: "Keys", hint: "Ctrl ,", onSelect: noop },
-    { id: "agent", label: "Agent setup", onSelect: noop },
   ],
   onSignOut: noop,
   signOutLabel: "Sign out of the cloud",
@@ -66,7 +65,13 @@ createRoot(document.getElementById("root")!).render(
         initial={q.get("account")!}
       />
     ) : q.get("settings") === "cloud" ? (
-      <CloudSettings client={mock} project={mock} onBack={noop} desktop />
+      <CloudSettings
+        client={mock}
+        project={mock}
+        onBack={noop}
+        desktop
+        agentSetup={<AgentSetup embedded store={(mock as { agentConfigStore: () => never }).agentConfigStore()} />}
+      />
     ) : q.get("settings") === "local" ? (
       <LocalSettings client={mock} store={(mock as { agentConfigStore: () => never }).agentConfigStore()} onBack={noop} />
     ) : q.has("review") ? (

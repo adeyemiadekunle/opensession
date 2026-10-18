@@ -22,7 +22,7 @@ export interface CloudAccount {
   email?: string;
   /** Opens the sign-in provider's account screen (web: Clerk). */
   onManage?: () => void;
-  /** Menu items besides the app's own (Settings, Agent setup, Projects). */
+  /** Menu items besides the app's own (Settings, Projects). */
   items?: AccountMenuItem[];
   onSignOut?: () => void;
 }
@@ -155,7 +155,6 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
     { id: "profile", label: "Profile", onSelect: () => go("/profile") },
     { id: "usage", label: "Usage and limits", onSelect: () => go("/usage") },
     { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => go("/settings") },
-    { id: "agent", label: "Agent setup", onSelect: () => go("/agent") },
     { id: "projects", label: "Projects", onSelect: () => go("/projects") },
     ...(downloads ? [{ id: "download", label: "Download apps", onSelect: () => go("/download") }] : []),
     ...(me.data?.admin ? [{ id: "admin", label: "Admin", onSelect: () => go("/admin") }] : []),
@@ -180,7 +179,18 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
       />
     );
   }
-  if (path === "/settings") return <CloudSettings client={client} project={projectClient} onBack={back} desktop={desktop} />;
+  if (path === "/settings" || path === "/agent") {
+    return (
+      <CloudSettings
+        client={client}
+        project={projectClient}
+        onBack={back}
+        desktop={desktop}
+        initial={path === "/agent" ? "agent" : undefined}
+        agentSetup={<AgentSetup embedded store={store} secrets={secrets} onSaved={() => setSetupVersion((v) => v + 1)} />}
+      />
+    );
+  }
   if (path === "/profile" || path === "/usage") {
     return (
       <ProfilePages
@@ -192,24 +202,20 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
       />
     );
   }
-  if (path === "/projects" || path === "/agent") {
+  if (path === "/projects") {
     return (
       <div className="flex h-full min-h-0 flex-col bg-background">
-        <PageHeader title={path === "/projects" ? "Projects" : "Agent setup"} onBack={back} />
+        <PageHeader title="Projects" onBack={back} />
         <div className="min-h-0 flex-1 overflow-auto">
-          {path === "/projects" ? (
-            <ProjectsPage
-              client={client}
-              current={project}
-              onOpen={(p) => {
-                openProject(p.id);
-                setProjectsVersion((v) => v + 1);
-                go("/");
-              }}
-            />
-          ) : (
-            <AgentSetup store={store} secrets={secrets} onSaved={() => setSetupVersion((v) => v + 1)} />
-          )}
+          <ProjectsPage
+            client={client}
+            current={project}
+            onOpen={(p) => {
+              openProject(p.id);
+              setProjectsVersion((v) => v + 1);
+              go("/");
+            }}
+          />
         </div>
       </div>
     );

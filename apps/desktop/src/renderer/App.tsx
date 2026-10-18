@@ -7,7 +7,6 @@ import {
   NamedIcon,
   PREF,
   OPEN_SESSION_KEY,
-  PageHeader,
   Workspace,
   localPreview,
   readPref,
@@ -330,17 +329,18 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       </Screen>
     );
   }
-  if (page === "agent") {
+  if (page === "settings" || page === "agent") {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-background">
-        <PageHeader title="Agent setup" onBack={back} aside="Applies to this computer" />
-        <div className="min-h-0 flex-1 overflow-auto">
-          <AgentSetup store={store} onSaved={() => setGen((g) => g + 1)} />
-        </div>
-      </div>
+      <LocalSettings
+        client={client}
+        store={store}
+        onBack={back}
+        onSaved={() => setGen((g) => g + 1)}
+        initial={page === "agent" ? "agent" : undefined}
+        agentSetup={<AgentSetup embedded store={store} onSaved={() => setGen((g) => g + 1)} />}
+      />
     );
   }
-  if (page === "settings") return <LocalSettings client={client} store={store} onBack={back} onSaved={() => setGen((g) => g + 1)} />;
 
   const name = basename(st.folder);
   const preview = localPreview(`opensession.preview.local.${st.folder}`);
@@ -384,7 +384,6 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
         detail: signedIn ? "Signed in to the cloud" : "Not signed in to the cloud",
         items: [
           { id: "settings", label: "Settings", hint: "Ctrl ,", onSelect: () => setPage("settings") },
-          { id: "agent", label: "Agent setup", onSelect: () => setPage("agent") },
           ...(signedIn ? [] : [{ id: "signin", label: "Sign in to the cloud", onSelect: () => onCloud() }]),
         ],
         onSignOut: signedIn ? () => void window.opensession.cloudLogout().then(() => cloud.reload()) : undefined,

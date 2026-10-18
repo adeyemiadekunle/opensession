@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { AgentConfigStore, CloudClient, LocalClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { GithubCard } from "./Projects";
@@ -32,6 +32,8 @@ export function CloudSettings({
   project,
   onBack,
   desktop,
+  agentSetup,
+  initial,
 }: {
   client: CloudClient;
   /** The open project, for its sandbox and model list. */
@@ -39,6 +41,10 @@ export function CloudSettings({
   onBack?: () => void;
   /** Desktop app: shows its own preferences (CI notifications). */
   desktop?: boolean;
+  /** The Agent setup section's body (skills, agents, MCP servers…). */
+  agentSetup?: ReactNode;
+  /** Section to open first. */
+  initial?: string;
 }) {
   const store = useMemo(() => client.agentConfigStore(), [client]);
   // The model list comes from the project's sandbox: read it only when it is already running.
@@ -89,6 +95,7 @@ export function CloudSettings({
         </>
       ),
     },
+    ...agentPage(agentSetup, "Skills, agents, commands, MCP servers and instructions for your cloud workspaces."),
     { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
     { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
     {
@@ -103,7 +110,7 @@ export function CloudSettings({
       ),
     },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} aside="Applies to your cloud account" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} aside="Applies to your cloud account" />;
 }
 
 /** Desktop app, this computer: the same settings pages, with keys and agent setup stored here. */
@@ -112,12 +119,18 @@ export function LocalSettings({
   store,
   onBack,
   onSaved,
+  agentSetup,
+  initial,
 }: {
   client: LocalClient;
   store: AgentConfigStore;
   onBack?: () => void;
   /** After keys change (the workspace remounts to pick up new models). */
   onSaved?: () => void;
+  /** The Agent setup section's body. */
+  agentSetup?: ReactNode;
+  /** Section to open first. */
+  initial?: string;
 }) {
   const models = useAsync(() => client.listModels(), [client]);
   const pages: SettingsPage[] = [
@@ -141,10 +154,15 @@ export function LocalSettings({
         </>
       ),
     },
+    ...agentPage(agentSetup, "Skills, agents, commands, MCP servers and instructions for OpenCode on this computer."),
     { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
     { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} aside="Applies to this computer" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} aside="Applies to this computer" />;
+}
+
+function agentPage(body: ReactNode, description: string): SettingsPage[] {
+  return body ? [{ id: "agent", title: "Agent setup", description, body }] : [];
 }
 
 export function ApiKeys({ client }: { client: CloudClient }) {
