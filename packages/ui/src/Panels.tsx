@@ -133,8 +133,8 @@ export function FilesPanel({
           </Button>
         ) : null}
         {onDock ? (
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={onDock}>
-            Dock right
+          <Button variant="ghost" size="icon-sm" className="text-faint" aria-label="Dock right" onClick={onDock}>
+            <NamedIcon name="collapse" />
           </Button>
         ) : null}
       </PanelHeader>

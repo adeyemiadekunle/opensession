@@ -121,7 +121,7 @@ export function SidebarRow({ item, actions }: { item: SidebarItem; actions?: Rea
           </span>
           {item.detail ? <span className="w-full truncate font-mono text-xs text-faint">{item.detail}</span> : null}
         </button>
-        {actions ? <div className="flex items-center gap-0.5 pr-1 pt-1.5">{actions}</div> : null}
+        {actions ? <div className="flex items-center gap-0.5 pr-1">{actions}</div> : null}
       </div>
     );
   }
@@ -176,6 +176,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
   return (
     <div className="mt-auto">
       <Separator className="mb-2" />
+      <div className="px-2.5">
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button className="flex w-full items-center gap-2.5 border-0 bg-transparent px-2 pb-2 pt-1 text-left text-foreground">
@@ -236,6 +237,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </div>
   );
 }

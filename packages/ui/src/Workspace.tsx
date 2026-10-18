@@ -695,13 +695,13 @@ export function Workspace({
           <aside
             aria-label="Sidebar"
             className={cn(
-              "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar px-2.5 py-3.5",
+              "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar",
               narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-[0_12px_32px_rgba(0,0,0,0.45)]",
             )}
             onKeyDown={narrow ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
           >
-            <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-auto">
-              <label className="flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5 text-faint">
+            <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-auto px-2.5">
+              <label className="mt-2.5 flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5 text-faint">
                 <NamedIcon name="search" className="size-3.5" />
                 <input
                   className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none placeholder:text-faint"
@@ -740,7 +740,6 @@ export function Workspace({
                       item={{
                         id: s.id,
                         title: s.title || new Date(s.time?.created ?? 0).toLocaleString(),
-                        detail: projectName ?? when,
                         meta: when,
                         status: isActive && busy ? { tone: "attention", label: "Working" } : undefined,
                         active: isActive,
@@ -809,8 +808,8 @@ export function Workspace({
             {full === "files" ? null : (
               <PanelHeader title={DOCK_TITLES[full]} onClose={() => closeFull(full)} closeLabel={`Close ${DOCK_TITLES[full]} panel`}>
                 {!narrow ? (
-                  <Button variant="outline" size="sm" className="h-7 px-2.5 text-[12.5px] font-normal" onClick={() => setFull(null)}>
-                    Dock right
+                  <Button variant="ghost" size="icon-sm" className="text-faint" aria-label="Dock right" onClick={() => setFull(null)}>
+                    <NamedIcon name="collapse" />
                   </Button>
                 ) : full === "changes" ? (
                   <Button
