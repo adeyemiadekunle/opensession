@@ -681,6 +681,12 @@ export function Workspace({
   /** Header buttons and the palette: on a narrow window a panel takes the conversation's place, one at a time. */
   const showPanel = (id: DockPanelId) => (narrow ? setFull((f) => (f === id ? null : id)) : togglePanel(id));
   const panelShown = (id: DockPanelId) => (narrow ? full === id : dock.stack.includes(id));
+  // A file path from a read/edit tool row: open the Files card (dock, or full on narrow) on that file.
+  const [fileRequest, setFileRequest] = useState<string | null>(null);
+  const openInFiles = (path: string) => {
+    if (!dock.stack.includes("files") && full !== "files") showPanel("files");
+    setFileRequest(path);
+  };
   // Closing a full-screen panel drops it from the dock only if it came from there.
   const closeFull = (id: DockPanelId) => (narrow || !dock.stack.includes(id) ? setFull(null) : togglePanel(id));
 
@@ -735,6 +741,8 @@ export function Workspace({
       <FilesPanel
         client={client}
         refreshKey={refreshKey}
+        requestPath={fileRequest}
+        onRequestHandled={() => setFileRequest(null)}
         onClose={() => (isFull ? closeFull("files") : togglePanel("files"))}
         onExpand={isFull ? undefined : () => setFull("files")}
         onDock={isFull && !narrow ? () => setFull(null) : undefined}
@@ -1028,6 +1036,7 @@ export function Workspace({
                   key={m.id}
                   m={m}
                   showModel={!sameModel}
+                  onOpenFile={openInFiles}
                   onRetry={busy ? undefined : () => void retryLast()}
                   onResume={m.id === lastAssistant && !busy ? () => void resume() : undefined}
                 />

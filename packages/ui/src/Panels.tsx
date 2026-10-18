@@ -28,6 +28,8 @@ export function FilesPanel({
   onClose,
   onExpand,
   onDock,
+  requestPath,
+  onRequestHandled,
 }: {
   client: OpenSessionClient;
   refreshKey: number;
@@ -36,6 +38,9 @@ export function FilesPanel({
   onExpand?: () => void;
   /** In full screen: puts it back in the dock. */
   onDock?: () => void;
+  /** A file to open from elsewhere (a read/edit tool row); handled once then cleared. */
+  requestPath?: string | null;
+  onRequestHandled?: () => void;
 }) {
   const [dirs, setDirs] = useState<Record<string, DirState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -113,6 +118,16 @@ export function FilesPanel({
     setTabs(rest);
     if (activePath === path) setActivePath(rest[rest.length - 1]?.path ?? null);
   };
+
+  // A tool row asked to show a file: reveal its folder chain in the tree, then open it.
+  useEffect(() => {
+    if (!requestPath) return;
+    const dir = requestPath.includes("/") ? requestPath.slice(0, requestPath.lastIndexOf("/")) : "";
+    if (dir) reveal(dir);
+    void openFile(requestPath);
+    onRequestHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestPath]);
 
   interface Row {
     path: string;

@@ -3,6 +3,7 @@ import type { FormRequest, OpenSessionClient, PermissionRequest } from "@openses
 import { errText } from "./hooks";
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
+import { CopyButton } from "./components/ui/copy-button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { cn } from "./lib/utils";
@@ -124,7 +125,12 @@ function PermissionCard({
           Allow {String(request.action ?? "this action")}?
         </h2>
       </div>
-      {resources ? <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-3 py-2 font-mono text-xs leading-[1.6] text-foreground">{resources}</pre> : null}
+      {resources ? (
+        <div className="group relative">
+          <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-3 py-2 font-mono text-xs leading-[1.6] text-foreground">{resources}</pre>
+          <CopyButton getText={() => resources} className="absolute right-1.5 top-1.5" />
+        </div>
+      ) : null}
       {request.message ? <div className="text-[13px] text-muted-foreground">{String(request.message)}</div> : null}
       <div className="flex items-center gap-2.5">
         <label className="flex flex-1 items-center gap-2 text-xs text-faint">

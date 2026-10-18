@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ContentPart, Message } from "@opensession/api-client";
 import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
+import { CopyButton } from "./components/ui/copy-button";
 import { NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
 import { Markdown } from "./Markdown";
@@ -149,12 +150,16 @@ function Spinner({ className }: { className?: string }) {
 /** Design (tool-call rows): one line per action, collapsed; expand to see output.
  *  A running row shows a spinner; a failed one stays open. A tool error goes back to the
  *  model as that call's result, so there is nothing for the user to retry. */
-function ToolRow({ part }: { part: ContentPart }) {
+function ToolRow({ part, onOpenFile }: { part: ContentPart; onOpenFile?: (path: string) => void }) {
   const st = stateOf(part);
   const failed = st.status === "error";
   const running = isRunning(part);
   const [open, setOpen] = useState(false);
   const { verb, target } = toolTitle(part);
+  const filePath =
+    onOpenFile && part.name && ["read", "edit", "write", "patch"].includes(part.name)
+      ? field(st.input, "filePath", "path", "file", "filename")
+      : undefined;
   const output = (st.content ?? [])
     .map((c) => (c.type === "text" ? c.text : c.name ?? c.uri))
     .filter(Boolean)
@@ -185,9 +190,22 @@ function ToolRow({ part }: { part: ContentPart }) {
         <div className={cn(rowClass, "text-muted-foreground")}>{line}</div>
       )}
       {expanded && (output || failed) ? (
-        <div className="mb-1.5 ml-5 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
+        <div className="group relative mb-1.5 ml-5 mt-1 flex flex-col gap-2 rounded-lg border border-border bg-code px-3 py-2.5">
+          <div className="absolute right-1.5 top-1.5 flex gap-1">
+            {filePath ? (
+              <button
+                type="button"
+                aria-label={`Open ${filePath} in Files`}
+                className="grid size-6 place-items-center rounded-md border border-input bg-card text-faint opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                onClick={() => onOpenFile!(filePath)}
+              >
+                <NamedIcon name="files" className="size-3" />
+              </button>
+            ) : null}
+            {output ? <CopyButton getText={() => output} /> : null}
+          </div>
           {failed && st.error?.message ? <div className="text-[13px] text-destructive">{st.error.message}</div> : null}
-          {output ? <pre className="m-0 max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-[1.7] text-muted-foreground">{output}</pre> : null}
+          {output ? <pre className="m-0 max-h-60 overflow-auto whitespace-pre-wrap break-words pr-12 font-mono text-xs leading-[1.7] text-muted-foreground">{output}</pre> : null}
           {failed ? <div className="text-xs text-faint">The agent got this error back and decides what to do next.</div> : null}
         </div>
       ) : null}
@@ -299,11 +317,14 @@ export function MessageView({
   m,
   onRetry,
   onResume,
+  onOpenFile,
   showModel = true,
 }: {
   m: Message;
   onRetry?: () => void;
   onResume?: () => void;
+  /** Opens a path in the Files card (read/edit/write tool rows). */
+  onOpenFile?: (path: string) => void;
   /** The model line under a reply; the caller hides it when it matches the previous reply's. */
   showModel?: boolean;
 }) {
@@ -318,7 +339,12 @@ export function MessageView({
           <span className="min-w-0 flex-1 truncate">$ {m.command}</span>
           {exit !== null && exit !== 0 ? <span className="shrink-0 font-sans text-xs text-destructive">Exit {exit}</span> : null}
         </div>
-        {m.output?.output ? <pre className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6]">{m.output.output}</pre> : null}
+        {m.output?.output ? (
+          <div className="group relative">
+            <pre className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6]">{m.output.output}</pre>
+            <CopyButton getText={() => m.output?.output ?? ""} className="absolute right-1.5 top-1.5" />
+          </div>
+        ) : null}
         {m.status && m.status !== "exited" ? (
           <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
             {m.status === "running" ? <Spinner /> : null}
@@ -344,7 +370,7 @@ export function MessageView({
               <Markdown key={i} text={p.text} className="rounded-lg border border-border bg-card px-4 py-3 text-[15px]" />
             ) : null;
           if (p.type === "reasoning") return p.text?.trim() ? <ReasoningRow key={i} text={p.text} /> : null;
-          if (p.type === "tool") return <ToolRow key={i} part={p} />;
+          if (p.type === "tool") return <ToolRow key={i} part={p} onOpenFile={onOpenFile} />;
           return null;
         })}
         {error && limit ? (

@@ -33,6 +33,7 @@ export { Separator } from "./components/ui/separator";
 export { Avatar, AvatarImage, AvatarFallback } from "./components/ui/avatar";
 export { Switch } from "./components/ui/switch";
 export { Checkbox } from "./components/ui/checkbox";
+export { CopyButton } from "./components/ui/copy-button";
 export { ScrollArea, ScrollBar } from "./components/ui/scroll-area";
 export { Select, SelectGroup, SelectValue, SelectTrigger, SelectContent, SelectLabel, SelectItem, SelectSeparator } from "./components/ui/select";
 export {
