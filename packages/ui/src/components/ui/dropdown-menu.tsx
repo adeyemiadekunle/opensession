@@ -22,7 +22,7 @@ export function DropdownMenuContent({
       <MenuPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-40 animate-pop overflow-hidden rounded-lg border border-input bg-popover p-1 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.45)]",
+          "z-50 min-w-40 animate-pop overflow-hidden rounded-lg border border-input bg-popover p-1 text-foreground shadow-pop",
           className,
         )}
         {...props}

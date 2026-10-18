@@ -187,7 +187,7 @@ export function FilesPanel({
                   ))
                 : null}
             </ul>
-            {list.error || err ? <div className="os-error text-xs">{list.error ?? err}</div> : null}
+            {list.error || err ? <div className="py-1.5 text-xs text-destructive">{list.error ?? err}</div> : null}
           </aside>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
@@ -220,7 +220,7 @@ export function DiffPanel({ client, refreshKey }: { client: OpenSessionClient; r
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {diff.error ? <div className="os-error px-3">{diff.error}</div> : null}
+      {diff.error ? <div className="py-1.5 text-[13px] text-destructive px-3">{diff.error}</div> : null}
       {diff.data && files.length === 0 ? (
         <Empty title="No changes yet" />
       ) : null}

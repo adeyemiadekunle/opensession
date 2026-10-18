@@ -54,7 +54,7 @@ export function SelectContent({
         position={position}
         sideOffset={sideOffset}
         className={cn(
-          "relative z-50 max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-32 animate-pop overflow-hidden rounded-lg border border-input bg-popover text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.45)]",
+          "relative z-50 max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-32 animate-pop overflow-hidden rounded-lg border border-input bg-popover text-foreground shadow-pop",
           position === "popper" &&
             "data-[side=bottom]:translate-y-0.5 data-[side=left]:-translate-x-0.5 data-[side=right]:translate-x-0.5 data-[side=top]:-translate-y-0.5",
           className,

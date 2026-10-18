@@ -21,6 +21,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { BrowserPanel, type PreviewApi } from "./BrowserPanel";
 import { Requests } from "./Requests";
 import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
+import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { Kbd } from "./components/ui/kbd";
@@ -696,7 +697,7 @@ export function Workspace({
             aria-label="Sidebar"
             className={cn(
               "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar",
-              narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-[0_12px_32px_rgba(0,0,0,0.45)]",
+              narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-pop",
             )}
             onKeyDown={narrow ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
           >
@@ -722,11 +723,10 @@ export function Workspace({
               <section className="flex flex-col gap-0.5" aria-label={sessionsTitle}>
                 <SectionHeader title={sessionsTitle} onAdd={openNew} addLabel="New session" />
                 {sessions.loading && !sessions.data ? (
-                  <div className="flex animate-pulse flex-col gap-2 px-2 pt-1 motion-reduce:animate-none" role="status" aria-label="Loading sessions">
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className="flex flex-col gap-1.5">
-                        <div className="h-3 w-[150px] rounded bg-sunken" />
-                        <div className="h-2.5 w-[84px] rounded bg-sunken" />
+                  <div className="flex animate-pulse flex-col motion-reduce:animate-none" role="status" aria-label="Loading sessions">
+                    {[150, 110, 130].map((w) => (
+                      <div key={w} className="flex h-[30px] items-center px-2">
+                        <div className="h-3 rounded bg-sunken" style={{ width: w }} />
                       </div>
                     ))}
                   </div>
@@ -790,8 +790,8 @@ export function Workspace({
               {sectionsAfter.map((sec) => (
                 <SectionView key={sec.id} section={sec} />
               ))}
-              {models.data && !modelList.length ? <div className="os-hint">{noModels ?? "No models available."}</div> : null}
-              {models.error ? <div className="os-error">{models.error}</div> : null}
+              {models.data && !modelList.length ? <div className="rounded-md bg-sunken px-2.5 py-2 text-[13px] text-muted-foreground">{noModels ?? "No models available."}</div> : null}
+              {models.error ? <div className="py-1.5 text-[13px] text-destructive">{models.error}</div> : null}
             </div>
             {account ? <AccountFooter account={account} onShortcuts={() => setShortcutsOpen(true)} /> : null}
           </aside>
@@ -830,18 +830,18 @@ export function Workspace({
         ) : null}
         <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
           {conn.lost && active ? (
-            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-10 mt-3 flex max-w-[640px] items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
-              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
-              <span className="min-w-0 flex-1">
-                <strong className="font-semibold text-destructive">Lost connection to the agent.</strong>{" "}
-                <span className="text-muted-foreground">
-                  Retrying in {conn.retryIn} s. The session keeps its history and the agent keeps working.
-                </span>
-              </span>
-              <Button size="sm" variant="outline" onClick={() => retryNow.current?.()}>
-                Retry now
-              </Button>
-            </div>
+            <Alert
+              tone="danger"
+              title="Lost connection to the agent."
+              className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,1.75rem)] mt-3 w-auto max-w-[640px] max-sm:mx-4"
+              action={
+                <Button size="sm" variant="outline" onClick={() => retryNow.current?.()}>
+                  Retry now
+                </Button>
+              }
+            >
+              <span className="text-muted-foreground">Retrying in {conn.retryIn} s. The session keeps its history and the agent keeps working.</span>
+            </Alert>
           ) : null}
           <div
             ref={listRef}
@@ -850,7 +850,7 @@ export function Workspace({
             {!active ? (
               <div className="m-auto flex max-w-[440px] flex-col items-center gap-5 text-center">
                 <span className="grid size-14 place-items-center rounded-[14px] bg-sunken text-primary">
-                  <NamedIcon name="files" className="size-[26px]" />
+                  <NamedIcon name="plus" className="size-[26px]" />
                 </span>
                 <div className="flex flex-col gap-2">
                   <h1 className="text-[22px] font-semibold">Start a session</h1>
@@ -878,37 +878,37 @@ export function Workspace({
               />
             ))}
             {notice ? (
-              <div
+              <Alert
                 role="status"
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border px-3.5 py-3 text-[13px]",
-                  notice.tone === "danger" ? "border-destructive/40 bg-del-bg" : "border-warning/40 bg-warning/10",
-                )}
+                tone={notice.tone}
+                title={notice.title}
+                action={
+                  notice.action ? (
+                    <Button size="sm" variant="outline" onClick={notice.action.onClick}>
+                      {notice.action.label}
+                    </Button>
+                  ) : undefined
+                }
               >
-                <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", notice.tone === "danger" ? "bg-destructive" : "bg-warning")} />
-                <span className="min-w-0 flex-1">
-                  <strong className={cn("font-semibold", notice.tone === "danger" ? "text-destructive" : "text-warning")}>{notice.title}</strong>
-                  {notice.detail ? <span className="text-muted-foreground"> {notice.detail}</span> : null}
-                </span>
-                {notice.action ? (
-                  <Button size="sm" variant="outline" onClick={notice.action.onClick}>
-                    {notice.action.label}
-                  </Button>
-                ) : null}
-              </div>
+                {notice.detail ? <span className="text-muted-foreground">{notice.detail}</span> : null}
+              </Alert>
             ) : null}
           </div>
           {err ? (
-            <div role="alert" className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,2.5rem)] mt-3 flex items-center gap-3 max-sm:mx-4 rounded-lg border border-destructive/40 bg-del-bg px-3.5 py-2.5 text-[13px]">
-              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-destructive" />
-              <span className="min-w-0 flex-1 text-destructive">{err}</span>
-              <Button size="sm" variant="outline" onClick={() => setErr(null)}>
-                Dismiss
-              </Button>
-            </div>
+            <Alert
+              tone="danger"
+              className="ml-[var(--gutter-l,2.5rem)] mr-[var(--gutter-r,1.75rem)] mt-3 w-auto max-w-[640px] max-sm:mx-4"
+              action={
+                <Button size="sm" variant="outline" onClick={() => setErr(null)}>
+                  Dismiss
+                </Button>
+              }
+            >
+              <span className="text-destructive">{err}</span>
+            </Alert>
           ) : null}
           {commandHints.length || skillHints.length ? (
-            <ul className="os-suggest os-requests pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)]">
+            <ul className="m-0 flex shrink-0 list-none flex-wrap gap-1.5 py-1 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] max-sm:px-4">
               {commandHints.map((c) => (
                 <li key={c.name}>
                   <Button size="sm" variant="outline" title={c.description} onClick={() => setText(`/${c.name} `)}>
@@ -942,14 +942,14 @@ export function Workspace({
               />
             ) : null}
             {!online && !perms.length && !forms.length ? (
-              <div
+              <Alert
                 role="status"
                 aria-live="polite"
-                className="absolute left-[var(--gutter-l,2.5rem)] right-10 bottom-full max-sm:inset-x-4 z-10 mb-2 flex max-w-[640px] items-center gap-2.5 rounded-lg border border-warning/40 bg-card px-3.5 py-2.5 text-[13px] text-warning shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
+                tone="warning"
+                className="absolute bottom-full left-[var(--gutter-l,2.5rem)] right-[var(--gutter-r,1.75rem)] z-10 mb-2 w-auto max-w-[640px] bg-card text-warning shadow-pop max-sm:inset-x-4"
               >
-                <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-warning" />
                 You're offline. Your message will send when the connection is back.
-              </div>
+              </Alert>
             ) : null}
             <Composer
               text={text}
@@ -1024,7 +1024,7 @@ export function Workspace({
           </>
         }
       >
-        {modelList.length ? null : <div className="os-hint">{noModels ?? "No models available."}</div>}
+        {modelList.length ? null : <div className="rounded-md bg-sunken px-2.5 py-2 text-[13px] text-muted-foreground">{noModels ?? "No models available."}</div>}
         {moveToCloud ? (
           <fieldset className="flex flex-col gap-1.5 text-xs text-muted-foreground">
             <legend className="mb-1.5">Where it runs</legend>

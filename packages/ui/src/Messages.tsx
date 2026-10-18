@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { ContentPart, Message } from "@opensession/api-client";
+import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
 import { NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
@@ -194,21 +195,25 @@ function ToolRow({ part }: { part: ContentPart }) {
   );
 }
 
-function Card({ tone, title, children, action }: { tone: "danger" | "warning"; title: string; children?: ReactNode; action?: ReactNode }) {
+/** The model's reasoning, folded like a tool row so the chrome matches. */
+function ReasoningRow({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      role="alert"
-      className={cn(
-        "flex w-full flex-col gap-2 rounded-lg border px-3.5 py-3 text-[13px]",
-        tone === "danger" ? "border-destructive/40 bg-del-bg" : "border-warning/40 bg-warning/10",
-      )}
-    >
-      <div className="flex items-center gap-2.5">
-        <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", tone === "danger" ? "bg-destructive" : "bg-warning")} />
-        <strong className={cn("font-semibold", tone === "danger" ? "text-destructive" : "text-warning")}>{title}</strong>
-      </div>
-      {children}
-      {action}
+    <div className="flex w-full flex-col">
+      <button
+        aria-expanded={open}
+        className={cn(
+          "flex h-[30px] w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left text-[13px] hover:bg-sunken",
+          open ? "text-foreground" : "text-muted-foreground",
+        )}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <NamedIcon name={open ? "chevronDown" : "chevronRight"} className="size-3" />
+        <span>Thinking</span>
+      </button>
+      {open ? (
+        <div className="mb-1.5 ml-5 mt-1 whitespace-pre-wrap break-words rounded-lg border border-border bg-code px-3 py-2.5 text-xs leading-[1.7] text-muted-foreground">{text}</div>
+      ) : null}
     </div>
   );
 }
@@ -231,7 +236,8 @@ export function usageLimit(error: StructuredError | undefined): "rate" | "quota"
 
 function LimitCard({ error, kind, model, onResume }: { error: StructuredError; kind: "rate" | "quota"; model?: string; onResume?: () => void }) {
   return (
-    <Card
+    <Alert
+      layout="stack"
       tone="warning"
       title={kind === "quota" ? "Out of API credit" : "Model rate limit reached"}
       action={
@@ -251,7 +257,7 @@ function LimitCard({ error, kind, model, onResume }: { error: StructuredError; k
           : " after OpenCode retried it for about a minute. Nothing was lost: resume picks up where it stopped, or switch model in the composer to carry on now."}
       </p>
       {error.message ? <p className="m-0 font-mono text-xs text-faint">{error.message}</p> : null}
-    </Card>
+    </Alert>
   );
 }
 
@@ -291,7 +297,7 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
           <span className="min-w-0 flex-1 truncate">$ {m.command}</span>
           {exit !== null && exit !== 0 ? <span className="shrink-0 font-sans text-xs text-destructive">Exit {exit}</span> : null}
         </div>
-        {m.output?.output ? <pre className="os-pre m-0">{m.output.output}</pre> : null}
+        {m.output?.output ? <pre className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-md bg-code px-3 py-2.5 font-mono text-[12.5px] leading-[1.6]">{m.output.output}</pre> : null}
         {m.status && m.status !== "exited" ? (
           <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
             {m.status === "running" ? <Spinner /> : null}
@@ -315,20 +321,15 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
             return p.text?.trim() ? (
               <Markdown key={i} text={p.text} className="rounded-lg border border-border bg-card px-4 py-3 text-[15px]" />
             ) : null;
-          if (p.type === "reasoning")
-            return (
-              <details key={i} className="text-xs">
-                <summary className="cursor-pointer text-muted-foreground">Thinking</summary>
-                <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{p.text}</div>
-              </details>
-            );
+          if (p.type === "reasoning") return p.text?.trim() ? <ReasoningRow key={i} text={p.text} /> : null;
           if (p.type === "tool") return <ToolRow key={i} part={p} />;
           return null;
         })}
         {error && limit ? (
           <LimitCard error={error} kind={limit} model={m.model?.id} onResume={onResume} />
         ) : error?.message ? (
-          <Card
+          <Alert
+            layout="stack"
             tone="danger"
             title="The agent stopped with an error"
             action={
@@ -342,7 +343,7 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
             }
           >
             <p className="m-0 text-muted-foreground">{error.message}</p>
-          </Card>
+          </Alert>
         ) : null}
         {!m.time?.completed && !error && retry ? (
           <RetryLine retry={retry} />
