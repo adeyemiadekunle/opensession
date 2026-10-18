@@ -268,7 +268,8 @@ export function Workspace({
       setPerms(p);
       setForms(f);
       const last = m[m.length - 1];
-      setBusy(Boolean(last && (last.type === "user" || (last.type === "assistant" && !last.time?.completed))));
+      // A reply that stopped with an error has no completed time, but the agent is done.
+      setBusy(Boolean(last && (last.type === "user" || (last.type === "assistant" && !last.time?.completed && !last.error))));
     } catch (e) {
       setLoadingMessages(false);
       setErr(errText(e));
@@ -337,6 +338,20 @@ export function Workspace({
       setConn({ lost: false, retryIn: 0 });
     };
   }, [client, active, refresh]);
+
+  // While the agent works, poll too: in the sandbox, OpenCode's log stream can stay quiet after
+  // its first "synced" event, and the reply (or its error) would only show on a reload.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (!active || !busy) {
+      if (wasBusy.current) setRefreshKey((k) => k + 1); // panels catch up once the turn ends
+      wasBusy.current = false;
+      return;
+    }
+    wasBusy.current = true;
+    const t = setInterval(() => void refresh(), 2000);
+    return () => clearInterval(t);
+  }, [active, busy, refresh]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
