@@ -141,109 +141,40 @@
 
 @layer components {
   .os-primary { background: var(--os-accent); border-color: var(--os-accent); color: var(--os-accent-text); }
-  .os-danger { color: var(--os-danger); }
   .os-link { border: none; background: none; padding: 0; color: var(--os-accent); }
-  .os-icon { border: none; background: none; padding: 0 6px; color: var(--os-muted); }
-  .os-muted { color: var(--os-muted); }
   .os-error { color: var(--os-danger); padding: 6px 0; }
   .os-ok { color: var(--os-ok); padding: 6px 0; }
   .os-hint { background: var(--os-sunken); border-radius: var(--os-radius-md); padding: 8px 10px; color: var(--os-muted); }
   .os-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .os-row > input { flex: 1 1 200px; }
-  .os-between { justify-content: space-between; }
-  .os-col { display: flex; flex-direction: column; gap: 6px; }
-  .os-wrap { word-break: break-all; }
-  .os-path { font-family: var(--os-mono); font-size: 12px; color: var(--os-muted); }
   .os-pre {
     font-family: var(--os-mono); font-size: 12.5px; background: var(--os-code); border-radius: var(--os-radius-md);
     padding: 10px; margin: 6px 0 0; overflow: auto; white-space: pre;
   }
-  .os-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--os-muted); }
-  .os-field > select, .os-field > input { color: var(--os-text); font-size: 14px; }
-  .os-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 
-  /* Shell: app header + content */
-  .os-app { display: flex; flex-direction: column; height: 100%; }
-  .os-header {
-    display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--os-border);
-    background: var(--os-surface1);
-  }
+  /* Brand on the sign-in page */
   .os-brand { font-weight: 650; letter-spacing: -0.01em; }
   .os-brand small { font-weight: 400; color: var(--os-muted); margin-left: 6px; }
-  .os-header nav { display: flex; gap: 4px; margin-left: 12px; }
-  .os-header nav button { border: none; background: none; color: var(--os-muted); }
-  .os-header nav button.active { color: var(--os-text); background: var(--os-sunken); }
-  .os-spacer { flex: 1; }
-  .os-content { flex: 1; min-height: 0; overflow: auto; }
 
   /* Approval requests above the composer (Requests.tsx) */
   .os-requests { display: flex; flex-direction: column; gap: 8px; padding: 0 28px 0 40px; flex: none; }
   .os-requests > * { max-width: 640px; }
 
-  .os-add { color: var(--os-add); }
-  .os-del { color: var(--os-del); }
-
   .os-settings { max-width: 760px; margin: 0 auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 16px; }
   .os-card { background: var(--os-panel); border: 1px solid var(--os-border); border-radius: var(--os-radius); padding: 16px 18px; }
   .os-card h2 { margin: 0 0 4px; font-size: 16px; }
   .os-card p { margin: 0 0 10px; }
-  .os-tabs { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--os-border); }
-  .os-tabs button { border: none; background: none; color: var(--os-muted); }
-  .os-tabs button.active { color: var(--os-text); background: var(--os-sunken); }
-  .os-panel { padding: 10px; overflow: auto; flex: 1; }
-  .os-file-row { border: none; background: none; width: 100%; text-align: left; padding: 3px 6px; border-radius: 6px; }
-  .os-file-row:hover { background: var(--os-sunken); }
 
   .os-signin { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px 16px; }
   .os-signin .os-brand { font-size: 22px; }
 
-  /* Agent setup */
-  .os-setup { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; display: flex; flex-direction: column; gap: 12px; }
-  .os-setup-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .os-setup-bar h2 { margin: 0; font-size: 18px; }
-  .os-setup-tabs { flex-wrap: wrap; border: 1px solid var(--os-border); border-radius: var(--os-radius); background: var(--os-panel); }
-  .os-count { margin-left: 6px; font-size: 11px; background: var(--os-sunken); border-radius: 999px; padding: 0 6px; }
-  .os-setup-body { display: flex; flex-direction: column; gap: 12px; }
-  .os-card h3 { margin: 0 0 4px; font-size: 15px; }
-  .os-split { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; margin-top: 8px; }
-  .os-split-list { display: flex; flex-direction: column; gap: 8px; }
-  .os-split-list .os-file-row.active { background: var(--os-sunken); }
-  .os-form-grid { display: flex; flex-direction: column; gap: 10px; }
-  .os-form-grid .os-row > .os-field { flex: 1 1 200px; }
-  .os-big { min-height: 180px; font-family: var(--os-mono); font-size: 12.5px; width: 100%; }
-  .os-form-grid textarea { width: 100%; min-height: 72px; }
-  .os-check { display: flex; gap: 6px; align-items: center; }
-  .os-small { font-size: 11.5px; }
-  .os-table { border-collapse: collapse; width: 100%; margin: 6px 0; }
-  .os-table td { padding: 4px 6px; border-bottom: 1px solid var(--os-border); vertical-align: middle; }
-  .os-table input { width: 100%; }
+  /* Suggested replies above the composer */
   .os-suggest { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-wrap: wrap; gap: 6px; }
   .os-suggest button { font-size: 12px; padding: 2px 8px; }
-  @media (max-width: 800px) { .os-split { grid-template-columns: 1fr; } }
-
-  /* Git panel, projects */
-  .os-git { display: flex; flex-direction: column; gap: 10px; }
-  .os-git-changes { border-top: 1px solid var(--os-border); padding-top: 8px; }
-  .os-project-switch { display: flex; align-items: center; gap: 6px; }
-  .os-project-switch select { max-width: 220px; }
-  .os-repo-list { max-height: 260px; overflow: auto; }
 
   /* Terminal */
   .os-terminal { display: flex; flex-direction: column; flex: 1; min-height: 320px; height: 100%; background: var(--os-code); border-radius: 6px; overflow: hidden; }
   .os-terminal-host { flex: 1; min-height: 0; padding: 6px; }
   .os-terminal-status { padding: 6px 10px; font-size: 12px; color: #c9d1d9; background: #1b1f27; display: flex; gap: 8px; align-items: center; }
-
-  /* waking / limit gate */
-  .os-gate { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 32px; max-width: 640px; }
-  .os-project-state { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--os-muted-bg, #eef0f3); color: var(--os-muted, #555); }
-  .os-project-state.running { background: #e3f6e8; color: #17653a; }
-
-  /* Review step before commit / push / pull request, and CI checks */
-  .os-review { display: grid; gap: 8px; margin: 8px 0; }
-  .os-warn { color: var(--os-danger); }
-  .os-git-ci { border-top: 1px solid var(--os-border); padding-top: 8px; margin-top: 8px; }
-  .os-ci { font-weight: 500; }
-  .os-ci-success { color: var(--os-ok); }
-  .os-ci-failure { color: var(--os-danger); }
-  .os-ci-pending, .os-ci-none { color: var(--os-muted); }
 }
+

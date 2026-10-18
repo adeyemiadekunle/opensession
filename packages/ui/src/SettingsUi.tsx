@@ -79,13 +79,69 @@ export function SettingsShell({
   );
 }
 
-export function SettingsCard({ title, children, footer }: { title: string; children: ReactNode; footer?: ReactNode }) {
+export function SettingsCard({
+  title,
+  description,
+  children,
+  footer,
+}: {
+  title: string;
+  /** A sentence or two under the title. */
+  description?: ReactNode;
+  children?: ReactNode;
+  footer?: ReactNode;
+}) {
   return (
     <section aria-label={title} className="flex flex-col gap-3 rounded-lg border border-input bg-card p-[18px]">
-      <h2 className="m-0 text-[15px] font-semibold">{title}</h2>
+      <div className="flex flex-col gap-1">
+        <h2 className="m-0 text-[15px] font-semibold">{title}</h2>
+        {description ? <p className="m-0 text-[13px] text-muted-foreground">{description}</p> : null}
+      </div>
       {children}
       {footer ? <div className="flex justify-end gap-2">{footer}</div> : null}
     </section>
+  );
+}
+
+/** Rows of saved things (keys, domains, tokens…), each with its actions on the right. */
+export function ItemList({ children, className }: { children: ReactNode; className?: string }) {
+  return <ul className={cn("m-0 flex list-none flex-col p-0", className)}>{children}</ul>;
+}
+
+export function Item({ children, actions, className }: { children: ReactNode; actions?: ReactNode; className?: string }) {
+  return (
+    <li className={cn("flex min-h-10 items-center gap-2.5 border-b border-border py-1 text-[13.5px] last:border-b-0", className)}>
+      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2">{children}</span>
+      {actions ? <span className="flex shrink-0 items-center gap-1.5">{actions}</span> : null}
+    </li>
+  );
+}
+
+/** One line of feedback in a card: an error, a success or a neutral note. */
+export function Notice({ tone = "info", children }: { tone?: "info" | "ok" | "error"; children: ReactNode }) {
+  return (
+    <div
+      role={tone === "error" ? "alert" : undefined}
+      className={cn(
+        "text-[13px]",
+        tone === "error" && "text-destructive",
+        tone === "ok" && "text-success",
+        tone === "info" && "rounded-md bg-sunken px-2.5 py-2 text-muted-foreground",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A form control with its label above and an optional hint below. */
+export function Field({ label, hint, children, className }: { label: ReactNode; hint?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <label className={cn("flex min-w-0 flex-col gap-1.5 text-[13px] text-muted-foreground", className)}>
+      <span>{label}</span>
+      {children}
+      {hint ? <span className="text-xs text-faint">{hint}</span> : null}
+    </label>
   );
 }
 
