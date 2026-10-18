@@ -1,5 +1,5 @@
 import type { CloudClient } from "@opensession/api-client";
-import { errText } from "@opensession/ui";
+import { Button, errText } from "@opensession/ui";
 import { useState } from "react";
 
 /**
@@ -32,26 +32,28 @@ export function CliAuthorize({ client }: { client: CloudClient }) {
   };
 
   return (
-    <div className="os-settings">
-      <div className="os-card">
+    <div className="mx-auto flex max-w-[760px] flex-col gap-4 px-4 py-6">
+      <div className="rounded-lg border border-border bg-card p-[18px] [&>h2]:mb-1 [&>h2]:text-base [&>p]:mb-2.5">
         <h2>Sign in the OpenSession CLI</h2>
         {!valid ? (
-          <p className="os-error">This link is incomplete. Run <code>opensession login</code> again.</p>
+          <p className="py-1.5 text-destructive">This link is incomplete. Run <code>opensession login</code> again.</p>
         ) : status === "done" ? (
-          <p className="os-ok">Done. You can close this tab and go back to your terminal.</p>
+          <p className="py-1.5 text-success">Done. You can close this tab and go back to your terminal.</p>
         ) : (
           <>
             <p>
               The CLI on <strong>{name}</strong> wants access to your OpenSession account. Only continue if you just
               ran <code>opensession login</code>.
             </p>
-            <div className="os-row">
-              <button className="os-primary" disabled={status === "working"} onClick={authorize}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="default" disabled={status === "working"} onClick={authorize}>
                 Authorize
-              </button>
-              <button onClick={() => window.close()}>Cancel</button>
+              </Button>
+              <Button variant="outline" onClick={() => window.close()}>
+                Cancel
+              </Button>
             </div>
-            {err ? <div className="os-error">{err}</div> : null}
+            {err ? <div className="py-1.5 text-destructive">{err}</div> : null}
           </>
         )}
       </div>

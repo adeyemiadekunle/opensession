@@ -19,8 +19,8 @@ export function App() {
   return (
     <>
       <Show when="signed-out">
-        <div className="os-signin">
-          <div className="os-brand">OpenSession</div>
+        <div className="flex min-h-full flex-col items-center justify-center gap-4 px-4 py-6">
+          <div className="text-[22px] font-[650] tracking-[-0.01em]">OpenSession</div>
           <SignIn routing="hash" />
         </div>
       </Show>

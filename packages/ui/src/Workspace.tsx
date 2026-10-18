@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import {
   BUILTIN_AGENTS,
   eventCursor,
+  type AgentConfig,
   type CommandInfo,
   type FormRequest,
   type GitActions,
@@ -95,6 +96,8 @@ export interface WorkspaceProps {
   agents?: string[];
   /** Commands from the agent setup; shown even before OpenCode has listed them. */
   commands?: { name: string; description?: string | null }[];
+  /** The agent setup (instructions, agents, skills, MCP…). Adds an inspector to the composer. */
+  agentContext?: AgentConfig;
   /** A shell in the cloud sandbox (Terminal panel). */
   terminal?: TerminalApi;
   /** What the Browser panel can show (the project's dev server). */
@@ -126,6 +129,7 @@ export function Workspace({
   skills = [],
   agents = [],
   commands: setupCommands = [],
+  agentContext,
   git,
   terminal,
   preview,
@@ -145,6 +149,14 @@ export function Workspace({
     () => [...new Set([...BUILTIN_AGENTS.filter((a) => a.mode === "primary").map((a) => a.id), ...agents])],
     [agents],
   );
+  // Description per agent id: built-ins plus the agents defined in the setup.
+  const agentInfo = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const a of BUILTIN_AGENTS) m[a.id] = a.description;
+    for (const a of agentContext?.agents ?? []) m[a.id] = a.description || "Custom agent";
+    return m;
+  }, [agentContext]);
+  const [ctxOpen, setCtxOpen] = useState(false);
   const [agent, setAgent] = useState<string>(() => storageGet(AGENT_KEY) ?? "build");
   const sessions = useAsync<Session[]>(() => client.listSessions(), [client]);
   const [model, setModel] = useState<string>(() => storageGet(MODEL_KEY) ?? "");
@@ -1124,7 +1136,9 @@ export function Workspace({
               onStop={active ? () => void client.interrupt(active).then(refresh).catch((e) => setErr(errText(e))) : undefined}
               agent={agent}
               agents={agentChoices}
+              agentInfo={agentInfo}
               onAgent={(a) => void pickAgent(a)}
+              onInspectContext={agentContext ? () => setCtxOpen(true) : undefined}
               models={modelList}
               model={chosen}
               onModel={(k) => void pickModel(k)}
@@ -1240,7 +1254,7 @@ export function Workspace({
             </SelectTrigger>
             <SelectContent>
               {agentChoices.map((a) => (
-                <SelectItem key={a} value={a}>
+                <SelectItem key={a} value={a} description={agentInfo[a]}>
                   {a}
                 </SelectItem>
               ))}
@@ -1256,6 +1270,86 @@ export function Workspace({
             onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
           />
         </label>
+      </Dialog>
+
+      <Dialog
+        open={ctxOpen}
+        onClose={() => setCtxOpen(false)}
+        title="Agent context"
+        footer={
+          onOpenSettings ? (
+            <Button variant="outline" onClick={() => { setCtxOpen(false); onOpenSettings(); }}>
+              Open agent setup
+            </Button>
+          ) : undefined
+        }
+      >
+        {agentContext ? (
+          <>
+            <div className="flex flex-col gap-1">
+              <div className="text-xs font-medium text-faint">Agent</div>
+              <div className="text-[13px]">
+                <span className="font-medium text-foreground">{agent.charAt(0).toUpperCase() + agent.slice(1)}</span>
+                {agentInfo[agent] ? <span className="text-muted-foreground"> — {agentInfo[agent]}</span> : null}
+              </div>
+              <div className="text-[12px] text-faint">
+                {agentContext.git_approval === false
+                  ? "Commits and pushes run without asking."
+                  : "Commits and pushes wait for your approval."}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="text-xs font-medium text-faint">Instructions (AGENTS.md)</div>
+              {agentContext.instructions.trim() ? (
+                <pre className="max-h-32 overflow-auto rounded-md border border-border bg-code p-2.5 font-mono text-[12px] whitespace-pre-wrap text-foreground">
+                  {agentContext.instructions}
+                </pre>
+              ) : (
+                <div className="text-[13px] text-muted-foreground">The default reply guide only.</div>
+              )}
+            </div>
+            {agentContext.skills.length ? (
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-faint">Skills</div>
+                {agentContext.skills.map((s) => (
+                  <div key={s.id} className="text-[13px]">
+                    <span className="font-mono text-foreground">@{s.id}</span>
+                    <span className="text-muted-foreground"> — {s.description}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {agentContext.commands.length ? (
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-faint">Commands</div>
+                {agentContext.commands.map((c) => (
+                  <div key={c.name} className="text-[13px]">
+                    <span className="font-mono text-foreground">/{c.name}</span>
+                    {c.description ? <span className="text-muted-foreground"> — {c.description}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {Object.keys(agentContext.mcp).length ? (
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-faint">MCP servers</div>
+                {Object.entries(agentContext.mcp).map(([name, s]) => (
+                  <div key={name} className="text-[13px]">
+                    <span className="font-mono text-foreground">{name}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      — {s.type}
+                      {s.disabled ? ", disabled" : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {agentContext.permissions.length ? (
+              <div className="text-[12px] text-faint">{agentContext.permissions.length} custom permission rules apply.</div>
+            ) : null}
+          </>
+        ) : null}
       </Dialog>
 
       <Dialog

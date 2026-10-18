@@ -77,21 +77,28 @@ export function SelectLabel({ className, ...props }: ComponentProps<typeof Selec
   return <SelectPrimitive.Label className={cn("px-2.5 py-1.5 text-xs font-medium text-faint", className)} {...props} />;
 }
 
-export function SelectItem({ className, children, ...props }: ComponentProps<typeof SelectPrimitive.Item>) {
+export function SelectItem({
+  className,
+  children,
+  description,
+  ...props
+}: ComponentProps<typeof SelectPrimitive.Item> & { description?: string }) {
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex h-8 w-full cursor-default items-center rounded-md py-1.5 pl-2.5 pr-7 text-[13px] outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-sunken data-[highlighted]:text-foreground",
+        "relative flex w-full cursor-default rounded-md py-1.5 pl-2.5 pr-7 text-[13px] outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-sunken data-[highlighted]:text-foreground",
+        description ? "flex-col items-start gap-px" : "h-8 items-center",
         className,
       )}
       {...props}
     >
-      <span className="absolute right-2 flex size-4 items-center justify-center">
+      <span className={cn("absolute right-2 flex size-4 items-center justify-center", description && "top-1/2 -translate-y-1/2")}>
         <SelectPrimitive.ItemIndicator>
           <Icon className="size-3.5">{icons.check}</Icon>
         </SelectPrimitive.ItemIndicator>
       </span>
-      <SelectPrimitive.ItemText className="truncate">{children}</SelectPrimitive.ItemText>
+      <SelectPrimitive.ItemText className="max-w-full truncate">{children}</SelectPrimitive.ItemText>
+      {description ? <span className="max-w-full truncate text-[11px] text-faint">{description}</span> : null}
     </SelectPrimitive.Item>
   );
 }

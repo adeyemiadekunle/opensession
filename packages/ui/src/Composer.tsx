@@ -1,9 +1,10 @@
 import { useRef } from "react";
 import type { Model, ModelRef } from "@opensession/api-client";
+import { Button } from "./components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { Kbd } from "./components/ui/kbd";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./components/ui/select";
-import { Icon, NamedIcon } from "./icons";
+import { Icon, icons, NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
 
 export function modelKey(m: ModelRef) {
@@ -24,7 +25,11 @@ export interface ComposerProps {
   onStop?: () => void;
   agent: string;
   agents: string[];
+  /** Short description per agent id, shown in the picker (built-ins and custom agents). */
+  agentInfo?: Record<string, string>;
   onAgent: (a: string) => void;
+  /** Opens the agent-context inspector; omitted when no agent setup data is available. */
+  onInspectContext?: () => void;
   models: Model[];
   model: Model | undefined;
   onModel: (key: string) => void;
@@ -145,7 +150,7 @@ export function Composer(p: ComposerProps) {
           </SelectTrigger>
           <SelectContent>
             {p.agents.map((a) => (
-              <SelectItem key={a} value={a}>
+              <SelectItem key={a} value={a} description={p.agentInfo?.[a]}>
                 {label(a)}
               </SelectItem>
             ))}
@@ -187,6 +192,11 @@ export function Composer(p: ComposerProps) {
           </Select>
         ) : null}
         {p.context ? <ContextRing use={p.context} /> : null}
+        {p.onInspectContext ? (
+          <Button variant="ghost" size="icon-sm" aria-label="Agent context" onClick={p.onInspectContext}>
+            <Icon className="size-3.5">{icons.info}</Icon>
+          </Button>
+        ) : null}
       </div>
     </div>
   );
