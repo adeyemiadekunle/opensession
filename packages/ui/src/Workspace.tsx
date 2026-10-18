@@ -42,6 +42,8 @@ import { MODEL_KEY, PREF, VARIANT_KEY, readPref } from "./prefs";
 
 const AGENT_KEY = "opensession.agent";
 const SIDEBAR_KEY = "opensession.sidebar";
+/** Pinned session ids (top of the list), stored locally — no pin API exists. */
+const PIN_KEY = "opensession.pins";
 /** Side gutters that center the 640px conversation column (the defaults are pl-10 / pr-7). */
 const CENTERED_GUTTERS = {
   "--gutter-l": "max(2.5rem, calc((100% - 640px) / 2))",
@@ -175,6 +177,19 @@ export function Workspace({
   const [err, setErr] = useState<string | null>(null);
   const [dock, setDock] = useState<DockState>(loadDock);
   const [query, setQuery] = useState("");
+  const [pins, setPins] = useState<string[]>(() => {
+    try {
+      return JSON.parse(storageGet(PIN_KEY) ?? "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
+  const togglePin = (id: string) =>
+    setPins((p) => {
+      const next = p.includes(id) ? p.filter((x) => x !== id) : [id, ...p];
+      storageSet(PIN_KEY, JSON.stringify(next));
+      return next;
+    });
   const [newOpen, setNewOpen] = useState(false);
   const [draft, setDraft] = useState({ model: "", agent: "", text: "", where: "computer" as "computer" | "cloud" });
   const [cloudAsk, setCloudAsk] = useState<{ sessionId: string | null; text: string; model: ModelRef; agent: string } | null>(null);
@@ -234,8 +249,11 @@ export function Workspace({
   );
 
   const visibleSessions = useMemo(
-    () => sessionList.filter((s) => (s.title ?? "").toLowerCase().includes(query.trim().toLowerCase())),
-    [sessionList, query],
+    () =>
+      sessionList
+        .filter((s) => (s.title ?? "").toLowerCase().includes(query.trim().toLowerCase()))
+        .sort((a, b) => Number(pins.includes(b.id)) - Number(pins.includes(a.id))),
+    [sessionList, query, pins],
   );
 
   useEffect(() => {
@@ -344,7 +362,16 @@ export function Workspace({
   // conversation; online/offline drive the offline notice.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
+      // "?" opens the shortcuts dialog from anywhere outside a text field.
+      const target = e.target as HTMLElement | null;
+      const typing = Boolean(target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable));
+      if (!(e.ctrlKey || e.metaKey)) {
+        if (e.key === "?" && !typing && !e.altKey) {
+          e.preventDefault();
+          setShortcutsOpen(true);
+        }
+        return;
+      }
       const key = e.key.toLowerCase();
       if (key === "k") {
         e.preventDefault();
@@ -741,6 +768,7 @@ export function Workspace({
       run: () => setActive(s.id),
     })),
     { id: "new", group: "Actions", label: "New session", run: openNew },
+    { id: "shortcuts", group: "Actions", label: "Keyboard shortcuts", hint: "?", run: () => setShortcutsOpen(true) },
     { id: "search-all", group: "Actions", label: "Search all sessions", hint: "message text", run: () => setSearchAll(true) },
     ...(["changes", "git", "files", "terminal", "browser"] as DockPanelId[])
       .filter(available)
@@ -764,6 +792,20 @@ export function Workspace({
     return null;
   }, [messages, chosen]);
   const togglable = (["terminal", "changes", "git", "files", "browser"] as DockPanelId[]).filter(available);
+  // Session totals across all loaded messages (there's no usage endpoint).
+  const sessionTokens = useMemo(() => {
+    const t = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    for (const m of messages) {
+      const u = m.tokens as TokenUse | undefined;
+      if (!u) continue;
+      t.input += u.input ?? 0;
+      t.output += u.output ?? 0;
+      t.cacheRead += u.cache?.read ?? 0;
+      t.cacheWrite += u.cache?.write ?? 0;
+    }
+    return t;
+  }, [messages]);
+  const compactNum = (n: number) => new Intl.NumberFormat("en", { notation: "compact" }).format(n);
   // The terminal and browser can be unavailable, so hide their cards rather than drop them from state.
   const shownDock: DockState = { ...dock, stack: dock.stack.filter((id) => available(id) && id !== full) };
   // With no panel beside it (none open, or a narrow window) the conversation and composer sit in a centered column.
@@ -913,6 +955,7 @@ export function Workspace({
                 ) : null}
                 {visibleSessions.map((s) => {
                   const isActive = s.id === active;
+                  const isPinned = pins.includes(s.id);
                   const when = relativeTime(s.time?.updated ?? s.time?.created);
                   return (
                     <SidebarRow
@@ -927,6 +970,19 @@ export function Workspace({
                       }}
                       actions={
                         <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              "size-6 focus-visible:opacity-100",
+                              isPinned ? "text-primary opacity-100" : "text-muted-foreground opacity-0 group-hover:opacity-100",
+                            )}
+                            aria-label={isPinned ? "Unpin session" : "Pin session"}
+                            aria-pressed={isPinned}
+                            onClick={() => togglePin(s.id)}
+                          >
+                            <NamedIcon name="pin" className="size-3.5" />
+                          </Button>
                           {moveToCloud ? (
                             <DropdownMenu open={rowMenu === s.id} onOpenChange={(o) => setRowMenu(o ? s.id : null)}>
                               <DropdownMenuTrigger asChild>
@@ -1003,7 +1059,7 @@ export function Workspace({
                 ) : null}
               </PanelHeader>
             )}
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{panelBody(full, true)}</div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.terminal-panel]:min-h-0">{panelBody(full, true)}</div>
           </section>
         ) : null}
         <main className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
@@ -1362,6 +1418,20 @@ export function Workspace({
       >
         {agentContext ? (
           <>
+            <div className="flex flex-col gap-1">
+              <div className="text-xs font-medium text-faint">This session</div>
+              <div className="text-[13px] text-muted-foreground">
+                {sessionTokens.input || sessionTokens.output ? (
+                  <>
+                    {compactNum(sessionTokens.input)} in · {compactNum(sessionTokens.output)} out
+                    {sessionTokens.cacheRead ? ` · ${compactNum(sessionTokens.cacheRead)} cached` : ""}
+                    {sessionTokens.cacheWrite ? ` · ${compactNum(sessionTokens.cacheWrite)} cache writes` : ""}
+                  </>
+                ) : (
+                  "No token use yet"
+                )}
+              </div>
+            </div>
             <div className="flex flex-col gap-1">
               <div className="text-xs font-medium text-faint">Agent</div>
               <div className="text-[13px]">

@@ -76,6 +76,11 @@ export function Composer(p: ComposerProps) {
   const area = useRef<HTMLTextAreaElement>(null);
   const providers = [...new Set(p.models.map((m) => m.providerID))];
   const variants = p.model?.variants ?? [];
+  // Past ~85% of the context window, suggest another configured model with a larger one.
+  const moreContext =
+    p.context && p.context.used / p.context.limit >= 0.85
+      ? p.models.find((m) => m !== p.model && (m.limit?.context ?? 0) > p.context!.limit)
+      : undefined;
 
   const insert = (prefix: string) => {
     if (prefix === "@") p.onText(p.text && !p.text.endsWith(" ") ? `${p.text} @` : `${p.text}@`);
@@ -192,6 +197,14 @@ export function Composer(p: ComposerProps) {
           </Select>
         ) : null}
         {p.context ? <ContextRing use={p.context} /> : null}
+        {moreContext ? (
+          <button
+            className="shrink-0 border-0 bg-transparent p-0 text-xs font-medium text-warning underline-offset-2 hover:underline"
+            onClick={() => p.onModel(modelKey(moreContext))}
+          >
+            Switch to {moreContext.name ?? moreContext.id}
+          </button>
+        ) : null}
         {p.onInspectContext ? (
           <Button variant="ghost" size="icon-sm" aria-label="Agent context" onClick={p.onInspectContext}>
             <Icon className="size-3.5">{icons.info}</Icon>

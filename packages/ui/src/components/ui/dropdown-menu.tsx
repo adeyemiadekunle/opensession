@@ -8,6 +8,7 @@ const DropdownMenuTrigger = MenuPrimitive.Trigger;
 const DropdownMenuGroup = MenuPrimitive.Group;
 const DropdownMenuPortal = MenuPrimitive.Portal;
 const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
+const DropdownMenuSub = MenuPrimitive.Sub;
 
 const itemClass =
   "relative flex h-8 cursor-pointer select-none items-center gap-2.5 rounded-md px-2.5 text-[13px] outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-sunken data-[highlighted]:text-foreground";
@@ -65,6 +66,27 @@ export function DropdownMenuRadioItem({ className, children, ...props }: Compone
   );
 }
 
+/** An item that opens a flyout submenu. */
+export function DropdownMenuSubTrigger({ className, children, ...props }: ComponentProps<typeof MenuPrimitive.SubTrigger>) {
+  return (
+    <MenuPrimitive.SubTrigger className={cn(itemClass, "data-[state=open]:bg-sunken data-[state=open]:text-foreground", className)} {...props}>
+      {children}
+      <Icon className="ml-auto size-3.5 shrink-0 text-faint">{icons.chevronRight}</Icon>
+    </MenuPrimitive.SubTrigger>
+  );
+}
+
+export function DropdownMenuSubContent({ className, ...props }: ComponentProps<typeof MenuPrimitive.SubContent>) {
+  return (
+    <MenuPrimitive.Portal>
+      <MenuPrimitive.SubContent
+        className={cn("z-50 min-w-32 animate-pop overflow-hidden rounded-lg border border-input bg-popover p-1 text-foreground shadow-pop", className)}
+        {...props}
+      />
+    </MenuPrimitive.Portal>
+  );
+}
+
 export function DropdownMenuLabel({ className, ...props }: ComponentProps<typeof MenuPrimitive.Label>) {
   return <MenuPrimitive.Label className={cn("px-2.5 py-1.5 text-xs font-medium text-faint", className)} {...props} />;
 }
@@ -78,4 +100,4 @@ export function DropdownMenuShortcut({ className, ...props }: ComponentProps<"sp
   return <span className={cn("ml-auto text-xs text-faint", className)} {...props} />;
 }
 
-export { DropdownMenu, DropdownMenuTrigger, DropdownMenuGroup, DropdownMenuPortal, DropdownMenuRadioGroup };
+export { DropdownMenu, DropdownMenuTrigger, DropdownMenuGroup, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuSub };

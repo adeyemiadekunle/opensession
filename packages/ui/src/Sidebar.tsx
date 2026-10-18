@@ -9,6 +9,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
 import { Kbd } from "./components/ui/kbd";
@@ -218,14 +221,21 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
             <DropdownMenuShortcut>Ctrl /</DropdownMenuShortcut>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuLabel className="px-2.5 py-1">Theme</DropdownMenuLabel>
-          <DropdownMenuRadioGroup value={theme} onValueChange={pickTheme}>
-            {THEMES.map((t) => (
-              <DropdownMenuRadioItem key={t.id} value={t.id}>
-                {t.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="h-9 text-sm">
+              <span className="flex-1">Appearance</span>
+              <DropdownMenuShortcut>{THEMES.find((t) => t.id === theme)?.label}</DropdownMenuShortcut>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup value={theme} onValueChange={pickTheme}>
+                {THEMES.map((t) => (
+                  <DropdownMenuRadioItem key={t.id} value={t.id}>
+                    {t.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           {account.onSignOut ? (
             <>
               <DropdownMenuSeparator />
@@ -245,7 +255,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
 export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: "Ctrl K", action: "Search sessions and actions" },
   { keys: "Ctrl F", action: "Find in this conversation" },
-  { keys: "Ctrl /", action: "Show keyboard shortcuts" },
+  { keys: "Ctrl / or ?", action: "Show keyboard shortcuts" },
   { keys: "Ctrl ,", action: "Open settings" },
   { keys: "Enter", action: "Send the message" },
   { keys: "Shift Enter", action: "New line in the message" },
