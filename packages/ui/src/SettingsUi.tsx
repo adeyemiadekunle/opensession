@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { storageGet, storageSet } from "./hooks";
+import { Button } from "./components/ui/button";
 import { PageHeader } from "./PageHeader";
 import { cn } from "./lib/utils";
 
@@ -211,18 +212,17 @@ export function Segmented<T extends string>({
 }
 
 export function Stepper({ value, min, max, onChange, label }: { value: number; min: number; max: number; onChange: (v: number) => void; label: string }) {
-  const btn = "h-[30px] w-[30px] border-0 bg-transparent p-0 text-muted-foreground hover:bg-sunken disabled:opacity-40";
   return (
-    <span role="group" aria-label={label} className="inline-flex h-[30px] items-center overflow-hidden rounded-md border border-input">
-      <button aria-label={`Decrease ${label}`} className={btn} disabled={value <= min} onClick={() => onChange(value - 1)}>
+    <span role="group" aria-label={label} className="inline-flex h-8 items-center overflow-hidden rounded-md border border-input bg-card">
+      <Button variant="ghost" size="icon" className="h-full w-[30px] rounded-none" aria-label={`Decrease ${label}`} disabled={value <= min} onClick={() => onChange(value - 1)}>
         −
-      </button>
+      </Button>
       <span aria-live="polite" className="w-10 text-center font-mono text-[12.5px]">
         {value}
       </span>
-      <button aria-label={`Increase ${label}`} className={btn} disabled={value >= max} onClick={() => onChange(value + 1)}>
+      <Button variant="ghost" size="icon" className="h-full w-[30px] rounded-none" aria-label={`Increase ${label}`} disabled={value >= max} onClick={() => onChange(value + 1)}>
         +
-      </button>
+      </Button>
     </span>
   );
 }
