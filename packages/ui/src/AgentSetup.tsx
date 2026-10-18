@@ -14,7 +14,7 @@ import {
 } from "@opensession/api-client";
 import { Button } from "./components/ui/button";
 import { Input, Textarea } from "./components/ui/input";
-import { Select } from "./components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { errText } from "./hooks";
 import { cn } from "./lib/utils";
 import { Field, Item, ItemList, Notice, Segmented, SettingRow, SettingsCard, Switch } from "./SettingsUi";
@@ -318,16 +318,19 @@ function ToolGrid({ rules, onChange, inheritLabel }: { rules: PermissionRule[]; 
           key={t.id}
           actions={
             <Select
-              aria-label={`${t.id} access`}
-              className="w-[150px]"
-              value={toolEffect(rules, t.id)}
-              onChange={(e) => onChange(setToolEffect(rules, t.id, e.target.value as Effect | ""))}
+              value={toolEffect(rules, t.id) || "__inherit"}
+              onValueChange={(v) => onChange(setToolEffect(rules, t.id, v === "__inherit" ? "" : (v as Effect)))}
             >
-              {EFFECTS.map((x) => (
-                <option key={x} value={x}>
-                  {x === "" ? inheritLabel : x === "ask" ? "ask first" : x}
-                </option>
-              ))}
+              <SelectTrigger aria-label={`${t.id} access`} className="w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EFFECTS.map((x) => (
+                  <SelectItem key={x || "__inherit"} value={x || "__inherit"}>
+                    {x === "" ? inheritLabel : x === "ask" ? "ask first" : x}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           }
         >
@@ -356,20 +359,20 @@ function AgentsTab({ cfg, set }: TabProps) {
         />
       </SettingRow>
       <SettingRow label="Default agent for new sessions">
-        <Select
-          aria-label="Default agent for new sessions"
-          className="w-[180px]"
-          value={cfg.default_agent ?? ""}
-          onChange={(e) => set({ ...cfg, default_agent: e.target.value || null })}
-        >
-          <option value="">build (default)</option>
-          {primaries
-            .filter((x) => x !== "build")
-            .map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
+        <Select value={cfg.default_agent ?? "__default"} onValueChange={(v) => set({ ...cfg, default_agent: v === "__default" ? null : v })}>
+          <SelectTrigger aria-label="Default agent for new sessions" className="w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default">build (default)</SelectItem>
+            {primaries
+              .filter((x) => x !== "build")
+              .map((x) => (
+                <SelectItem key={x} value={x}>
+                  {x}
+                </SelectItem>
+              ))}
+          </SelectContent>
         </Select>
       </SettingRow>
       <ListEditor
@@ -391,10 +394,15 @@ function AgentsTab({ cfg, set }: TabProps) {
               </Field>
               <Pair>
                 <Field label="Mode">
-                  <Select value={a.mode} onChange={(e) => put(update(agents, i, { mode: e.target.value as AgentDef["mode"] }))}>
-                    <option value="subagent">subagent (called by other agents)</option>
-                    <option value="primary">primary (pick it for a session)</option>
-                    <option value="all">both</option>
+                  <Select value={a.mode} onValueChange={(v) => put(update(agents, i, { mode: v as AgentDef["mode"] }))}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="subagent">subagent (called by other agents)</SelectItem>
+                      <SelectItem value="primary">primary (pick it for a session)</SelectItem>
+                      <SelectItem value="all">both</SelectItem>
+                    </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Model (optional)" hint="provider/model, e.g. anthropic/claude-sonnet-4-5">
@@ -457,13 +465,18 @@ function CommandsTab({ cfg, set }: TabProps) {
               </Field>
               <Pair>
                 <Field label="Agent (optional)">
-                  <Select value={c.agent ?? ""} onChange={(e) => put(update(cmds, i, { agent: e.target.value || null }))}>
-                    <option value="">current</option>
-                    {agentIds.map((x) => (
-                      <option key={x} value={x}>
-                        {x}
-                      </option>
-                    ))}
+                  <Select value={c.agent ?? "__current"} onValueChange={(v) => put(update(cmds, i, { agent: v === "__current" ? null : v }))}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__current">current</SelectItem>
+                      {agentIds.map((x) => (
+                        <SelectItem key={x} value={x}>
+                          {x}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Model (optional)">
@@ -646,10 +659,15 @@ function ToolsTab({ cfg, set }: TabProps) {
                   placeholder="resource pattern"
                   onChange={(e) => setAdvanced(update(advanced, i, { resource: e.target.value }))}
                 />
-                <Select aria-label="Effect" value={r.effect} onChange={(e) => setAdvanced(update(advanced, i, { effect: e.target.value as Effect }))}>
-                  <option value="allow">allow</option>
-                  <option value="ask">ask first</option>
-                  <option value="deny">deny</option>
+                <Select value={r.effect} onValueChange={(v) => setAdvanced(update(advanced, i, { effect: v as Effect }))}>
+                  <SelectTrigger aria-label="Effect" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="allow">allow</SelectItem>
+                    <SelectItem value="ask">ask first</SelectItem>
+                    <SelectItem value="deny">deny</SelectItem>
+                  </SelectContent>
                 </Select>
                 <Button variant="ghost" size="icon" aria-label="Remove rule" onClick={() => setAdvanced(advanced.filter((_, n) => n !== i))}>
                   ×

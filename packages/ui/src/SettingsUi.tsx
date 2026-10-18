@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { storageGet, storageSet } from "./hooks";
 import { Button } from "./components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
+import { Switch as SwitchPrimitive } from "./components/ui/switch";
 import { PageHeader } from "./PageHeader";
 import { cn } from "./lib/utils";
 
@@ -103,14 +105,14 @@ export function SettingsCard({
   footer?: ReactNode;
 }) {
   return (
-    <section aria-label={title} className="flex flex-col gap-3 rounded-lg border border-input bg-card p-[18px]">
-      <div className="flex flex-col gap-1">
-        <h2 className="m-0 text-[15px] font-semibold">{title}</h2>
-        {description ? <p className="m-0 text-[13px] text-muted-foreground">{description}</p> : null}
-      </div>
-      {children}
-      {footer ? <div className="flex justify-end gap-2">{footer}</div> : null}
-    </section>
+    <Card role="region" aria-label={title}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        {description ? <CardDescription>{description}</CardDescription> : null}
+      </CardHeader>
+      {children ? <CardContent>{children}</CardContent> : null}
+      {footer ? <CardFooter>{footer}</CardFooter> : null}
+    </Card>
   );
 }
 
@@ -170,24 +172,7 @@ export function SettingRow({ label, hint, children }: { label: ReactNode; hint?:
 }
 
 export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      className={cn("relative h-5 w-[34px] shrink-0 rounded-full border-0 p-0", checked ? "bg-primary" : "bg-input")}
-      onClick={() => onChange(!checked)}
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "absolute top-[3px] size-3.5 rounded-full transition-[left]",
-          checked ? "left-[17px] bg-primary-foreground" : "left-[3px] bg-faint",
-        )}
-      />
-    </button>
-  );
+  return <SwitchPrimitive checked={checked} onCheckedChange={onChange} aria-label={label} disabled={disabled} />;
 }
 
 export function Segmented<T extends string>({

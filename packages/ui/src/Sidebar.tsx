@@ -1,4 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { Avatar, AvatarFallback } from "./components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu";
+import { Kbd } from "./components/ui/kbd";
+import { Separator } from "./components/ui/separator";
 import { NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
 import { getTheme, setTheme, type Theme } from "./theme";
@@ -152,111 +166,76 @@ const THEMES: { id: Theme; label: string }[] = [
 export function AccountFooter({ account, onShortcuts }: { account: Account; onShortcuts: () => void }) {
   const [open, setOpen] = useState(false);
   const [theme, setThemeState] = useState<Theme>(getTheme);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    menuRef.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-
-  const pick = (f: () => void) => () => {
-    setOpen(false);
-    f();
+  const pickTheme = (t: string) => {
+    const next = t as Theme;
+    setTheme(next);
+    setThemeState(next);
   };
-  const pickTheme = (t: Theme) => {
-    setTheme(t);
-    setThemeState(t);
-  };
-  const itemClass =
-    "flex h-9 w-full items-center gap-2.5 rounded-md border-0 bg-transparent px-2.5 text-left text-sm text-foreground hover:bg-sunken focus-visible:bg-sunken";
 
   return (
-    <div className="relative mt-auto">
-      {open ? (
-        <>
-          <div aria-hidden="true" className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div
-            ref={menuRef}
-            role="menu"
-            aria-label="Account menu"
-            className="absolute bottom-[calc(100%+8px)] left-0.5 z-40 flex w-[286px] flex-col rounded-lg border border-input bg-popover p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.45)]"
-          >
-            <div className="flex items-center gap-2.5 px-2.5 pb-3 pt-2.5">
-              <span aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-full bg-sunken text-xs font-semibold">
-                {initials(account.name)}
-              </span>
-              <span className="flex min-w-0 flex-col leading-tight">
-                <span className="truncate font-semibold">{account.name}</span>
-                {account.detail ? <span className="truncate text-[12.5px] text-faint">{account.detail}</span> : null}
-              </span>
+    <div className="mt-auto">
+      <Separator className="mb-2" />
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button className="flex w-full items-center gap-2.5 border-0 bg-transparent px-2 pb-2 pt-1 text-left text-foreground">
+            <Avatar aria-hidden="true" className="size-7 text-[11px]">
+              <AvatarFallback>{initials(account.name)}</AvatarFallback>
+            </Avatar>
+            <span className="flex min-w-0 flex-1 flex-col leading-tight">
+              <span className="truncate text-[13px] font-medium">{account.name}</span>
+              {account.detail ? <span className="truncate text-xs text-faint">{account.detail}</span> : null}
+            </span>
+            <NamedIcon name="chevronDown" className={cn("size-3 text-faint transition-transform", !open && "rotate-180")} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-[286px] p-1.5" aria-label="Account menu">
+          <DropdownMenuLabel className="flex items-center gap-2.5 px-2.5 pb-3 pt-2.5 text-sm font-normal text-foreground">
+            <Avatar aria-hidden="true" className="size-9 text-xs">
+              <AvatarFallback>{initials(account.name)}</AvatarFallback>
+            </Avatar>
+            <span className="flex min-w-0 flex-col leading-tight">
+              <span className="truncate font-semibold">{account.name}</span>
+              {account.detail ? <span className="truncate text-[12.5px] text-faint">{account.detail}</span> : null}
+            </span>
+          </DropdownMenuLabel>
+          {account.notice ? (
+            <div className="mx-1.5 mb-1.5 flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 text-[12.5px] text-warning">
+              <span aria-hidden="true" className="size-[7px] shrink-0 rounded-full bg-warning" />
+              {account.notice}
             </div>
-            {account.notice ? (
-              <div className="mx-1.5 mb-1.5 flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 text-[12.5px] text-warning">
-                <span aria-hidden="true" className="size-[7px] shrink-0 rounded-full bg-warning" />
-                {account.notice}
-              </div>
-            ) : null}
-            {(account.items ?? []).map((it) => (
-              <button key={it.id} role="menuitem" className={itemClass} onClick={pick(it.onSelect)}>
-                <span className="flex-1">{it.label}</span>
-                {it.hint ? <span className={cn("text-xs", it.hintTone === "attention" ? "text-warning" : "text-faint")}>{it.hint}</span> : null}
-              </button>
+          ) : null}
+          {(account.items ?? []).map((it) => (
+            <DropdownMenuItem key={it.id} className="h-9 text-sm" onSelect={it.onSelect}>
+              <span className="flex-1">{it.label}</span>
+              {it.hint ? (
+                <DropdownMenuShortcut className={it.hintTone === "attention" ? "text-warning" : undefined}>{it.hint}</DropdownMenuShortcut>
+              ) : null}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuItem className="h-9 text-sm" onSelect={onShortcuts}>
+            <span className="flex-1">Keyboard shortcuts</span>
+            <DropdownMenuShortcut>Ctrl /</DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="px-2.5 py-1">Theme</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={theme} onValueChange={pickTheme}>
+            {THEMES.map((t) => (
+              <DropdownMenuRadioItem key={t.id} value={t.id}>
+                {t.label}
+              </DropdownMenuRadioItem>
             ))}
-            <button role="menuitem" className={itemClass} onClick={pick(onShortcuts)}>
-              <span className="flex-1">Keyboard shortcuts</span>
-              <span className="text-xs text-faint">Ctrl /</span>
-            </button>
-            <div role="separator" className="mx-1 my-1.5 h-px bg-border" />
-            <div role="group" aria-label="Theme" className="flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] text-muted-foreground">
-              <span className="flex-1">Theme</span>
-              <span role="radiogroup" aria-label="Theme" className="inline-flex gap-0.5 rounded-md border border-input p-0.5">
-                {THEMES.map((t) => (
-                  <button
-                    key={t.id}
-                    role="radio"
-                    aria-checked={theme === t.id}
-                    className={cn(
-                      "h-6 rounded border-0 px-2 text-xs",
-                      theme === t.id ? "bg-sunken text-foreground" : "bg-transparent text-faint hover:text-foreground",
-                    )}
-                    onClick={() => pickTheme(t.id)}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </span>
-            </div>
-            {account.onSignOut ? (
-              <>
-                <div role="separator" className="mx-1 my-1.5 h-px bg-border" />
-                <button role="menuitem" className={cn(itemClass, "text-destructive")} onClick={pick(account.onSignOut)}>
-                  {account.signOutLabel ?? "Sign out"}
-                </button>
-              </>
-            ) : null}
-          </div>
-        </>
-      ) : null}
-      <button
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 border-0 border-t border-border bg-transparent px-2 pb-2 pt-3 text-left text-foreground"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span aria-hidden="true" className="grid size-7 shrink-0 place-items-center rounded-full bg-sunken text-[11px] font-semibold">
-          {initials(account.name)}
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="truncate text-[13px] font-medium">{account.name}</span>
-          {account.detail ? <span className="truncate text-xs text-faint">{account.detail}</span> : null}
-        </span>
-        <NamedIcon name="chevronDown" className={cn("size-3 text-faint transition-transform", !open && "rotate-180")} />
-      </button>
+          </DropdownMenuRadioGroup>
+          {account.onSignOut ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem destructive onSelect={account.onSignOut}>
+                {account.signOutLabel ?? "Sign out"}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -277,7 +256,7 @@ export function ShortcutList() {
       {SHORTCUTS.map((s) => (
         <li key={s.keys} className="flex items-center gap-3 border-b border-border py-2 last:border-b-0">
           <span className="flex-1">{s.action}</span>
-          <kbd className="rounded-md border border-input px-1.5 py-0.5 font-mono text-[11.5px] text-muted-foreground">{s.keys}</kbd>
+          <Kbd>{s.keys}</Kbd>
         </li>
       ))}
     </ul>

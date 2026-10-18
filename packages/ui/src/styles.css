@@ -117,6 +117,17 @@
   --radius-lg: var(--os-radius);
   --font-sans: var(--os-sans);
   --font-mono: var(--os-mono);
+  /* Popovers, menus and dialogs: quick fade/scale so they feel attached, not teleported. */
+  --animate-pop: os-pop 120ms ease-out;
+  --animate-fade: os-fade 120ms ease-out;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes os-pop {
+    from { opacity: 0; transform: scale(0.98); }
+  }
+  @keyframes os-fade {
+    from { opacity: 0; }
+  }
 }
 
 @layer base {

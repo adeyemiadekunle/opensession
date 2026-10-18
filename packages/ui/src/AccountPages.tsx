@@ -1,6 +1,9 @@
 import { useState } from "react";
 import type { AccessToken, CloudClient, Limits, Project, WorkspaceStatus } from "@opensession/api-client";
+import { Avatar, AvatarFallback } from "./components/ui/avatar";
+import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
+import { Card } from "./components/ui/card";
 import { Dialog } from "./components/ui/dialog";
 import { errText, useAsync } from "./hooks";
 import { Icon } from "./icons";
@@ -62,9 +65,9 @@ function ProfileCards({ client, account }: { client: CloudClient; account: Profi
     <>
       <SettingsCard title="Public profile">
         <div className="flex items-center gap-4">
-          <span aria-hidden="true" className="grid size-16 shrink-0 place-items-center rounded-full bg-sunken text-xl font-semibold">
-            {initials(account.name)}
-          </span>
+          <Avatar aria-hidden="true" className="size-16 text-xl">
+            <AvatarFallback>{initials(account.name)}</AvatarFallback>
+          </Avatar>
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate text-base font-semibold">{account.name}</span>
             {account.email ? <span className="truncate text-[13.5px] text-muted-foreground">{account.email}</span> : null}
@@ -122,7 +125,7 @@ function UsageCards({ client }: { client: CloudClient }) {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 max-[700px]:grid-cols-1">
-        <section aria-label="Sandboxes running" className="flex flex-col gap-3 rounded-lg border border-input bg-card p-4">
+        <Card role="region" aria-label="Sandboxes running" className="p-4">
           <div className="flex items-baseline gap-2">
             <span className="font-semibold">Sandboxes running</span>
             <span className="ml-auto text-[12.5px] text-faint">{l ? `Sleep after ${Math.round(l.idle_timeout_seconds / 60)} min idle` : ""}</span>
@@ -132,8 +135,8 @@ function UsageCards({ client }: { client: CloudClient }) {
           ) : (
             <span className="text-[13px] text-muted-foreground">{limits.error ?? "Loading…"}</span>
           )}
-        </section>
-        <section aria-label="Disk" className="flex flex-col gap-3 rounded-lg border border-input bg-card p-4">
+        </Card>
+        <Card role="region" aria-label="Disk" className="p-4">
           <div className="flex items-baseline gap-2">
             <span className="font-semibold">Disk</span>
             <span className="ml-auto text-[12.5px] text-faint">{l ? (l.disk_mb ? `${l.disk_mb} MB per project` : "No limit") : ""}</span>
@@ -147,7 +150,7 @@ function UsageCards({ client }: { client: CloudClient }) {
           ) : (
             <span className="text-[13px] text-muted-foreground">{projects.error ?? "Loading…"}</span>
           )}
-        </section>
+        </Card>
       </div>
       <section aria-labelledby="by-project" className="flex flex-col gap-2">
         <h2 id="by-project" className="m-0 mb-1 text-[13px] font-semibold text-faint">
@@ -225,16 +228,16 @@ function DevicesCards({ client, thisDevice }: { client: CloudClient; thisDevice:
         <h2 id="this-device" className="m-0 mb-1 text-[13px] font-semibold text-faint">
           This device
         </h2>
-        <div className="flex items-center gap-3.5 rounded-lg border border-input bg-card px-4 py-3.5">
+        <Card className="flex-row items-center gap-3.5 px-4 py-3.5">
           <DeviceIcon kind={thisDevice.kind} />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex items-center gap-2 font-medium">
               {thisDevice.label}
-              <span className="rounded-full bg-primary/15 px-2 py-px text-[11.5px] text-primary">This device</span>
+              <Badge>This device</Badge>
             </span>
             <span className="truncate text-[12.5px] text-faint">{me.data ? `Signed in as ${me.data.user_id} · Active now` : "Active now"}</span>
           </div>
-        </div>
+        </Card>
       </section>
       <section aria-labelledby="token-apps" className="flex flex-col gap-2">
         <div className="mb-1 flex items-center gap-3">

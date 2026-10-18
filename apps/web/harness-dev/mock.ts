@@ -31,7 +31,7 @@ const messages: Record<string, unknown[]> = {
           name: "shell",
           state: { status: "error", input: { command: "node scripts/patch-terminal.mjs" }, error: { type: "shell", message: "The shell rejected the inline script: exit code 2." } },
         },
-        { type: "text", text: "The terminal section timed out after 30s. The fix is in apps/desktop/main.ts: the shell is started before the PTY is ready." },
+        { type: "text", text: "The terminal section timed out after 30s.\n\n**Cause:** the shell is started before the PTY is ready.\n\n- Fix it in `apps/desktop/main.ts`\n- Then re-run that section:\n\n```sh\npnpm test:smoke -- --section terminal\n```" },
       ],
     },
     { id: "m3", type: "shell", command: "pnpm lint", status: "exited", exit: 1, output: { output: "apps/desktop/src/main/main.ts\n  12:5  error  'pty' is never reassigned  prefer-const" } },

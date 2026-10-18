@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import type { Model, ModelRef } from "@opensession/api-client";
-import { Select } from "./components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
+import { Kbd } from "./components/ui/kbd";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Icon, NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
 
@@ -63,22 +65,11 @@ function ContextRing({ use }: { use: ContextUse }) {
 }
 
 export function Composer(p: ComposerProps) {
-  const [menu, setMenu] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const providers = [...new Set(p.models.map((m) => m.providerID))];
   const variants = p.model?.variants ?? [];
 
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenu(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menu]);
-
   const insert = (prefix: string) => {
-    setMenu(false);
     if (prefix === "@") p.onText(p.text && !p.text.endsWith(" ") ? `${p.text} @` : `${p.text}@`);
     else p.onText(prefix + p.text.replace(/^[/!]/, ""));
     area.current?.focus();
@@ -87,35 +78,26 @@ export function Composer(p: ComposerProps) {
   return (
     <div className="relative flex max-w-[640px] flex-col gap-2.5 rounded-lg border border-input bg-card px-3.5 pb-2.5 pt-3 focus-within:border-muted-foreground">
       <div className="flex items-start gap-2.5">
-        <div className="relative">
-          <button
-            aria-label="Add a command, skill or shell command"
-            aria-haspopup="menu"
-            aria-expanded={menu}
-            className="grid size-7 place-items-center rounded-md border-0 bg-transparent p-0 text-muted-foreground hover:bg-sunken hover:text-foreground"
-            onClick={() => setMenu((m) => !m)}
-          >
-            <NamedIcon name="plus" className="size-[18px]" />
-          </button>
-          {menu ? (
-            <>
-              <div aria-hidden="true" className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
-              <div role="menu" className="absolute bottom-[calc(100%+6px)] left-0 z-40 flex w-56 flex-col rounded-lg border border-input bg-popover p-1 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
-                {INSERTS.map((it) => (
-                  <button
-                    key={it.prefix}
-                    role="menuitem"
-                    className="flex h-8 items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left text-[13px] text-foreground hover:bg-sunken"
-                    onClick={() => insert(it.prefix)}
-                  >
-                    <span className="flex-1">{it.label}</span>
-                    <kbd className="font-mono text-xs text-faint">{it.hint}</kbd>
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : null}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Add a command, skill or shell command"
+              className="grid size-7 place-items-center rounded-md border-0 bg-transparent p-0 text-muted-foreground hover:bg-sunken hover:text-foreground"
+            >
+              <NamedIcon name="plus" className="size-[18px]" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-56">
+            {INSERTS.map((it) => (
+              <DropdownMenuItem key={it.prefix} onSelect={() => insert(it.prefix)}>
+                <span className="flex-1">{it.label}</span>
+                <DropdownMenuShortcut>
+                  <Kbd className="border-0 px-0">{it.hint}</Kbd>
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <textarea
           ref={area}
           aria-label="Message"
@@ -154,35 +136,51 @@ export function Composer(p: ComposerProps) {
         </button>
       </div>
       <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-        <Select variant="ghost" aria-label="Agent" className="bg-sunken text-foreground" value={p.agent} onChange={(e) => p.onAgent(e.target.value)}>
-          {p.agents.map((a) => (
-            <option key={a} value={a}>
-              {label(a)}
-            </option>
-          ))}
+        <Select value={p.agent} onValueChange={p.onAgent}>
+          <SelectTrigger variant="ghost" aria-label="Agent" className="bg-sunken text-foreground">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {p.agents.map((a) => (
+              <SelectItem key={a} value={a}>
+                {label(a)}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
         <span className="flex-1" />
-        <Select variant="ghost" aria-label="Model" className="text-foreground" value={p.model ? modelKey(p.model) : ""} onChange={(e) => p.onModel(e.target.value)}>
-          {providers.map((prov) => (
-            <optgroup key={prov} label={prov}>
-              {p.models
-                .filter((m) => m.providerID === prov)
-                .map((m) => (
-                  <option key={modelKey(m)} value={modelKey(m)}>
-                    {m.name ?? m.id}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
+        <Select value={p.model ? modelKey(p.model) : ""} onValueChange={p.onModel}>
+          <SelectTrigger variant="ghost" aria-label="Model" className="text-foreground">
+            <SelectValue placeholder="Model" />
+          </SelectTrigger>
+          <SelectContent>
+            {providers.map((prov) => (
+              <SelectGroup key={prov}>
+                <SelectLabel>{prov}</SelectLabel>
+                {p.models
+                  .filter((m) => m.providerID === prov)
+                  .map((m) => (
+                    <SelectItem key={modelKey(m)} value={modelKey(m)}>
+                      {m.name ?? m.id}
+                    </SelectItem>
+                  ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
         </Select>
         {variants.length ? (
-          <Select variant="ghost" aria-label="Effort" value={p.variant} onChange={(e) => p.onVariant(e.target.value)}>
-            <option value="">Default effort</option>
-            {variants.map((v) => (
-              <option key={v} value={v}>
-                {label(v)}
-              </option>
-            ))}
+          <Select value={p.variant || "__default"} onValueChange={(v) => p.onVariant(v === "__default" ? "" : v)}>
+            <SelectTrigger variant="ghost" aria-label="Effort">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__default">Default effort</SelectItem>
+              {variants.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {label(v)}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         ) : null}
         {p.context ? <ContextRing use={p.context} /> : null}

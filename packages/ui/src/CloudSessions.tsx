@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import type { CloudClient, ModelRef, Project, Session } from "@opensession/api-client";
+import { Avatar, AvatarFallback } from "./components/ui/avatar";
+import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
-import { Select } from "./components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { errText, storageGet, useAsync } from "./hooks";
 import { cn } from "./lib/utils";
 import { MODEL_KEY, VARIANT_KEY } from "./prefs";
@@ -20,11 +22,11 @@ interface Card {
   at?: number;
 }
 
-const STATUS: Record<Status, { label: string; className: string }> = {
-  approval: { label: "Needs approval", className: "bg-warning/15 text-warning" },
-  running: { label: "Running", className: "bg-primary/15 text-primary" },
-  idle: { label: "Idle", className: "bg-sunken text-muted-foreground" },
-  asleep: { label: "Asleep", className: "bg-sunken text-muted-foreground" },
+const STATUS: Record<Status, { label: string; variant: "warning" | "default" | "muted" }> = {
+  approval: { label: "Needs approval", variant: "warning" },
+  running: { label: "Running", variant: "default" },
+  idle: { label: "Idle", variant: "muted" },
+  asleep: { label: "Asleep", variant: "muted" },
 };
 
 const FILTERS: { id: "all" | Status; label: string }[] = [
@@ -190,9 +192,9 @@ export function CloudSessions({ client, project, open, go, accountName }: CloudS
             className="h-8 w-[220px] rounded-md border border-border bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-ring"
           />
           {accountName ? (
-            <span aria-hidden="true" className="grid size-[30px] place-items-center rounded-full bg-sunken text-[11px] font-semibold">
-              {initials(accountName)}
-            </span>
+            <Avatar aria-hidden="true" className="size-[30px] text-[11px]">
+              <AvatarFallback>{initials(accountName)}</AvatarFallback>
+            </Avatar>
           ) : null}
         </div>
       </header>
@@ -226,12 +228,17 @@ export function CloudSessions({ client, project, open, go, accountName }: CloudS
                 onChange={(e) => setText(e.target.value)}
                 className="h-8 min-w-0 flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
-              <Select variant="ghost" aria-label="Project" value={target} onChange={(e) => setTarget(e.target.value)}>
-                {(projects.data ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
+              <Select value={target} onValueChange={setTarget}>
+                <SelectTrigger variant="ghost" aria-label="Project">
+                  <SelectValue placeholder="Project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(projects.data ?? []).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
               {model ? <span className="shrink-0 text-xs text-muted-foreground">{model.id}</span> : null}
               <Button type="submit" variant="default" size="sm" disabled={!text.trim() || starting}>
@@ -275,7 +282,7 @@ export function CloudSessions({ client, project, open, go, accountName }: CloudS
               : shown.map((card) => (
                   <article key={card.key} className="flex flex-col gap-3 rounded-xl border border-input bg-card p-4">
                     <div className="flex items-center gap-2">
-                      <span className={cn("rounded-full px-2 py-0.5 text-xs", STATUS[card.status].className)}>{STATUS[card.status].label}</span>
+                      <Badge variant={STATUS[card.status].variant}>{STATUS[card.status].label}</Badge>
                       {card.at ? <span className="ml-auto text-[12.5px] text-faint">{relativeTime(card.at)}</span> : null}
                     </div>
                     <h2 className="m-0 text-base font-semibold">{card.session ? card.session.title || "Untitled session" : card.project.name}</h2>

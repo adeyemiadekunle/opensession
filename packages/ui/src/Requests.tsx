@@ -2,7 +2,9 @@ import { useState } from "react";
 import type { FormRequest, OpenSessionClient, PermissionRequest } from "@opensession/api-client";
 import { errText } from "./hooks";
 import { Button } from "./components/ui/button";
-import { Select } from "./components/ui/select";
+import { Checkbox } from "./components/ui/checkbox";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { cn } from "./lib/utils";
 
 type Field = {
@@ -119,7 +121,7 @@ function PermissionCard({
       {request.message ? <div className="text-[13px] text-muted-foreground">{String(request.message)}</div> : null}
       <div className="flex items-center gap-2.5">
         <label className="flex flex-1 items-center gap-2 text-xs text-faint">
-          <input type="checkbox" className="accent-primary" checked={always} onChange={(e) => setAlways(e.target.checked)} />
+          <Checkbox checked={always} onCheckedChange={(v) => setAlways(v === true)} />
           Always allow
         </label>
         <Button variant="outline" onClick={onDeny}>
@@ -237,6 +239,31 @@ function HandOverCard({
   );
 }
 
+/** An "array" question field: several options to tick, shown as checkboxes in a menu. */
+function MultiPick({ field, value, onChange }: { field: Field; value: unknown; onChange: (v: string[]) => void }) {
+  const chosen = Array.isArray(value) ? (value as string[]) : [];
+  const toggle = (v: string, on: boolean) => onChange(on ? [...chosen, v] : chosen.filter((x) => x !== v));
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex h-8 w-full items-center rounded-md border border-input bg-card px-2.5 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="min-w-0 flex-1 truncate">{chosen.length ? chosen.join(", ") : "Choose…"}</span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]">
+        {(field.options ?? []).map((o) => (
+          <DropdownMenuCheckboxItem key={optValue(o)} checked={chosen.includes(optValue(o))} onCheckedChange={(v) => toggle(optValue(o), v === true)} onSelect={(e) => e.preventDefault()}>
+            {optLabel(o)}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function FormCard({ form, onSubmit }: { form: FormRequest; onSubmit: (a: Record<string, unknown>) => void }) {
   const fields = ((form.fields ?? []) as Field[]).filter((f) => f && f.key);
   const [vals, setVals] = useState<Record<string, unknown>>(() =>
@@ -262,23 +289,24 @@ function FormCard({ form, onSubmit }: { form: FormRequest; onSubmit: (a: Record<
           <span>{f.title ?? f.key}</span>
           {f.description ? <span className="text-faint">{f.description}</span> : null}
           {f.type === "boolean" ? (
-            <input type="checkbox" checked={Boolean(vals[f.key])} onChange={(e) => set(f.key, e.target.checked)} />
+            <Checkbox checked={Boolean(vals[f.key])} onCheckedChange={(v) => set(f.key, v === true)} />
           ) : f.options?.length ? (
-            <Select
-              className="h-auto text-sm"
-              multiple={f.type === "array"}
-              value={vals[f.key] as string | string[]}
-              onChange={(e) =>
-                set(f.key, f.type === "array" ? Array.from(e.target.selectedOptions).map((o) => o.value) : e.target.value)
-              }
-            >
-              {f.type !== "array" ? <option value="">Choose…</option> : null}
-              {f.options.map((o) => (
-                <option key={optValue(o)} value={optValue(o)}>
-                  {optLabel(o)}
-                </option>
-              ))}
-            </Select>
+            f.type === "array" ? (
+              <MultiPick field={f} value={vals[f.key]} onChange={(v) => set(f.key, v)} />
+            ) : (
+              <Select name={f.key} required={f.required} value={String(vals[f.key] ?? "")} onValueChange={(v) => set(f.key, v)}>
+                <SelectTrigger className="w-full" aria-label={f.title ?? f.key}>
+                  <SelectValue placeholder="Choose…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {f.options.map((o) => (
+                    <SelectItem key={optValue(o)} value={optValue(o)}>
+                      {optLabel(o)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )
           ) : (
             <input
               className="h-8 rounded-md border border-input bg-card px-2.5 text-sm text-foreground"

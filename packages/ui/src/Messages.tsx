@@ -3,6 +3,7 @@ import type { ContentPart, Message } from "@opensession/api-client";
 import { Button } from "./components/ui/button";
 import { NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
+import { Markdown } from "./Markdown";
 
 type ToolState = {
   status?: string;
@@ -311,11 +312,9 @@ export function MessageView({ m, onRetry, onResume }: { m: Message; onRetry?: ()
       <div className="flex w-full flex-col gap-1.5">
         {parts.map((p, i) => {
           if (p.type === "text")
-            return (
-              <div key={i} className="whitespace-pre-wrap break-words rounded-lg border border-border bg-card px-4 py-3 text-[15px]">
-                {p.text}
-              </div>
-            );
+            return p.text?.trim() ? (
+              <Markdown key={i} text={p.text} className="rounded-lg border border-border bg-card px-4 py-3 text-[15px]" />
+            ) : null;
           if (p.type === "reasoning")
             return (
               <details key={i} className="text-xs">
