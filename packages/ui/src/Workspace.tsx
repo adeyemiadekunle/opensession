@@ -29,6 +29,7 @@ import { Kbd } from "./components/ui/kbd";
 import { PanelHeader } from "./components/ui/panel";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Tip } from "./components/ui/tooltip";
+import { Toaster, toast } from "./components/ui/toast";
 import { Dialog } from "./components/ui/dialog";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { ReviewView } from "./ReviewView";
@@ -652,20 +653,25 @@ export function Workspace({
     setVariants(next);
     storageSet(VARIANT_KEY, JSON.stringify(next));
     const ref: ModelRef = v ? { providerID: chosen.providerID, id: chosen.id, variant: v } : { providerID: chosen.providerID, id: chosen.id };
-    if (active) await client.setModel(active, ref).catch((e) => setErr(errText(e)));
+    if (active) await client.setModel(active, ref).catch((e) => toast.error(errText(e)));
   };
 
   const remove = async (id: string) => {
     if (!confirmDelete()) return;
-    await client.deleteSession(id).catch((e) => setErr(errText(e)));
-    if (active === id) setActive(null);
+    try {
+      await client.deleteSession(id);
+      if (active === id) setActive(null);
+      toast.success("Session deleted");
+    } catch (e) {
+      toast.error(errText(e));
+    }
     void sessions.reload();
   };
 
   const pickAgent = async (a: string) => {
     setAgent(a);
     storageSet(AGENT_KEY, a);
-    if (active) await client.setAgent(active, a).catch((e) => setErr(errText(e)));
+    if (active) await client.setAgent(active, a).catch((e) => toast.error(errText(e)));
   };
 
   /** Panels this workspace can show: the terminal and browser need their backends. */
@@ -789,6 +795,7 @@ export function Workspace({
       className="relative flex h-full min-h-0 flex-col bg-background"
       onKeyDown={narrow && drawerOpen ? (e) => e.key === "Escape" && setDrawerOpen(false) : undefined}
     >
+      <Toaster />
       <header className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border bg-sidebar pl-2.5 pr-2.5">
         <Button
           ref={drawerToggle}
@@ -1133,7 +1140,7 @@ export function Workspace({
               onText={setText}
               busy={busy}
               onSend={() => void send()}
-              onStop={active ? () => void client.interrupt(active).then(refresh).catch((e) => setErr(errText(e))) : undefined}
+              onStop={active ? () => void client.interrupt(active).then(refresh).catch((e) => toast.error(errText(e))) : undefined}
               agent={agent}
               agents={agentChoices}
               agentInfo={agentInfo}
