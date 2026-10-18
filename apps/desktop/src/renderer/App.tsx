@@ -200,7 +200,7 @@ function CloudMode({ onLocal }: { onLocal: () => void }) {
 function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudRequest) => Promise<void>; onCloud: (project?: string) => void }) {
   const [st, setSt] = useState<LocalStatus | null>(null);
   const [busy, setBusy] = useState(false);
-  const [page, setPage] = useState<"workspace" | "settings" | "agent">("workspace");
+  const [page, setPage] = useState<"workspace" | "settings" | "agent" | "models">("workspace");
   const [gen, setGen] = useState(0); // remount the workspace after keys change
   const cloud = useAsync(() => window.opensession.cloudStatus(), []);
 
@@ -329,14 +329,14 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       </Screen>
     );
   }
-  if (page === "settings" || page === "agent") {
+  if (page === "settings" || page === "agent" || page === "models") {
     return (
       <LocalSettings
         client={client}
         store={store}
         onBack={back}
         onSaved={() => setGen((g) => g + 1)}
-        initial={page === "agent" ? "agent" : undefined}
+        initial={page === "agent" ? "agent" : page === "models" ? "models" : undefined}
         agentSetup={<AgentSetup embedded store={store} onSaved={() => setGen((g) => g + 1)} />}
       />
     );
@@ -392,7 +392,7 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
       noModels={
         <>
           Add a model API key in{" "}
-          <button className="os-link" onClick={() => setPage("settings")}>
+          <button className="os-link" onClick={() => setPage("models")}>
             Settings
           </button>
           .

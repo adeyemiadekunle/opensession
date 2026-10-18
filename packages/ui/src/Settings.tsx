@@ -34,6 +34,8 @@ export function CloudSettings({
   desktop,
   agentSetup,
   initial,
+  section,
+  onSection,
 }: {
   client: CloudClient;
   /** The open project, for its sandbox and model list. */
@@ -45,6 +47,9 @@ export function CloudSettings({
   agentSetup?: ReactNode;
   /** Section to open first. */
   initial?: string;
+  /** The open section, from the address (see SettingsShell). */
+  section?: string;
+  onSection?: (id: string) => void;
 }) {
   const store = useMemo(() => client.agentConfigStore(), [client]);
   // The model list comes from the project's sandbox: read it only when it is already running.
@@ -110,7 +115,7 @@ export function CloudSettings({
       ),
     },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} initial={initial} aside="Applies to your cloud account" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} aside="Applies to your cloud account" />;
 }
 
 /** Desktop app, this computer: the same settings pages, with keys and agent setup stored here. */
@@ -121,6 +126,8 @@ export function LocalSettings({
   onSaved,
   agentSetup,
   initial,
+  section,
+  onSection,
 }: {
   client: LocalClient;
   store: AgentConfigStore;
@@ -131,6 +138,9 @@ export function LocalSettings({
   agentSetup?: ReactNode;
   /** Section to open first. */
   initial?: string;
+  /** The open section, from the address (see SettingsShell). */
+  section?: string;
+  onSection?: (id: string) => void;
 }) {
   const models = useAsync(() => client.listModels(), [client]);
   const pages: SettingsPage[] = [
@@ -158,7 +168,7 @@ export function LocalSettings({
     { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
     { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} initial={initial} aside="Applies to this computer" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} aside="Applies to this computer" />;
 }
 
 function agentPage(body: ReactNode, description: string): SettingsPage[] {
