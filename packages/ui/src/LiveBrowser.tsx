@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
 import { Button } from "./components/ui/button";
+import { Empty } from "./components/ui/empty";
 import { errText } from "./hooks";
 import { NamedIcon } from "./icons";
 import { cn } from "./lib/utils";
@@ -130,6 +131,8 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
   const controlRef = useRef(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const [retry, setRetry] = useState(0);
+  // Connections in a row that dropped before the browser answered (the gateway accepts before reaching it).
+  const [failures, setFailures] = useState(0);
   controlRef.current = control;
   activeRef.current = active;
 
@@ -175,21 +178,23 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
           void client.send("Page.screencastFrameAck", { sessionId: p.sessionId }, m.sessionId).catch(() => {});
         }
       };
+      const sock = ws;
       ws.addEventListener("open", async () => {
         cdp.current = client;
-        delay = 2000;
         setErr(null);
         setState("live");
         session.current = null;
         try {
           await client.send("Target.setDiscoverTargets", { discover: true });
           const { targetInfos } = await client.send<{ targetInfos: { targetId: string; type: string; title: string; url: string }[] }>("Target.getTargets");
+          delay = 2000; // back off from scratch only once the browser itself answered
+          setFailures(0);
           const pages = targetInfos.filter((t) => t.type === "page").map((t) => ({ id: t.targetId, title: t.title, url: t.url }));
           setTabs(pages);
           setActive((a) => (a && pages.some((p) => p.id === a) ? a : (pages.at(-1)?.id ?? null)));
           setRetry((n) => n + 1); // re-attach to the active tab on this connection
         } catch (e) {
-          setErr(errText(e));
+          if (sock.readyState === WebSocket.OPEN) setErr(errText(e)); // a dropped socket shows as Reconnecting, not "closed"
         }
       });
       ws.addEventListener("close", () => {
@@ -199,6 +204,7 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
     };
     const schedule = () => {
       setState("lost");
+      setFailures((n) => n + 1);
       timer = setTimeout(() => void connect(), delay);
       delay = Math.min(delay * 2, 30_000);
     };
@@ -380,14 +386,16 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
             </button>
           </div>
         ))}
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           aria-label="New tab"
-          className="mb-0.5 grid size-7 shrink-0 place-items-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-sunken"
+          className="mb-1 text-muted-foreground"
           disabled={state !== "live"}
           onClick={() => void cdp.current?.send("Target.createTarget", { url: "about:blank" }).catch((e) => setErr(errText(e)))}
         >
-          <NamedIcon name="plus" className="size-3.5" />
-        </button>
+          <NamedIcon name="plus" />
+        </Button>
       </div>
       <form
         className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2"
@@ -479,44 +487,44 @@ export function LiveBrowser({ api, handOver, waiting }: { api: LiveBrowserApi; h
             onWheel={(e) => claim() && void page("Input.dispatchMouseEvent", { type: "mouseWheel", ...point(e), deltaX: e.deltaX, deltaY: e.deltaY })}
           />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center text-[13px] text-muted-foreground">
-            <NamedIcon name="browser" className="size-6 text-faint" />
-            <p className="m-0 font-medium text-foreground">
-              {state === "connecting"
+          <Empty
+            className="h-full"
+            icon={<NamedIcon name="browser" />}
+            title={
+              state === "connecting"
                 ? "Starting the sandbox browser…"
                 : state === "lost"
-                  ? "Reconnecting to the sandbox browser…"
+                  ? failures >= 3
+                    ? "Can't reach the sandbox browser"
+                    : "Reconnecting to the sandbox browser…"
                   : !tabs.length
                     ? "No tabs open"
                     : !tab || tab.url === "about:blank"
                       ? "Blank tab"
-                      : "Loading…"}
-            </p>
-            <p className="m-0 max-w-[340px]">
-              The agent opens pages here with its browser tools. You can open one too: try your dev server, such as localhost:5173.
-            </p>
-          </div>
+                      : "Loading…"
+            }
+          >
+            {state === "lost" && failures >= 3 ? (
+              <p className="m-0 max-w-[340px]">Still retrying. If this lasts, put the sandbox to sleep in Settings &gt; Sandbox.</p>
+            ) : null}
+          </Empty>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2.5 border-t border-border bg-card px-3.5 py-2 text-[13px] text-muted-foreground">
-        <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", control ? "bg-warning" : "bg-primary")} />
-        <span className="min-w-0 flex-1">
-          {mode === "handover"
-            ? "The agent is waiting on this tab for you. When you're done, click Done or tell it in the chat."
-            : mode === "own"
-              ? "You took over this tab. The agent sees it's yours and carries on in a new tab; sign-ins are shared."
-              : "Watching the agent's browser. Click, scroll or type on the page to take the tab over."}
-        </span>
-        {mode === "own" ? (
-          <Button size="sm" variant="default" onClick={() => void handBack()}>
-            Hand back
-          </Button>
-        ) : mode === "handover" ? (
-          <Button size="sm" variant="default" onClick={() => setMode("watch")}>
-            Stop controlling
-          </Button>
-        ) : null}
-      </div>
+      {control ? (
+        <div className="flex shrink-0 items-center gap-2.5 border-t border-border bg-card px-3.5 py-2 text-[13px] text-muted-foreground">
+          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-warning" />
+          <span className="min-w-0 flex-1">{mode === "handover" ? "The agent is waiting for you" : "You're using this tab"}</span>
+          {mode === "own" ? (
+            <Button size="sm" variant="default" onClick={() => void handBack()}>
+              Hand back
+            </Button>
+          ) : (
+            <Button size="sm" variant="default" onClick={() => setMode("watch")}>
+              Stop controlling
+            </Button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

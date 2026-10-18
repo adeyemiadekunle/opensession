@@ -16,6 +16,7 @@ export const buttonVariants = cva(
         default: "h-8 px-3",
         sm: "h-7 px-2.5 text-xs",
         icon: "size-8 p-0",
+        "icon-sm": "size-[26px] p-0 [&_svg]:size-[13px]",
       },
     },
     defaultVariants: { variant: "outline", size: "default" },

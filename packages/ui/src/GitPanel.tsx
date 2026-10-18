@@ -2,6 +2,10 @@ import { useState } from "react";
 import type { GitActions, GitInfo, OpenSessionClient, OutgoingChanges } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { ChecksView } from "./Checks";
+import { Button } from "./components/ui/button";
+import { Empty } from "./components/ui/empty";
+import { Input, Textarea } from "./components/ui/input";
+import { Select } from "./components/ui/select";
 
 /** A pending commit, push or pull request, shown for approval before it runs. */
 export interface Review {
@@ -68,23 +72,16 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
   };
 
   const g = git.data;
-  if (git.error) return <div className="os-panel os-error">{git.error}</div>;
-  if (!g) return <div className="os-panel os-muted">Loading…</div>;
-  if (!g.branch) {
-    return (
-      <div className="os-panel os-muted">
-        This workspace isn't a git repository yet. Link a GitHub repository to a project, or ask the agent to run{" "}
-        <code>git init</code>.
-      </div>
-    );
-  }
+  if (git.error) return <div className="px-3.5 py-3 text-[13px] text-destructive">{git.error}</div>;
+  if (!g) return <div className="px-3.5 py-3 text-[13px] text-muted-foreground">Loading…</div>;
+  if (!g.branch) return <Empty title="Not a git repository" />;
   const onDefault = g.branch === g.default_branch;
   return (
-    <div className="os-panel os-git">
-      {g.repo ? <div className="os-path">{g.repo}</div> : null}
-      <label className="os-field">
-        <span>Branch</span>
-        <select
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-3.5 py-3 text-[13px]">
+      {g.repo ? <div className="truncate font-mono text-xs text-muted-foreground">{g.repo}</div> : null}
+      <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        Branch
+        <Select
           value={g.branch}
           disabled={!actions || Boolean(busy)}
           onChange={(e) => run("checkout", async () => void (await actions!.checkout(e.target.value)))}
@@ -95,11 +92,11 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
               {b === g.default_branch ? " (default)" : ""}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       {actions ? (
         <form
-          className="os-row"
+          className="flex gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             const b = newBranch.trim();
@@ -110,47 +107,43 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
             });
           }}
         >
-          <input placeholder="new-branch-name" value={newBranch} onChange={(e) => setNewBranch(e.target.value.replace(/\s+/g, "-"))} />
-          <button type="submit" disabled={!newBranch.trim() || Boolean(busy)}>
+          <Input placeholder="new-branch-name" value={newBranch} onChange={(e) => setNewBranch(e.target.value.replace(/\s+/g, "-"))} />
+          <Button type="submit" disabled={!newBranch.trim() || Boolean(busy)}>
             New branch
-          </button>
+          </Button>
         </form>
       ) : null}
 
-      <div className="os-git-changes">
-        <div className="os-muted os-small">{g.status.length ? `${g.status.length} changed file(s)` : "No uncommitted changes"}</div>
-        <ul className="os-list">
-          {g.status.map((f) => (
-            <li key={f.file} className="os-row os-between">
-              <span className="os-path">{f.file}</span>
-              <span>
-                <span className="os-add">+{f.additions}</span> <span className="os-del">−{f.deletions}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
+      <div className="flex flex-col gap-2 border-t border-border pt-3">
+        <div className="text-xs text-muted-foreground">{g.status.length ? `${g.status.length} changed file(s)` : "No uncommitted changes"}</div>
+        {g.status.length ? (
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {g.status.map((f) => (
+              <li key={f.file} className="flex items-center justify-between gap-2">
+                <span className="truncate font-mono text-xs text-muted-foreground">{f.file}</span>
+                <span className="shrink-0 font-mono text-xs">
+                  <span className="text-success">+{f.additions}</span> <span className="text-destructive">−{f.deletions}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {actions?.commit && g.status.length ? (
-          <button disabled={Boolean(busy) || Boolean(review)} onClick={() => setReview({ kind: "commit", message: "", title: "", body: "" })}>
+          <Button className="self-start" disabled={Boolean(busy) || Boolean(review)} onClick={() => setReview({ kind: "commit", message: "", title: "", body: "" })}>
             Commit…
-          </button>
-        ) : (
-          <div className="os-muted os-small">Ask the agent to commit when you're happy with the changes.</div>
-        )}
+          </Button>
+        ) : null}
       </div>
 
       {actions?.push && !review ? (
-        <div className="os-row">
-          <button disabled={Boolean(busy)} onClick={() => void openReview("push")}>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={Boolean(busy)} onClick={() => void openReview("push")}>
             {busy === "review" ? "Loading…" : "Push…"}
-          </button>
+          </Button>
           {actions.pullRequest ? (
-            <button
-              disabled={Boolean(busy) || onDefault}
-              title={onDefault ? "Create a branch first" : undefined}
-              onClick={() => void openReview("pr")}
-            >
+            <Button disabled={Boolean(busy) || onDefault} title={onDefault ? "Create a branch first" : undefined} onClick={() => void openReview("pr")}>
               Create pull request…
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}
@@ -168,10 +161,10 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
 
       {actions?.checks ? <ChecksView checks={actions.checks} refreshKey={bump + refreshKey} /> : null}
       {msg ? (
-        <div className={msg.ok ? "os-ok" : "os-error"}>
+        <div className={msg.ok ? "text-success" : "text-destructive"}>
           {msg.text}{" "}
           {msg.url ? (
-            <a href={msg.url} target="_blank" rel="noreferrer">
+            <a href={msg.url} target="_blank" rel="noreferrer" className="text-primary">
               View on GitHub
             </a>
           ) : null}
@@ -205,28 +198,28 @@ function ReviewStep({
   const verb = review.kind === "commit" ? "commit" : review.kind === "push" ? "push" : "open pull request";
   return (
     <form
-      className="os-card os-review"
+      className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (ready) onApprove();
       }}
     >
-      <strong>{review.kind === "commit" ? "Review commit" : review.kind === "push" ? "Review push" : "Review pull request"}</strong>
+      <strong className="text-[13.5px]">{review.kind === "commit" ? "Review commit" : review.kind === "push" ? "Review push" : "Review pull request"}</strong>
       {review.kind === "commit" ? (
         <>
-          <div className="os-muted os-small">These {files.length} file(s) will be committed:</div>
-          <ul className="os-list">
+          <div className="text-xs text-muted-foreground">These {files.length} file(s) will be committed:</div>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
             {files.map((f) => (
-              <li key={f} className="os-path">
+              <li key={f} className="truncate font-mono text-xs text-muted-foreground">
                 {f}
               </li>
             ))}
           </ul>
-          <input autoFocus placeholder="Commit message" value={review.message} onChange={(e) => onChange({ ...review, message: e.target.value })} />
+          <Input autoFocus placeholder="Commit message" value={review.message} onChange={(e) => onChange({ ...review, message: e.target.value })} />
         </>
       ) : (
         <>
-          <div className="os-muted os-small">
+          <div className="text-xs text-muted-foreground">
             {out
               ? commits.length
                 ? `${commits.length} commit(s) on ${out.branch} will go to GitHub${out.base ? ` (not yet on ${out.base})` : ""}:`
@@ -234,34 +227,34 @@ function ReviewStep({
               : "The current branch will be sent to GitHub."}
           </div>
           {commits.length ? (
-            <ul className="os-list">
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {commits.map((c) => (
                 <li key={c.sha}>
-                  <code>{c.sha}</code> {c.subject} <span className="os-muted os-small">{c.author}</span>
+                  <code>{c.sha}</code> {c.subject} <span className="text-xs text-muted-foreground">{c.author}</span>
                 </li>
               ))}
             </ul>
           ) : null}
           {out?.uncommitted.length ? (
-            <div className="os-warn os-small">
+            <div className="text-xs text-warning">
               {out.uncommitted.length} uncommitted file(s) will not be included. Commit them first if they belong in this {review.kind === "pr" ? "pull request" : "push"}.
             </div>
           ) : null}
           {review.kind === "pr" ? (
             <>
-              <input autoFocus placeholder="Title" value={review.title} onChange={(e) => onChange({ ...review, title: e.target.value })} />
-              <textarea placeholder="What changed and why" value={review.body} onChange={(e) => onChange({ ...review, body: e.target.value })} />
+              <Input autoFocus placeholder="Title" value={review.title} onChange={(e) => onChange({ ...review, title: e.target.value })} />
+              <Textarea placeholder="What changed and why" value={review.body} onChange={(e) => onChange({ ...review, body: e.target.value })} />
             </>
           ) : null}
         </>
       )}
-      <div className="os-row">
-        <button className="os-primary" type="submit" disabled={!ready || Boolean(busy)}>
+      <div className="flex gap-2">
+        <Button variant="default" type="submit" disabled={!ready || Boolean(busy)}>
           {busy === review.kind ? "Working…" : `Approve and ${verb}`}
-        </button>
-        <button type="button" onClick={onCancel} disabled={Boolean(busy)}>
+        </Button>
+        <Button onClick={onCancel} disabled={Boolean(busy)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
