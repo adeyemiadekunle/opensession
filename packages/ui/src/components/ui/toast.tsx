@@ -52,23 +52,17 @@ const TONE_ICON: Record<ToastItem["tone"], { icon: React.ReactNode; cls: string 
   error: { icon: icons.close, cls: "text-destructive" },
 };
 
-/** The toast stack. Mount once near the app root (the Workspace mounts it). */
-export function Toaster() {
+/** Just the toast items; the Workspace places them under the approval stack in one overlay column. */
+export function ToastStack() {
   const shown = useSyncExternalStore(subscribe, () => items, () => items);
-  if (!shown.length) return null;
   return (
-    <div
-      role="region"
-      aria-label="Notifications"
-      aria-live="polite"
-      className="pointer-events-none fixed right-4 bottom-4 z-[100] flex w-fit max-w-[min(24rem,calc(100vw-2rem))] flex-col items-end gap-2"
-    >
+    <>
       {shown.map((t) => {
         const tone = TONE_ICON[t.tone];
         return (
           <div
             key={t.id}
-            className="pointer-events-auto flex w-fit max-w-full animate-pop items-start gap-2.5 rounded-lg border border-input bg-popover py-2.5 pr-2 pl-3 shadow-pop"
+            className="pointer-events-auto flex w-fit max-w-full animate-pop items-start gap-2.5 self-end rounded-lg border border-input bg-popover py-2.5 pr-2 pl-3 shadow-pop"
           >
             {tone ? <Icon className={cn("mt-0.5 size-3.5 shrink-0", tone.cls)}>{tone.icon}</Icon> : null}
             <div className="min-w-0 text-[13px] leading-snug">
@@ -96,6 +90,20 @@ export function Toaster() {
           </div>
         );
       })}
+    </>
+  );
+}
+
+/** Standalone toast stack, fixed bottom-right. The Workspace composes its own overlay column. */
+export function Toaster() {
+  return (
+    <div
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+      className="pointer-events-none fixed right-4 bottom-4 z-[100] flex w-fit max-w-[min(24rem,calc(100vw-2rem))] flex-col items-end gap-2 [&>*]:pointer-events-auto"
+    >
+      <ToastStack />
     </div>
   );
 }
