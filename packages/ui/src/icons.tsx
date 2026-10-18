@@ -58,6 +58,8 @@ export const icons = {
     </>
   ),
   chevronDown: <path d="M6 9l6 6 6-6" />,
+  chevronUp: <path d="M6 15l6-6 6 6" />,
+  check: <path d="M4 12l5 5L20 7" />,
   chevronRight: <path d="M9 6l6 6-6 6" />,
   expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />,
   list: <path d="M4 6h2M4 12h2M4 18h2M9 6h11M9 12h11M9 18h11" />,

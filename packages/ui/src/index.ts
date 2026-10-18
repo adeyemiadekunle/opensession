@@ -25,6 +25,30 @@ export { ReviewView } from "./ReviewView";
 export type { Account, AccountMenuItem, SidebarItem, SidebarSection } from "./Sidebar";
 export { PageHeader } from "./PageHeader";
 export { Button } from "./components/ui/button";
+export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./components/ui/card";
+export { Badge } from "./components/ui/badge";
+export { Kbd } from "./components/ui/kbd";
+export { Separator } from "./components/ui/separator";
+export { Avatar, AvatarImage, AvatarFallback } from "./components/ui/avatar";
+export { Switch } from "./components/ui/switch";
+export { Checkbox } from "./components/ui/checkbox";
+export { ScrollArea, ScrollBar } from "./components/ui/scroll-area";
+export { Select, SelectGroup, SelectValue, SelectTrigger, SelectContent, SelectLabel, SelectItem, SelectSeparator } from "./components/ui/select";
+export {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuGroup,
+  DropdownMenuPortal,
+} from "./components/ui/dropdown-menu";
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, Tip } from "./components/ui/tooltip";
 export { initTheme, setTheme, getTheme } from "./theme";
 export type { Theme } from "./theme";
 export { NamedIcon } from "./icons";

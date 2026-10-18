@@ -22,8 +22,11 @@ import { BrowserPanel, type PreviewApi } from "./BrowserPanel";
 import { Requests } from "./Requests";
 import { Dock, DOCK_KEY, DOCK_TITLES, loadDock, type DockPanelId, type DockState } from "./Dock";
 import { Button } from "./components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
+import { Kbd } from "./components/ui/kbd";
 import { PanelHeader } from "./components/ui/panel";
-import { Select } from "./components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./components/ui/select";
+import { Tip } from "./components/ui/tooltip";
 import { Dialog } from "./components/ui/dialog";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { ReviewView } from "./ReviewView";
@@ -645,18 +648,18 @@ export function Workspace({
     );
 
   const toggleButton = (id: DockPanelId, pressed: boolean, onClick: () => void) => (
-    <Button
-      key={id}
-      variant="ghost"
-      size="icon"
-      title={DOCK_TITLES[id]}
-      aria-label={DOCK_TITLES[id]}
-      aria-pressed={pressed}
-      className="aria-pressed:bg-muted aria-pressed:text-primary"
-      onClick={onClick}
-    >
-      <Icon>{icons[id]}</Icon>
-    </Button>
+    <Tip key={id} label={DOCK_TITLES[id]}>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={DOCK_TITLES[id]}
+        aria-pressed={pressed}
+        className="aria-pressed:bg-muted aria-pressed:text-primary"
+        onClick={onClick}
+      >
+        <Icon>{icons[id]}</Icon>
+      </Button>
+    </Tip>
   );
 
   return (
@@ -707,7 +710,7 @@ export function Workspace({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
-                <kbd className="whitespace-nowrap font-mono text-[11px] text-faint">Ctrl K</kbd>
+                <Kbd className="whitespace-nowrap border-0 px-0 text-[11px]">Ctrl K</Kbd>
               </label>
               <Button variant="ghost" className="h-8 shrink-0 justify-start gap-2.5 px-2 text-sm font-normal text-foreground" onClick={openNew}>
                 <NamedIcon name="plus" className="size-[15px]" />
@@ -746,33 +749,24 @@ export function Workspace({
                       actions={
                         <>
                           {moveToCloud ? (
-                            <div className="relative">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={cn(
-                                  "size-6 text-muted-foreground focus-visible:opacity-100",
-                                  isActive || rowMenu === s.id ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-                                )}
-                                aria-label="Session actions"
-                                aria-haspopup="menu"
-                                aria-expanded={rowMenu === s.id}
-                                onClick={() => setRowMenu(rowMenu === s.id ? null : s.id)}
-                              >
-                                ⋯
-                              </Button>
-                              {rowMenu === s.id ? (
-                                <div role="menu" className="absolute right-0 top-7 z-20 flex w-44 flex-col rounded-lg border border-input bg-popover p-1 shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
-                                  <button
-                                    role="menuitem"
-                                    className="h-8 justify-start border-0 bg-transparent px-2 text-left text-[13px] text-foreground hover:bg-sunken"
-                                    onClick={() => askMoveToCloud(s.id)}
-                                  >
-                                    Move to cloud
-                                  </button>
-                                </div>
-                              ) : null}
-                            </div>
+                            <DropdownMenu open={rowMenu === s.id} onOpenChange={(o) => setRowMenu(o ? s.id : null)}>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={cn(
+                                    "size-6 text-muted-foreground focus-visible:opacity-100",
+                                    isActive || rowMenu === s.id ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                                  )}
+                                  aria-label="Session actions"
+                                >
+                                  ⋯
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem onSelect={() => askMoveToCloud(s.id)}>Move to cloud</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           ) : null}
                           <Button
                             variant="ghost"
@@ -1056,32 +1050,39 @@ export function Workspace({
         ) : null}
         <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
           Model
-          <Select
-            className="h-9 w-full"
-            value={draft.model}
-            onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}
-          >
-            {providers.map((p) => (
-              <optgroup key={p} label={p}>
-                {modelList
-                  .filter((m) => m.providerID === p)
-                  .map((m) => (
-                    <option key={modelKey(m)} value={modelKey(m)}>
-                      {m.name ?? m.id}
-                    </option>
-                  ))}
-              </optgroup>
-            ))}
+          <Select value={draft.model} onValueChange={(v) => setDraft((d) => ({ ...d, model: v }))}>
+            <SelectTrigger className="h-9 w-full" aria-label="Model">
+              <SelectValue placeholder="Choose a model" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((p) => (
+                <SelectGroup key={p}>
+                  <SelectLabel>{p}</SelectLabel>
+                  {modelList
+                    .filter((m) => m.providerID === p)
+                    .map((m) => (
+                      <SelectItem key={modelKey(m)} value={modelKey(m)}>
+                        {m.name ?? m.id}
+                      </SelectItem>
+                    ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
           </Select>
         </label>
         <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
           Agent
-          <Select className="h-9 w-full" value={draft.agent} onChange={(e) => setDraft((d) => ({ ...d, agent: e.target.value }))}>
-            {agentChoices.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
+          <Select value={draft.agent} onValueChange={(v) => setDraft((d) => ({ ...d, agent: v }))}>
+            <SelectTrigger className="h-9 w-full" aria-label="Agent">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {agentChoices.map((a) => (
+                <SelectItem key={a} value={a}>
+                  {a}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         </label>
         <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">

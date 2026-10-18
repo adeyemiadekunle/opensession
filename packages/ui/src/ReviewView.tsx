@@ -3,6 +3,7 @@ import type { DiffFile, GitActions, GitInfo, OpenSessionClient, OutgoingChanges 
 import { errText, useAsync } from "./hooks";
 import { ChecksView } from "./Checks";
 import { Button } from "./components/ui/button";
+import { Checkbox } from "./components/ui/checkbox";
 import { Dialog } from "./components/ui/dialog";
 import { cn } from "./lib/utils";
 import { EDITOR_DEFAULTS, PREF, usePref, type EditorPrefs } from "./prefs";
@@ -221,13 +222,7 @@ export function ReviewView({
                     current?.file === f.file && "bg-muted",
                   )}
                 >
-                  <input
-                    type="checkbox"
-                    checked={!excluded.has(f.file)}
-                    onChange={() => toggleInclude(f.file)}
-                    aria-label={`Include ${f.file} in the commit`}
-                    className="m-0 accent-primary"
-                  />
+                  <Checkbox checked={!excluded.has(f.file)} onCheckedChange={() => toggleInclude(f.file)} aria-label={`Include ${f.file} in the commit`} />
                   <button
                     className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left font-mono text-[12.5px]"
                     onClick={() => setSelected(f.file)}

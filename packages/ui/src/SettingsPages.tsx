@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AgentConfigStore, CloudClient, Model } from "@opensession/api-client";
 import { Button } from "./components/ui/button";
-import { Select } from "./components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { modelKey } from "./Composer";
 import { errText, storageGet, storageSet, useAsync } from "./hooks";
 import { cn } from "./lib/utils";
@@ -87,15 +87,19 @@ export function AppearanceCard() {
       <label className="flex max-w-[280px] flex-col gap-1.5 text-[13px] text-muted-foreground">
         Code font
         <Select
-          className="h-[38px] w-full"
           value={font}
-          onChange={(e) => {
-            setFont(e.target.value as CodeFont);
+          onValueChange={(v) => {
+            setFont(v as CodeFont);
             applyAppearance();
           }}
         >
-          <option value="jetbrains">JetBrains Mono</option>
-          <option value="system">System monospace</option>
+          <SelectTrigger className="h-[38px] w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="jetbrains">JetBrains Mono</SelectItem>
+            <SelectItem value="system">System monospace</SelectItem>
+          </SelectContent>
         </Select>
       </label>
     </SettingsCard>

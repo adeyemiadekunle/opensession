@@ -5,7 +5,7 @@ import { ChecksView } from "./Checks";
 import { Button } from "./components/ui/button";
 import { Empty } from "./components/ui/empty";
 import { Input, Textarea } from "./components/ui/input";
-import { Select } from "./components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 
 /** A pending commit, push or pull request, shown for approval before it runs. */
 export interface Review {
@@ -81,17 +81,18 @@ export function GitPanel({ client, actions, refreshKey }: { client: OpenSessionC
       {g.repo ? <div className="truncate font-mono text-xs text-muted-foreground">{g.repo}</div> : null}
       <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
         Branch
-        <Select
-          value={g.branch}
-          disabled={!actions || Boolean(busy)}
-          onChange={(e) => run("checkout", async () => void (await actions!.checkout(e.target.value)))}
-        >
-          {[...new Set([g.branch, ...g.branches])].map((b) => (
-            <option key={b} value={b}>
-              {b}
-              {b === g.default_branch ? " (default)" : ""}
-            </option>
-          ))}
+        <Select value={g.branch} disabled={!actions || Boolean(busy)} onValueChange={(b) => run("checkout", async () => void (await actions!.checkout(b)))}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {[...new Set([g.branch, ...g.branches])].map((b) => (
+              <SelectItem key={b} value={b}>
+                {b}
+                {b === g.default_branch ? " (default)" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       </label>
       {actions ? (

@@ -4,7 +4,7 @@ import { errText, useAsync } from "./hooks";
 import { GithubCard } from "./Projects";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { Select } from "./components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Item, ItemList, Notice, SettingsCard, SettingsShell, type SettingsPage } from "./SettingsUi";
 import {
   AppearanceCard,
@@ -234,12 +234,17 @@ export function ApiKeys({ client }: { client: CloudClient }) {
           void save();
         }}
       >
-        <Select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
-          {(providers.data ?? Object.keys(PROVIDER_NAMES).map((id) => ({ id }))).map((p) => (
-            <option key={p.id} value={p.id}>
-              {PROVIDER_NAMES[p.id] ?? p.id}
-            </option>
-          ))}
+        <Select value={provider} onValueChange={setProvider}>
+          <SelectTrigger aria-label="Provider">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(providers.data ?? Object.keys(PROVIDER_NAMES).map((id) => ({ id }))).map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {PROVIDER_NAMES[p.id] ?? p.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
         <Input
           className="w-auto flex-[1_1_200px]"
@@ -416,12 +421,17 @@ export function LocalKeys({ client, onSaved }: { client: LocalClient; onSaved?: 
           }
         }}
       >
-        <Select aria-label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
-          {LOCAL_PROVIDERS.map((p) => (
-            <option key={p} value={p}>
-              {PROVIDER_NAMES[p] ?? p}
-            </option>
-          ))}
+        <Select value={provider} onValueChange={setProvider}>
+          <SelectTrigger aria-label="Provider">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LOCAL_PROVIDERS.map((p) => (
+              <SelectItem key={p} value={p}>
+                {PROVIDER_NAMES[p] ?? p}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
         <Input
           className="w-auto flex-[1_1_200px]"

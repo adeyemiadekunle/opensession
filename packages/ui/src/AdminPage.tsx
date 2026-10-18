@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { AdminLimits, AdminModelUsage, AdminOverview, AdminRoute, CloudClient } from "@opensession/api-client";
 import { Meter } from "./AccountPages";
 import { Button } from "./components/ui/button";
+import { Card } from "./components/ui/card";
 import { errText, useAsync } from "./hooks";
 import { cn } from "./lib/utils";
 import { PageHeader } from "./PageHeader";
@@ -40,7 +41,7 @@ function mb(v: number | null | undefined): string {
 /** A headline number (dataviz: a stat tile, not a chart). Text stays in text colors. */
 function Tile({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone?: "warning" | "danger" }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-input bg-card px-4 py-3.5">
+    <Card className="min-w-0 gap-1 px-4 py-3.5">
       <span className="text-[12.5px] text-muted-foreground">{label}</span>
       <span className="text-[24px] font-semibold leading-tight tabular-nums">{value}</span>
       {detail ? (
@@ -49,19 +50,19 @@ function Tile({ label, value, detail, tone }: { label: string; value: string; de
           {detail}
         </span>
       ) : null}
-    </div>
+    </Card>
   );
 }
 
 function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <section aria-label={title} className="flex flex-col gap-3 rounded-lg border border-input bg-card p-[18px]">
+    <Card role="region" aria-label={title}>
       <div className="flex items-center gap-3">
         <h2 className="m-0 flex-1 text-[15px] font-semibold">{title}</h2>
         {aside}
       </div>
       {children}
-    </section>
+    </Card>
   );
 }
 
