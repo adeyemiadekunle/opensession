@@ -129,6 +129,28 @@ echo "== database"
 N=$(docker exec opensession-db psql -U opensession -d opensession -tAc "select count(*) from egress_domains where user_id='alice'" | tr -d '[:space:]')
 check "alice's domains are stored in Postgres" 1 "$N"
 
+echo "== model proxy (keys stay out of sandboxes)"
+FAKE_KEY="sk-ant-smoke-not-a-real-key-0123456789abcdef"
+check "alice saves a key" 200 "$(api PUT alice '/keys/anthropic?validate=false' "{\"api_key\":\"$FAKE_KEY\"}")"
+check "sandbox picks it up" 200 "$(api GET alice /p/default/api/health)"
+TOKEN=$(docker exec "$(sandbox_of alice)" printenv ANTHROPIC_API_KEY || true)
+[[ "$TOKEN" == osm_* ]] && ok "sandbox holds a stand-in token" || bad "ANTHROPIC_API_KEY in sandbox: ${TOKEN:0:12}..."
+docker exec "$(sandbox_of alice)" sh -c "env; cat /home/agent/.config/opencode/opencode.json" | grep -q -- "$FAKE_KEY" \
+  && bad "the real key is inside the sandbox" || ok "the real key is not in the sandbox"
+CFG=$(docker exec "$(sandbox_of alice)" cat /home/agent/.config/opencode/opencode.json)
+[[ "$CFG" == *'"baseURL": "http://opensession-gateway:8000/llm/anthropic"'* || "$CFG" == *'"baseURL":"http://opensession-gateway:8000/llm/anthropic"'* ]] \
+  && ok "OpenCode calls Anthropic through the gateway" || bad "opencode.json providers: $CFG"
+llm() { # llm USER [TOKEN] -> "<status> <body>" of GET /llm/anthropic/models from that user's sandbox
+  docker exec "$(sandbox_of "$1")" curl -s -m 20 --noproxy '*' ${2:+-H "x-api-key: $2"} -w ' %{http_code}' \
+    http://opensession-gateway:8000/llm/anthropic/models || true
+}
+OUT=$(llm alice "$TOKEN")
+# Anthropic itself refuses the fake key: proof the gateway swapped the token for it.
+[[ "$OUT" == *" 401" && "$OUT" != *"sandbox token"* ]] && ok "proxied to Anthropic with the stored key" || bad "alice via proxy: ${OUT: -300}"
+OUT=$(llm alice); [[ "$OUT" == *"sandbox token"*" 401" ]] && ok "no token: refused" || bad "no token: ${OUT: -200}"
+OUT=$(llm bob "$TOKEN"); [[ "$OUT" == *"sandbox token"*" 401" ]] && ok "alice's token from bob's sandbox: refused" || bad "bob with alice's token: ${OUT: -200}"
+check "model proxy from outside a sandbox" 404 "$(curl -s -o /tmp/os_body -w '%{http_code}' -H "x-api-key: $TOKEN" "$G/llm/anthropic/models")"
+
 echo "== sleep and resume"
 check "create a session" 200 "$(api POST alice /p/default/api/session '{"model":{"providerID":"anthropic","id":"claude-sonnet-4-5"}}')"
 SID=$(python3 -c "import json;print(json.load(open('/tmp/os_body'))['data']['id'])")

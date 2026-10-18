@@ -454,10 +454,30 @@ export interface AdminOverview {
   errors: { time: number; method: string; route: string; status: number; user: string | null }[];
   events: { time: number; kind: string; user: string | null; workspace: string | null; [k: string]: unknown }[];
   warnings: { level: "danger" | "warning" | "info"; text: string }[];
+  /** Model proxy (provider calls from sandboxes); absent from older gateways. */
+  models?: {
+    proxy: boolean;
+    day?: string;
+    top?: AdminModelUsage[];
+    defaults?: { tokens_per_day: number; requests_per_minute: number; max_concurrent: number };
+  };
+}
+
+export interface AdminModelUsage {
+  user: string;
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  /** Daily token limit for this user; 0 = none. */
+  limit: number;
+  /** Model requests in flight now. */
+  active: number;
 }
 
 export interface AdminLimits {
-  override: { max_running: number | null; disk_mb: number | null };
-  effective: { max_running: number; disk_mb: number };
-  defaults: { max_running: number; disk_mb: number };
+  override: { max_running: number | null; disk_mb: number | null; model_tokens_per_day?: number | null };
+  effective: { max_running: number; disk_mb: number; model_tokens_per_day?: number };
+  defaults: { max_running: number; disk_mb: number; model_tokens_per_day?: number };
+  /** With the model proxy on. */
+  model_usage_today?: { requests: number; input_tokens: number; output_tokens: number };
 }

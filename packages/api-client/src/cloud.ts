@@ -138,7 +138,10 @@ export class CloudClient extends OpenCodeClient {
   adminLimits(user: string): Promise<AdminLimits> {
     return this.http.get(`/admin/users/${enc(user)}/limits`);
   }
-  adminSetLimits(user: string, limits: { max_running: number | null; disk_mb: number | null }): Promise<unknown> {
+  adminSetLimits(
+    user: string,
+    limits: { max_running: number | null; disk_mb: number | null; model_tokens_per_day?: number | null },
+  ): Promise<unknown> {
     return this.http.put(`/admin/users/${enc(user)}/limits`, { json: limits });
   }
 

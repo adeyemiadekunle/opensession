@@ -187,15 +187,31 @@ const handlers: Record<string, unknown> = {
         { time: now - 900, method: "GET", route: "/p/{workspace}/api/{path:path}", status: 429, user: "user_9xyZ" },
       ],
       events: [
+        { time: now - 30, kind: "model_usage_high", user: "user_9xyZ", workspace: null, tokens: 41_200_000, limit: 50_000_000 },
         { time: now - 60, kind: "started", user: "user_2abcDEF123", workspace: "e2b", seconds: 6.4 },
         { time: now - 61, kind: "slept", user: "user_9xyZ", workspace: "default", reason: "make_room" },
         { time: now - 3600, kind: "user_limit", user: "user_9xyZ", workspace: "web" },
         { time: now - 7200, kind: "slept", user: "user_2abcDEF123", workspace: "default", reason: "idle" },
       ],
       warnings: [{ level: "info", text: "GitHub App not configured: projects can't clone, push or open pull requests." }],
+      models: {
+        proxy: true,
+        day: "2026-10-17",
+        defaults: { tokens_per_day: 50_000_000, requests_per_minute: 120, max_concurrent: 8 },
+        top: [
+          { user: "user_9xyZ", requests: 1840, input_tokens: 40_100_000, output_tokens: 1_100_000, limit: 50_000_000, active: 3 },
+          { user: "user_2abcDEF123", requests: 312, input_tokens: 6_400_000, output_tokens: 210_000, limit: 50_000_000, active: 1 },
+          { user: "user_7team", requests: 41, input_tokens: 820_000, output_tokens: 31_000, limit: 0, active: 0 },
+        ],
+      },
     };
   },
-  adminLimits: async () => ({ override: { max_running: null, disk_mb: 4096 }, effective: { max_running: 2, disk_mb: 4096 }, defaults: { max_running: 2, disk_mb: 2048 } }),
+  adminLimits: async () => ({
+    override: { max_running: null, disk_mb: 4096, model_tokens_per_day: null },
+    effective: { max_running: 2, disk_mb: 4096, model_tokens_per_day: 50_000_000 },
+    defaults: { max_running: 2, disk_mb: 2048, model_tokens_per_day: 50_000_000 },
+    model_usage_today: { requests: 312, input_tokens: 6_400_000, output_tokens: 210_000 },
+  }),
   agentConfigStore: () => {
     let config: Record<string, unknown> = { git_approval: true, agents: [], skills: [], commands: [] };
     return {

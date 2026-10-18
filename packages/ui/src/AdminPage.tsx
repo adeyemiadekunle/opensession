@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { AdminLimits, AdminOverview, AdminRoute, CloudClient } from "@opensession/api-client";
+import type { AdminLimits, AdminModelUsage, AdminOverview, AdminRoute, CloudClient } from "@opensession/api-client";
 import { Meter } from "./AccountPages";
 import { Button } from "./components/ui/button";
 import { errText, useAsync } from "./hooks";
@@ -21,6 +21,15 @@ function duration(seconds: number | null | undefined): string {
 
 function ago(t: number): string {
   return `${duration(Math.max(0, Math.round(Date.now() / 1000 - t)))} ago`;
+}
+
+/** 1234567 -> "1.2M" */
+function tokens(v: number | null | undefined): string {
+  if (v == null) return "—";
+  if (v >= 1e9) return `${+(v / 1e9).toFixed(1)}B`;
+  if (v >= 1e6) return `${+(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `${+(v / 1e3).toFixed(1)}k`;
+  return String(v);
 }
 
 function mb(v: number | null | undefined): string {
@@ -103,6 +112,8 @@ const EVENT_LABEL: Record<string, string> = {
   user_limit: "Hit the user's limit",
   capacity: "Server full",
   start_failed: "Failed to start",
+  model_usage_high: "Used 80% of daily model tokens",
+  model_limit: "Hit the daily model limit",
 };
 
 function eventDetail(e: AdminOverview["events"][number]): string {
@@ -114,6 +125,7 @@ function eventDetail(e: AdminOverview["events"][number]): string {
   if (e.kind === "capacity" && typeof e.running === "number") return `${e.running} running`;
   if (e.kind === "start_failed") return String(e.error ?? "");
   if (e.kind === "destroyed") return e.data_deleted ? "with its data" : "data kept";
+  if (e.kind === "model_usage_high" || e.kind === "model_limit") return `${tokens(Number(e.tokens))} of ${tokens(Number(e.limit))} tokens`;
   return "";
 }
 
@@ -127,18 +139,71 @@ function RouteTable({ routes, empty }: { routes: AdminRoute[] | undefined; empty
   );
 }
 
+/** Today's heaviest model users (UTC day), against their daily token limit. */
+function ModelUsage({ models }: { models: NonNullable<AdminOverview["models"]> }) {
+  if (!models.proxy) {
+    return (
+      <Section title="Model usage">
+        <p className="m-0 text-[13px] text-muted-foreground">
+          The model proxy is off, so usage isn't measured and provider keys are inside the sandboxes. See the warning above.
+        </p>
+      </Section>
+    );
+  }
+  const dflt = models.defaults;
+  return (
+    <Section
+      title="Model usage today"
+      aside={
+        dflt ? (
+          <span className="text-xs text-faint">
+            Per user: {dflt.tokens_per_day ? `${tokens(dflt.tokens_per_day)} tokens a day` : "no daily limit"} · {dflt.requests_per_minute || "∞"}/min ·{" "}
+            {dflt.max_concurrent || "∞"} at once
+          </span>
+        ) : undefined
+      }
+    >
+      <Table
+        head={["User", "Requests", "Input", "Output", "Daily limit", "Now"]}
+        empty="No model calls yet today."
+        rows={(models.top ?? []).map((u: AdminModelUsage) => {
+          const used = u.input_tokens + u.output_tokens;
+          return [
+            <code className="font-mono text-xs">{u.user}</code>,
+            u.requests,
+            tokens(u.input_tokens),
+            tokens(u.output_tokens),
+            u.limit ? (
+              <div className="min-w-[140px]">
+                <Meter label={`${u.user} daily tokens`} value={used} max={u.limit} detail={`${tokens(used)} of ${tokens(u.limit)}`} />
+              </div>
+            ) : (
+              "No limit"
+            ),
+            u.active ? `${u.active} streaming` : "—",
+          ];
+        })}
+      />
+    </Section>
+  );
+}
+
 /** Per-user limits: look a user up, override their running projects and disk, or reset. */
 function UserLimits({ client }: { client: CloudClient }) {
   const [user, setUser] = useState("");
   const [data, setData] = useState<AdminLimits | null>(null);
-  const [form, setForm] = useState({ max_running: "", disk_mb: "" });
+  const [form, setForm] = useState({ max_running: "", disk_mb: "", model_tokens_per_day: "" });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const load = async (u = user) => {
     setMsg(null);
     try {
       const d = await client.adminLimits(u.trim());
       setData(d);
-      setForm({ max_running: d.override.max_running?.toString() ?? "", disk_mb: d.override.disk_mb?.toString() ?? "" });
+      setForm({
+        max_running: d.override.max_running?.toString() ?? "",
+        disk_mb: d.override.disk_mb?.toString() ?? "",
+        model_tokens_per_day: d.override.model_tokens_per_day?.toString() ?? "",
+      });
     } catch (e) {
       setData(null);
       setMsg({ ok: false, text: errText(e) });
@@ -147,7 +212,11 @@ function UserLimits({ client }: { client: CloudClient }) {
   const save = async (reset = false) => {
     const num = (v: string) => (v.trim() === "" ? null : Number(v));
     try {
-      await client.adminSetLimits(user.trim(), reset ? { max_running: null, disk_mb: null } : { max_running: num(form.max_running), disk_mb: num(form.disk_mb) });
+      const model = data?.defaults.model_tokens_per_day !== undefined;
+      const limits = reset
+        ? { max_running: null, disk_mb: null, ...(model ? { model_tokens_per_day: null } : {}) }
+        : { max_running: num(form.max_running), disk_mb: num(form.disk_mb), ...(model ? { model_tokens_per_day: num(form.model_tokens_per_day) } : {}) };
+      await client.adminSetLimits(user.trim(), limits);
       await load();
       setMsg({ ok: true, text: reset ? "Back to the defaults." : "Saved." });
     } catch (e) {
@@ -179,6 +248,20 @@ function UserLimits({ client }: { client: CloudClient }) {
             Disk per project in MB (default {data.defaults.disk_mb || "no limit"}, now {data.effective.disk_mb || "no limit"})
             <input inputMode="numeric" placeholder="Default" value={form.disk_mb} onChange={(e) => setForm((f) => ({ ...f, disk_mb: e.target.value }))} className={field} />
           </label>
+          {data.defaults.model_tokens_per_day !== undefined ? (
+            <label className="flex flex-col gap-1 text-muted-foreground">
+              Model tokens a day (default {data.defaults.model_tokens_per_day ? tokens(data.defaults.model_tokens_per_day) : "no limit"}, now{" "}
+              {data.effective.model_tokens_per_day ? tokens(data.effective.model_tokens_per_day) : "no limit"}; used today{" "}
+              {tokens((data.model_usage_today?.input_tokens ?? 0) + (data.model_usage_today?.output_tokens ?? 0))})
+              <input
+                inputMode="numeric"
+                placeholder="Default"
+                value={form.model_tokens_per_day}
+                onChange={(e) => setForm((f) => ({ ...f, model_tokens_per_day: e.target.value }))}
+                className={field}
+              />
+            </label>
+          ) : null}
           <div className="flex items-end gap-2">
             <Button variant="default" onClick={() => void save()}>
               Save
@@ -347,6 +430,8 @@ export function AdminPage({ client, onBack }: { client: CloudClient; onBack?: ()
                 />
               </Section>
 
+              {d.models ? <ModelUsage models={d.models} /> : null}
+
               <div className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(420px,1fr))] max-[700px]:grid-cols-1">
                 <Section title="Recent errors" aside={<span className="text-xs text-faint">Server errors and rate limits</span>}>
                   <Table
@@ -362,7 +447,7 @@ export function AdminPage({ client, onBack }: { client: CloudClient; onBack?: ()
                     ])}
                   />
                 </Section>
-                <Section title="Sandbox events">
+                <Section title="Events">
                   <Table
                     head={["When", "Event", "User / project", "Detail"]}
                     empty="Nothing yet."
@@ -370,7 +455,7 @@ export function AdminPage({ client, onBack }: { client: CloudClient; onBack?: ()
                       <span className="text-muted-foreground">{ago(e.time)}</span>,
                       EVENT_LABEL[e.kind] ?? e.kind,
                       <code className="font-mono text-xs">
-                        {e.user}/{e.workspace}
+                        {e.workspace ? `${e.user}/${e.workspace}` : e.user}
                       </code>,
                       <span className="text-muted-foreground">{eventDetail(e)}</span>,
                     ])}
