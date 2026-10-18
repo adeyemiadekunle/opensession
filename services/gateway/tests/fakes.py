@@ -65,6 +65,10 @@ class FakeHelper:
         self.labels = labels or {}
         self.status = "running"
         self.execs = []
+        self.attrs = {"NetworkSettings": {"Networks": {}}}  # filled in as sandbox networks connect it
+
+    def reload(self):
+        pass
 
     def exec_run(self, cmd):
         self.execs.append(cmd)
@@ -79,7 +83,7 @@ class FakeContainers:
     def __init__(self):
         self.by_name = {}
         self.run_calls = 0
-        self.helpers = {"egress": FakeHelper("egress")}
+        self.helpers = {"egress": FakeHelper("egress"), "gw": FakeHelper("gw")}
 
     def run(self, image, **kwargs):
         c = self.create(image, **kwargs)
@@ -157,6 +161,10 @@ class FakeNetwork:
             self.members.add(container.name)
         else:
             self.members.add(container)
+            helper = getattr(self.store, "helpers", {}).get(container)
+            if helper is not None:  # a helper gets its own address on each network it joins
+                n = self.store.created.index(self.name)
+                helper.attrs["NetworkSettings"]["Networks"][self.name] = {"IPAddress": f"172.30.{n}.{200 + len(self.members)}"}
 
     def disconnect(self, container, force=False):
         if isinstance(container, FakeContainer):
@@ -193,6 +201,7 @@ class FakeDocker:
     def __init__(self):
         self.containers = FakeContainers()
         self.networks = FakeNetworks()
+        self.networks.helpers = self.containers.helpers
         self.volumes = FakeVolumes()
 
 

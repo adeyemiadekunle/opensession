@@ -313,6 +313,39 @@ def test_egress_proxy_makes_networks_internal_and_injects_proxy_env():
     asyncio.run(go())
 
 
+def test_sandbox_hosts_name_gateway_and_proxy_on_every_start():
+    """gVisor sandboxes can't use Docker's DNS: the aliases go into /etc/hosts, refreshed per start."""
+    mgr, docker, _ = make_manager(egress_proxy="egress", gateway_container="gw")
+
+    def hosts_scripts(c):
+        return [cmd[2] for cmd, _env, _wd, user in getattr(c, "execs", []) if cmd[:2] == ["sh", "-c"] and "/etc/hosts" in cmd[2]]
+
+    async def go():
+        await mgr.ensure("alice", "default", {"ANTHROPIC_API_KEY": "k"})
+        (c,) = docker.containers.by_name.values()
+        net = c.kwargs["network"]
+        gw_ip = docker.containers.helpers["gw"].attrs["NetworkSettings"]["Networks"][net]["IPAddress"]
+        proxy_ip = docker.containers.helpers["egress"].attrs["NetworkSettings"]["Networks"][net]["IPAddress"]
+        (first,) = hosts_scripts(c)
+        assert f"{gw_ip}\\topensession-gateway" in first and f"{proxy_ip}\\topensession-egress" in first
+        assert "grep -v" in first  # earlier entries for the aliases are dropped, not duplicated
+        assert c.execs[-1][3] == "root"
+        await mgr.stop("alice", "default")
+        await mgr.ensure("alice", "default", {"ANTHROPIC_API_KEY": "k"})  # a new network: new addresses
+        new_gw = docker.containers.helpers["gw"].attrs["NetworkSettings"]["Networks"][net]["IPAddress"]
+        assert new_gw != gw_ip
+        assert f"{new_gw}\\topensession-gateway" in hosts_scripts(c)[-1]
+
+    asyncio.run(go())
+
+
+def test_no_hosts_rewrite_without_gateway_or_proxy_containers():
+    mgr, docker, _ = make_manager()
+    asyncio.run(mgr.ensure("alice", "default"))
+    (c,) = docker.containers.by_name.values()
+    assert not [cmd for cmd, *_ in getattr(c, "execs", []) if "/etc/hosts" in " ".join(cmd)]
+
+
 def test_gateway_and_proxy_found_by_compose_labels(monkeypatch):
     """Under Dokploy (no fixed container_name): "self" and "compose:<service>"."""
     import socket

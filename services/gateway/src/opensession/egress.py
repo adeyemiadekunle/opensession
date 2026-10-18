@@ -58,12 +58,15 @@ class EgressRules:
         conf_dir: str | None,
         proxy_container: str | None,
         global_allowlist_path: str | None = None,
+        extra_domains: list[str] | None = None,
     ):
         self.users = users
         self.manager = manager
         self.conf_dir = conf_dir
         self.proxy_container = proxy_container
         self.global_allowlist_path = global_allowlist_path
+        # Allowed for every sandbox on top of the static allowlist (e.g. OpenCode's hosted models).
+        self.extra_domains = list(extra_domains or [])
         self._lock = asyncio.Lock()
         self.last_rendered: str | None = None
 
@@ -76,6 +79,8 @@ class EgressRules:
             e("EGRESS_CONF_DIR") or None,
             e("SANDBOX_EGRESS_PROXY") or None,
             e("EGRESS_GLOBAL_ALLOWLIST") or None,
+            # ALLOW_OPENCODE_PROVIDER=1 offers OpenCode's own (free) models: its inference lives at opencode.ai.
+            [".opencode.ai"] if e("ALLOW_OPENCODE_PROVIDER", "0") == "1" else [],
         )
 
     @property
@@ -99,6 +104,8 @@ class EgressRules:
             networks = await asyncio.to_thread(self.manager.user_networks)
             users = {u for u, _ in networks}
             domains = await asyncio.to_thread(self.users.domains_for_users, users)
+            if self.extra_domains:
+                domains = {u: [*(domains.get(u) or []), *self.extra_domains] for u in users}
             text = render_rules(networks, domains)
             if text == self.last_rendered:
                 return

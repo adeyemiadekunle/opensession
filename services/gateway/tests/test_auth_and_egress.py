@@ -181,6 +181,25 @@ def test_user_domains_api_and_proxy_rules(tmp_path):
         assert "bar.io" not in (conf / "50-users.conf").read_text()
 
 
+def test_opencode_provider_flag_allows_opencode_ai_for_every_sandbox(tmp_path, monkeypatch):
+    monkeypatch.setenv("EGRESS_CONF_DIR", str(tmp_path))
+    monkeypatch.setenv("SANDBOX_EGRESS_PROXY", "egress")
+    monkeypatch.setenv("ALLOW_OPENCODE_PROVIDER", "1")
+    users = UserStore(str(tmp_path / "u.db"))
+    mgr, docker, _ = make_manager(egress_proxy="egress")
+    eg = EgressRules.from_env(users, mgr)
+    assert eg.extra_domains == [".opencode.ai"]
+    import asyncio
+
+    asyncio.run(mgr.ensure("alice", "default"))
+    asyncio.run(eg.sync())
+    text = (tmp_path / "50-users.conf").read_text()
+    assert "# user alice" in text and ".opencode.ai" in text  # even with no domains of her own
+
+    monkeypatch.setenv("ALLOW_OPENCODE_PROVIDER", "0")
+    assert EgressRules.from_env(users, mgr).extra_domains == []
+
+
 def test_egress_disabled_without_proxy(tmp_path):
     c, _, _ = app_client(tmp_path, mode="dev")
     with c:

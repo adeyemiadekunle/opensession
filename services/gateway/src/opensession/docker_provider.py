@@ -21,6 +21,12 @@ Network isolation
   in) or "compose:<service>" (a service of the gateway's own compose project).
   The last two need no fixed container_name, which platforms such as Dokploy
   rewrite or discourage.
+- The gateway and proxy aliases are also written into each sandbox's /etc/hosts
+  (their IPs on its network) every time it starts or is reattached: under gVisor
+  (runsc) Docker's embedded DNS server (127.0.0.11) is unreachable, so without
+  them nothing in a sandbox resolves and model calls fail with "getaddrinfo
+  ETIMEOUT opensession-gateway". The network, and so those IPs, can change on
+  every wake, which is why this isn't done once at create time.
 - Docker's default address pools allow only ~30 bridge networks. For more running
   sandboxes, configure "default-address-pools" in daemon.json with small (/24 or
   /28) subnets.
@@ -284,6 +290,7 @@ class DockerProvider(SandboxProvider):
             if c.status == "running":
                 # Running already (e.g. gateway restarted): make sure we can reach it.
                 self._ensure_network(net_name, ref.user)
+                self._pin_hosts(c, net_name)
                 return
         self._ensure_network(net_name, ref.user)
         if c is None:
@@ -292,6 +299,7 @@ class DockerProvider(SandboxProvider):
         try:
             self._attach(c, net_name, ref.user)
             c.start()
+            self._pin_hosts(c, net_name)
         except APIError:
             # e.g. the container still points at a network that was removed while
             # the gateway was down. Recreate it; the volumes are kept.
@@ -471,7 +479,39 @@ class DockerProvider(SandboxProvider):
             c.put_archive("/home/agent/.state", config_tar)
         c.start()
         c.reload()
+        self._pin_hosts(c, net_name)
         return c
+
+    def _pin_hosts(self, container: Any, net_name: str) -> None:
+        """Point the gateway and proxy aliases in the sandbox's /etc/hosts at their IPs on
+        its network, replacing earlier entries (the file is a bind mount: rewrite in place)."""
+        hosts = self._alias_hosts(net_name)
+        if not hosts:
+            return
+        drop = " ".join(f"-e '[[:space:]]{a}$'" for a in hosts)
+        add = "".join(f"{ip}\\t{a}\\n" for a, ip in sorted(hosts.items()))  # printf escapes
+        script = f"grep -v {drop} /etc/hosts > /tmp/.hosts; printf '{add}' >> /tmp/.hosts && cat /tmp/.hosts > /etc/hosts; rm -f /tmp/.hosts"
+        try:
+            container.exec_run(["sh", "-c", script], user="root")
+        except Exception:
+            pass  # the sandbox still works; only model calls and the egress proxy would fail
+
+    def _alias_hosts(self, net_name: str) -> dict[str, str]:
+        """/etc/hosts entries for the gateway and proxy aliases: their IPs on this network."""
+        out = {}
+        for alias, spec in ((GATEWAY_ALIAS, self.cfg.gateway_container), (PROXY_ALIAS, self.cfg.egress_proxy)):
+            name = self.helper(spec)
+            if not name:
+                continue
+            try:
+                c = self._d().containers.get(name)
+                c.reload()
+                ip = self._ip(c, net_name)
+            except Exception:
+                continue
+            if ip:
+                out[alias] = ip
+        return out
 
     @staticmethod
     def _password(container: Any) -> str:
