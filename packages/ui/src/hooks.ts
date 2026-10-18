@@ -47,3 +47,18 @@ export function storageSet(key: string, value: string) {
     /* private mode etc. */
   }
 }
+
+/** Whether a CSS media query matches, kept current as the window resizes. */
+export function useMediaQuery(query: string): boolean {
+  const get = () => (typeof window === "undefined" || !window.matchMedia ? false : window.matchMedia(query).matches);
+  const [matches, setMatches] = useState(get);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(query);
+    const on = () => setMatches(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [query]);
+  return matches;
+}
