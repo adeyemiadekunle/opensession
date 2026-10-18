@@ -208,6 +208,12 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
   useEffect(() => {
     void window.opensession.status().then(setSt);
   }, []);
+  // While OpenCode starts (or downloads, the first time), follow its progress.
+  useEffect(() => {
+    if (!st?.starting) return;
+    const t = setInterval(() => void window.opensession.status().then(setSt), 500);
+    return () => clearInterval(t);
+  }, [st?.starting]);
 
   const store = useMemo<AgentConfigStore>(
     () => ({
@@ -302,9 +308,25 @@ function LocalMode({ moveToCloud, onCloud }: { moveToCloud: (req: MoveToCloudReq
     );
   }
   if (!client) {
+    const d = st.download;
+    const mb = (n: number) => Math.round(n / 1e6);
     return (
-      <Screen title="Starting OpenCode…">
-        <p className="m-0 text-sm text-muted-foreground">In {st.folder}</p>
+      <Screen title={d ? "Setting up OpenCode…" : "Starting OpenCode…"}>
+        {d ? (
+          <div className="flex w-[320px] max-w-full flex-col gap-2">
+            <p className="m-0 text-sm text-muted-foreground">
+              Downloading the agent runtime (first run only): {mb(d.received)}
+              {d.total ? ` of ${mb(d.total)}` : ""} MB
+            </p>
+            {d.total ? (
+              <div className="h-1.5 overflow-hidden rounded-full bg-sunken" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((d.received / d.total) * 100)}>
+                <div className="h-full bg-primary transition-[width]" style={{ width: `${(d.received / d.total) * 100}%` }} />
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="m-0 text-sm text-muted-foreground">In {st.folder}</p>
+        )}
       </Screen>
     );
   }

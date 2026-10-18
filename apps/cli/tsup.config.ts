@@ -4,10 +4,12 @@ import { defineConfig } from "tsup";
 // One self-contained file (workspace packages and dependencies bundled in), so a
 // release can ship it as opensession.mjs and npm can publish it with no dependencies.
 // The deployment's addresses are compiled in when OPENSESSION_GATEWAY_URL /
-// OPENSESSION_WEB_URL are set at build time (config.ts).
+// OPENSESSION_WEB_URL are set at build time (config.ts), and the OpenCode version local
+// mode installs when OPENCODE_VERSION is (local-runner opencode.ts).
 const version = process.env.OPENSESSION_VERSION || JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 const define: Record<string, string> = { __CLI_VERSION__: JSON.stringify(version) };
 if (process.env.OPENSESSION_GATEWAY_URL) define.__DEFAULT_GATEWAY_URL__ = JSON.stringify(process.env.OPENSESSION_GATEWAY_URL.replace(/\/+$/, ""));
+if (process.env.OPENCODE_VERSION) define.__OPENCODE_VERSION__ = JSON.stringify(process.env.OPENCODE_VERSION.trim().replace(/^v/, ""));
 if (process.env.OPENSESSION_WEB_URL) define.__DEFAULT_WEB_URL__ = JSON.stringify(process.env.OPENSESSION_WEB_URL.replace(/\/+$/, ""));
 
 export default defineConfig({

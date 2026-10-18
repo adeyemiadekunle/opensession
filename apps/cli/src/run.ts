@@ -6,11 +6,15 @@ export function parseModel(s: string): ModelRef {
   return { providerID: s.slice(0, i), id: s.slice(i + 1) };
 }
 
-export async function pickModel(client: OpenSessionClient, wanted?: string): Promise<ModelRef> {
+export async function pickModel(
+  client: OpenSessionClient,
+  wanted?: string,
+  noModels = "no models available: add an API key first (opensession keys set <provider>)",
+): Promise<ModelRef> {
   if (wanted) return parseModel(wanted);
   const models: Model[] = await client.listModels();
   const m = models.find((x) => x.providerID !== "opencode") ?? models[0];
-  if (!m) throw new Error("no models available: add an API key first (opensession keys set <provider>)");
+  if (!m) throw new Error(noModels);
   return { providerID: m.providerID, id: m.id };
 }
 

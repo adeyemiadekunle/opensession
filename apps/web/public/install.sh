@@ -55,6 +55,9 @@ EOF
 chmod +x "$BIN_DIR/opensession"
 
 echo "Installed opensession $("$BIN_DIR/opensession" --version) in $BIN_DIR"
+
+# The agent runtime (OpenCode) for local mode: OpenSession installs its own copy.
+"$BIN_DIR/opensession" opencode install --postinstall || echo "OpenCode will be downloaded on the first local run."
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
@@ -64,4 +67,7 @@ case ":$PATH:" in
     ;;
 esac
 echo
-echo "Next: opensession login"
+echo "Next, in a terminal in your project folder:"
+echo "  opensession local key anthropic   # once: a model API key (any provider OpenCode supports)"
+echo "  opensession                       # chat with the agent in this folder"
+echo "To use your cloud projects too: opensession login"

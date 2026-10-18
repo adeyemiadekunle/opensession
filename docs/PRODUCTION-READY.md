@@ -98,7 +98,9 @@ pnpm desktop:build --web https://app.yourdomain.com --gateway https://api.yourdo
 
 Or let the **Release** GitHub workflow build macOS, Windows and Linux: set the
 repository variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL`
-(Settings > Secrets and variables > Actions > Variables), then push a version tag:
+(Settings > Secrets and variables > Actions > Variables), and `OPENCODE_VERSION` if
+you changed it in Dokploy (the apps then install the same OpenCode for local mode;
+default 2.0.0), then push a version tag:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
@@ -120,8 +122,10 @@ irm https://app.yourdomain.com/install.ps1 | iex             # Windows PowerShel
 
 or from npm (`npm install -g opensession-cli`, then
 `opensession config --gateway https://api.yourdomain.com --web https://app.yourdomain.com`),
-and sign in with `opensession login`. The install scripts download the CLI from the
-latest release, so publish one (above) first.
+Both also install OpenCode, the agent runtime for local mode. Then, in a terminal in
+a project folder: `opensession local key anthropic` once, and `opensession` to chat
+with the agent there; `opensession login` for cloud projects. The install scripts
+download the CLI from the latest release, so publish one (above) first.
 
 ## Go-live checklist
 

@@ -53,6 +53,8 @@ RUN mkdir -p /home/agent/.state/data /home/agent/.state/config \
  && ln -s /home/agent/.state/data /home/agent/.local/share/opencode \
  && ln -s /home/agent/.state/config /home/agent/.config/opencode
 
+# Build the CLI and desktop app with the same OPENCODE_VERSION (the Release workflow's
+# repository variable), so local mode runs the version the sandbox does.
 ARG OPENCODE_VERSION=2.0.0
 RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/oc-install.sh \
  && (bash /tmp/oc-install.sh --version "${OPENCODE_VERSION}" || bash /tmp/oc-install.sh) \

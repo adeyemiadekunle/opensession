@@ -10,7 +10,8 @@ name: Release
 #   The tag sets the version. With the NPM_TOKEN secret, the CLI is also published to
 #   npm as opensession-cli.
 # Needs the repository variables OPENSESSION_WEB_URL and OPENSESSION_GATEWAY_URL: the
-# servers the apps talk to are compiled in (scripts/build-desktop.mjs).
+# servers the apps talk to are compiled in (scripts/build-desktop.mjs). The optional
+# variable OPENCODE_VERSION sets the OpenCode version they install for local mode.
 # Code signing is used only when the secrets exist; without them the builds are
 # unsigned (macOS Gatekeeper and Windows SmartScreen warn on first launch):
 #   macOS:   MAC_CSC_LINK (base64 .p12 "Developer ID Application"), MAC_CSC_KEY_PASSWORD,
@@ -29,6 +30,9 @@ permissions:
 env:
   OPENSESSION_WEB_URL: ${{ vars.OPENSESSION_WEB_URL }}
   OPENSESSION_GATEWAY_URL: ${{ vars.OPENSESSION_GATEWAY_URL }}
+  # Optional: the OpenCode version the apps install for local mode (default 2.0.0).
+  # Use the same as the server's OPENCODE_VERSION (the sandbox image).
+  OPENCODE_VERSION: ${{ vars.OPENCODE_VERSION }}
 
 jobs:
   # One job creates the release, so the builds below only upload to it.
