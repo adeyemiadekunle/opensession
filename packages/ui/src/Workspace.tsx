@@ -256,14 +256,19 @@ export function Workspace({
     };
   }, []);
 
+  // Refreshes overlap (live events, the busy poll, a session switch). Only the newest one's answer
+  // is shown: an older one finishing late would flash stale messages, or another session's.
+  const refreshSeq = useRef(0);
   const refresh = useCallback(async () => {
     if (!active) return;
+    const seq = ++refreshSeq.current;
     try {
       const [m, p, f] = await Promise.all([
         client.messages(active, { limit: 200 }),
         client.listPermissions(active).catch(() => []),
         client.listForms(active).catch(() => []),
       ]);
+      if (seq !== refreshSeq.current) return;
       setMessages(m);
       setLoadingMessages(false);
       setConn((c) => (c.lost ? { lost: false, retryIn: 0 } : c));
@@ -276,6 +281,7 @@ export function Workspace({
         last?.type === "assistant" && ((!last.time?.completed && !last.error) || (last as { finish?: string }).finish === "tool-calls");
       setBusy(Boolean(last && (last.type === "user" || working)));
     } catch (e) {
+      if (seq !== refreshSeq.current) return;
       setLoadingMessages(false);
       setErr(errText(e));
     }
@@ -283,6 +289,7 @@ export function Workspace({
 
   // Live updates: any event on the session's log triggers a (debounced) refresh.
   useEffect(() => {
+    refreshSeq.current++; // a refresh still in flight was for the previous session
     if (!active) return;
     setMessages([]);
     setLoadingMessages(true);
