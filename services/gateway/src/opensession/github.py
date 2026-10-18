@@ -46,6 +46,13 @@ class GitHubError(Exception):
         self.status = status
 
 
+def app_slug(value: str) -> str:
+    """The app's slug, also when GITHUB_APP_SLUG holds its page URL
+    (https://github.com/apps/<slug>), which would otherwise make the install link a 404."""
+    value = value.strip().rstrip("/")
+    return value.rsplit("/apps/", 1)[-1].split("/", 1)[0] if "/apps/" in value else value
+
+
 @dataclass
 class GitHubAppConfig:
     app_id: str
@@ -70,7 +77,7 @@ class GitHubAppConfig:
         secret = e("GITHUB_STATE_SECRET")
         return cls(
             app_id=e("GITHUB_APP_ID", ""),
-            slug=e("GITHUB_APP_SLUG", ""),
+            slug=app_slug(e("GITHUB_APP_SLUG", "")),
             private_key=key,
             client_id=e("GITHUB_APP_CLIENT_ID", ""),
             client_secret=e("GITHUB_APP_CLIENT_SECRET", ""),
