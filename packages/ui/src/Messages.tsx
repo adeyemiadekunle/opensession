@@ -220,6 +220,20 @@ function ReasoningRow({ text }: { text: string }) {
 
 type StructuredError = { type?: string; message?: string; status?: number; response?: { body?: string } };
 
+/** Compact token counts: "98k in · 2.1k out · 6k cached". */
+function tokenLine(m: Message): string | null {
+  const t = m.tokens as { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } } | undefined;
+  if (!t) return null;
+  const k = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k`.replace(".0k", "k") : String(n));
+  const parts = [
+    t.input ? `${k(t.input)} in` : null,
+    t.output ? `${k(t.output)} out` : null,
+    t.reasoning ? `${k(t.reasoning)} thinking` : null,
+    t.cache?.read ? `${k(t.cache.read)} cached` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 /**
  * Whether a turn stopped on the model's limits. OpenCode classifies provider errors itself:
  * `provider.rate-limit` (a throttle it has already retried about ten times before giving up)
@@ -273,7 +287,7 @@ function RetryLine({ retry }: { retry: { attempt: number; at: number; error?: St
   return (
     <div role="status" className="flex items-center gap-2.5 text-[13px] text-warning">
       <Spinner />
-      <span className="min-w-0 truncate" title={retry.error?.message}>
+      <span className="min-w-0 truncate">
         {why.length > 80 ? `${why.slice(0, 80)}…` : why} · {secs > 0 ? `retrying in ${secs} s` : "retrying now"} (attempt {retry.attempt})
       </span>
     </div>
@@ -321,6 +335,7 @@ export function MessageView({
     const retry = m.retry as { attempt: number; at: number; error?: StructuredError } | undefined;
     const runningTool = [...parts].reverse().find((p) => p.type === "tool" && ["running", "streaming", "pending"].includes(stateOf(p).status ?? ""));
     const step = runningTool ? toolTitle(runningTool) : null;
+    const footer = [m.model && showModel ? `${m.model.providerID}/${m.model.id}` : null, tokenLine(m)].filter(Boolean).join(" · ");
     return (
       <div className="flex w-full flex-col gap-1.5">
         {parts.map((p, i) => {
@@ -362,7 +377,7 @@ export function MessageView({
             </span>
           </div>
         ) : null}
-        {m.model && showModel ? <div className="text-[11px] text-faint">{m.model.providerID}/{m.model.id}</div> : null}
+        {footer ? <div className="text-[11px] text-faint">{footer}</div> : null}
       </div>
     );
   }

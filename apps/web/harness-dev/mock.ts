@@ -66,15 +66,59 @@ const messages: Record<string, unknown[]> = {
     },
   ],
 };
-const files = [
-  { path: "docs/", type: "directory" },
-  { path: "packages/", type: "directory" },
-  { path: "services/", type: "directory" },
-  { path: ".env", type: "file" },
-  { path: ".env.example", type: "file" },
-  { path: "docker-compose.yml", type: "file" },
-  { path: "README.md", type: "file" },
-];
+// One directory per key, so the Files card's lazy tree has real children.
+const tree: Record<string, { path: string; type: "file" | "directory" }[]> = {
+  "": [
+    { path: "docs/", type: "directory" },
+    { path: "packages/", type: "directory" },
+    { path: "services/", type: "directory" },
+    { path: ".env", type: "file" },
+    { path: ".env.example", type: "file" },
+    { path: "docker-compose.yml", type: "file" },
+    { path: "README.md", type: "file" },
+  ],
+  docs: [
+    { path: "guide.md", type: "file" },
+    { path: "api.md", type: "file" },
+  ],
+  packages: [
+    { path: "api-client/", type: "directory" },
+    { path: "ui/", type: "directory" },
+  ],
+  "packages/api-client": [
+    { path: "src/", type: "directory" },
+    { path: "package.json", type: "file" },
+  ],
+  "packages/api-client/src": [
+    { path: "opencode.ts", type: "file" },
+    { path: "types.ts", type: "file" },
+  ],
+  "packages/ui": [
+    { path: "src/", type: "directory" },
+    { path: "package.json", type: "file" },
+  ],
+  "packages/ui/src": [
+    { path: "Sidebar.tsx", type: "file" },
+    { path: "Workspace.tsx", type: "file" },
+    { path: "styles.css", type: "file" },
+  ],
+  services: [{ path: "gateway/", type: "directory" }],
+  "services/gateway": [
+    { path: "main.go", type: "file" },
+    { path: "Dockerfile", type: "file" },
+  ],
+};
+const fileText = (path: string) => {
+  if (/\.tsx?$/.test(path))
+    return `import { useEffect, useState } from "react";\n\n// Renders the workspace shell.\nexport function useClock(interval = 1000): number {\n  const [now, setNow] = useState(() => Date.now());\n  useEffect(() => {\n    const t = setInterval(() => setNow(Date.now()), interval);\n    return () => clearInterval(t);\n  }, [interval]);\n  return now;\n}\n\n/* Keep the label under 24 chars\n   so the row never wraps. */\nconst label = "workspace";\n`;
+  if (path.endsWith(".go")) return `package main\n\nimport "fmt"\n\n// start binds the gateway.\nfunc main() {\n\tfmt.Println("listening on :8080")\n}\n`;
+  if (path.endsWith(".json")) return `{\n  "name": "@opensession/ui",\n  "version": "0.1.0",\n  "private": true\n}\n`;
+  if (/dockerfile$/i.test(path)) return `FROM node:22-slim\nWORKDIR /app\nCOPY . .\nRUN pnpm install --frozen-lockfile\nCMD ["pnpm", "start"]\n`;
+  if (path.endsWith(".css")) return `/* Shared tokens */\n:root {\n  --os-accent: #2f5fc4;\n}\n`;
+  if (path.endsWith(".yml") || path.endsWith(".yaml"))
+    return `version: "3"\nservices:\n  app:\n    build: .\n    ports:\n      - "8080:8080"\n`;
+  return "# OpenSession\n\nRun the coding agent on your computer or in the cloud.\n";
+};
 const patch = [
   "@@ -1,3 +1,8 @@",
   " # OpenSession",
@@ -107,8 +151,8 @@ const handlers: Record<string, unknown> = {
       ? [{ id: "p1", action: "shell", resources: ["pnpm test:smoke -- --section terminal"], message: "Runs the terminal section of the smoke test." }]
       : [],
   listForms: async () => [],
-  listFiles: async () => files,
-  readFile: async () => "# OpenSession\n\nRun the coding agent on your computer or in the cloud.\n",
+  listFiles: async (path = "") => tree[path] ?? [],
+  readFile: async (path: string) => fileText(path),
   diff: async () => [
     { file: "README.md", additions: 5, deletions: 1, patch, status: "modified" },
     {

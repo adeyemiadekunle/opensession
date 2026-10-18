@@ -1,15 +1,27 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiffFile, FileEntry, OpenSessionClient } from "@opensession/api-client";
 import { errText, useAsync } from "./hooks";
 import { Button } from "./components/ui/button";
 import { Empty } from "./components/ui/empty";
 import { PanelHeader } from "./components/ui/panel";
 import { NamedIcon } from "./icons";
+import { highlightedLines } from "./highlight";
 import { EDITOR_DEFAULTS, PREF, usePref, type EditorPrefs } from "./prefs";
 import { cn } from "./lib/utils";
 
+interface DirState {
+  entries?: FileEntry[];
+  loading?: boolean;
+  error?: string;
+}
+
+const nameOf = (p: string) => p.replace(/\/$/, "").split("/").pop() ?? p;
+const dirsFirst = (a: FileEntry, b: FileEntry) =>
+  a.type === b.type ? nameOf(a.path).localeCompare(nameOf(b.path)) : a.type === "directory" ? -1 : 1;
+
 /** Files card (design): its own header (tree toggle, open-file tabs, filter, close), the folder
- *  tree on the left and the open file with line numbers on the right. */
+ *  tree on the left and the open file with line numbers on the right. Folders expand in place
+ *  and load lazily (the API lists one directory at a time). */
 export function FilesPanel({
   client,
   refreshKey,
@@ -25,15 +37,61 @@ export function FilesPanel({
   /** In full screen: puts it back in the dock. */
   onDock?: () => void;
 }) {
-  const [dir, setDir] = useState("");
+  const [dirs, setDirs] = useState<Record<string, DirState>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [tabs, setTabs] = useState<{ path: string; text: string }[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [showTree, setShowTree] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
+  const treeRef = useRef<HTMLElement>(null);
   const [editor] = usePref<EditorPrefs>(PREF.editor, EDITOR_DEFAULTS);
-  const list = useAsync<FileEntry[]>(() => client.listFiles(dir), [client, dir, refreshKey]);
+
+  const loadDir = useCallback(
+    async (path: string) => {
+      setDirs((d) => ({ ...d, [path]: { ...d[path], loading: true, error: undefined } }));
+      try {
+        const entries = await client.listFiles(path);
+        setDirs((d) => ({ ...d, [path]: { entries } }));
+      } catch (e) {
+        setDirs((d) => ({ ...d, [path]: { entries: d[path]?.entries, error: errText(e) } }));
+      }
+    },
+    [client],
+  );
+
+  // Root and every expanded folder reload on mount and on refreshKey (the agent's edits).
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  useEffect(() => {
+    void loadDir("");
+    for (const p of expandedRef.current) void loadDir(p);
+  }, [loadDir, refreshKey]);
+
+  const toggleDir = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+    const st = dirs[path];
+    if (!st?.entries && !st?.loading) void loadDir(path);
+  };
+
+  /** Expands (and lazy-loads) the folder chain down to `dirPath`, for the file breadcrumb. */
+  const reveal = (dirPath: string) => {
+    setShowTree(true);
+    const segs = dirPath.split("/").filter(Boolean);
+    const chain = segs.map((_, i) => segs.slice(0, i + 1).join("/"));
+    setExpanded((prev) => new Set([...prev, ...chain]));
+    for (const p of chain) {
+      const st = dirs[p];
+      if (!st?.entries && !st?.loading) void loadDir(p);
+    }
+    requestAnimationFrame(() => treeRef.current?.querySelector(`[data-path="${CSS.escape(dirPath)}"]`)?.scrollIntoView({ block: "nearest" }));
+  };
 
   const openFile = async (path: string) => {
     if (tabs.some((t) => t.path === path)) {
@@ -56,13 +114,54 @@ export function FilesPanel({
     if (activePath === path) setActivePath(rest[rest.length - 1]?.path ?? null);
   };
 
-  const up = dir.includes("/") ? dir.slice(0, dir.replace(/\/$/, "").lastIndexOf("/")) : "";
-  const entries = useMemo(
-    () => (list.data ?? []).filter((f) => f.path.toLowerCase().includes(filter.toLowerCase())),
-    [list.data, filter],
-  );
+  interface Row {
+    path: string;
+    name: string;
+    kind: "dir" | "file" | "loading" | "error" | "empty";
+    depth: number;
+    note?: string;
+  }
+
+  const rows = useMemo(() => {
+    const out: Row[] = [];
+    const q = filter.trim().toLowerCase();
+    if (q) {
+      // Flat search over the folders loaded so far.
+      for (const [dir, st] of Object.entries(dirs)) {
+        for (const e of st.entries ?? []) {
+          const name = nameOf(e.path);
+          if (name.toLowerCase().includes(q)) out.push({ path: dir ? `${dir}/${name}` : name, name, kind: e.type === "directory" ? "dir" : "file", depth: 0 });
+        }
+      }
+      return out;
+    }
+    const walk = (dir: string, depth: number) => {
+      const st = dirs[dir];
+      const entries = [...(st?.entries ?? [])].sort(dirsFirst);
+      for (const e of entries) {
+        const name = nameOf(e.path);
+        const path = dir ? `${dir}/${name}` : name;
+        const kind = e.type === "directory" ? "dir" : "file";
+        out.push({ path, name, kind, depth });
+        if (kind === "dir" && expanded.has(path)) {
+          const sub = dirs[path];
+          if (sub?.loading && !sub.entries) out.push({ path: `${path}~loading`, name: "", kind: "loading", depth: depth + 1 });
+          else if (sub?.error && !sub.entries) out.push({ path: `${path}~error`, name: "", kind: "error", depth: depth + 1, note: sub.error });
+          else walk(path, depth + 1);
+        }
+      }
+      if (dir === "" && st?.loading && !st.entries) out.push({ path: "~loading", name: "", kind: "loading", depth });
+      if (dir === "" && st?.error) out.push({ path: "~error", name: "", kind: "error", depth, note: st.error });
+      if (dir === "" && st?.entries && !entries.length) out.push({ path: "~empty", name: "", kind: "empty", depth });
+    };
+    walk("", 0);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirs, expanded, filter]);
+
   const open = tabs.find((t) => t.path === activePath) ?? null;
-  const lines = open ? open.text.split("\n") : [];
+  const lines = useMemo(() => (open ? highlightedLines(open.text, open.path) : []), [open]);
+  const crumbs = open ? open.path.split("/") : [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -73,7 +172,7 @@ export function FilesPanel({
         tabs.length === 0 ? "Files" : (
         <div role="tablist" aria-label="Open files" className="flex h-[41px] min-w-0 flex-1 items-end gap-0.5 overflow-x-auto font-normal">
           {tabs.map((t) => {
-            const name = t.path.split("/").pop() ?? t.path;
+            const name = nameOf(t.path);
             const selected = t.path === activePath;
             return (
               <div
@@ -86,7 +185,6 @@ export function FilesPanel({
                 <button
                   role="tab"
                   aria-selected={selected}
-                  title={t.path}
                   className="border-0 bg-transparent p-0 font-mono text-inherit"
                   onClick={() => setActivePath(t.path)}
                 >
@@ -140,8 +238,8 @@ export function FilesPanel({
       </PanelHeader>
       <div className="flex min-h-0 flex-1">
         {showTree ? (
-          <aside aria-label="File tree" className="flex w-[156px] shrink-0 flex-col gap-1.5 overflow-hidden border-r border-border p-2">
-            <label className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-faint">
+          <aside aria-label="File tree" ref={treeRef} className="flex w-[168px] shrink-0 flex-col gap-1.5 overflow-hidden border-r border-border p-2">
+            <label className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-faint">
               <NamedIcon name="search" className="size-3" />
               <input
                 ref={filterRef}
@@ -152,54 +250,73 @@ export function FilesPanel({
                 onChange={(e) => setFilter(e.target.value)}
               />
             </label>
-            {dir ? (
-              <button className="h-6 justify-start border-0 bg-transparent px-1.5 text-left font-mono text-xs text-muted-foreground" onClick={() => setDir(up)}>
-                ‹ ..
-              </button>
-            ) : null}
             <ul className="m-0 flex min-h-0 list-none flex-col gap-px overflow-auto p-0 font-mono text-xs text-foreground">
-              {entries.map((f) => {
-                const name = f.path.replace(/\/$/, "").split("/").pop() ?? f.path;
-                const full = (dir ? `${dir.replace(/\/$/, "")}/` : "") + name;
-                const isOpen = activePath === full;
-                return (
-                  <li key={f.path}>
+              {rows.map((r) =>
+                r.kind === "loading" ? (
+                  <li key={r.path} className="flex h-6 items-center px-1.5" style={{ paddingLeft: r.depth * 12 + 6 }}>
+                    <span className="h-2.5 w-24 animate-pulse rounded bg-sunken motion-reduce:animate-none" />
+                  </li>
+                ) : r.kind === "error" ? (
+                  <li key={r.path} className="px-1.5 py-1 font-sans text-destructive" style={{ paddingLeft: r.depth * 12 + 6 }}>
+                    {r.note ?? "Couldn't load the folder"}
+                  </li>
+                ) : r.kind === "empty" ? (
+                  <li key={r.path} className="px-1.5 font-sans text-muted-foreground">
+                    Empty folder
+                  </li>
+                ) : (
+                  <li key={r.path}>
                     <button
+                      data-path={r.kind === "dir" ? r.path : undefined}
+                      aria-expanded={r.kind === "dir" ? expanded.has(r.path) : undefined}
                       className={cn(
-                        "flex h-6 w-full items-center gap-1.5 truncate rounded-md border-0 bg-transparent px-1.5 text-left",
-                        isOpen && "bg-muted text-foreground",
-                        f.type === "directory" && "text-muted-foreground",
+                        "flex h-6 w-full items-center gap-1 truncate rounded-md border-0 bg-transparent px-1.5 text-left",
+                        r.kind === "dir" ? "text-muted-foreground" : "text-foreground",
+                        r.path === activePath && "bg-muted text-foreground",
                       )}
-                      onClick={() => (f.type === "directory" ? setDir(full) : openFile(full))}
+                      style={{ paddingLeft: r.depth * 12 + 6 }}
+                      onClick={() => (r.kind === "dir" ? toggleDir(r.path) : openFile(r.path))}
                     >
-                      {f.type === "directory" ? <span aria-hidden="true">›</span> : null}
-                      <span className="truncate">{name}</span>
+                      <NamedIcon
+                        name="chevronRight"
+                        className={cn("size-3 shrink-0", r.kind === "dir" ? (expanded.has(r.path) ? "rotate-90" : "") : "invisible")}
+                      />
+                      <span className="truncate">{r.name}</span>
                     </button>
                   </li>
-                );
-              })}
-              {list.data && entries.length === 0 ? <li className="px-1.5 text-muted-foreground">Empty folder</li> : null}
-              {list.loading && !list.data
-                ? [110, 126, 100, 118, 90].map((w, i) => (
-                    <li key={i} role={i ? undefined : "status"} aria-label={i ? undefined : "Loading files"} className="flex h-6 items-center px-1.5">
-                      <span className="h-2.5 animate-pulse rounded bg-sunken motion-reduce:animate-none" style={{ width: w }} />
-                    </li>
-                  ))
-                : null}
+                ),
+              )}
             </ul>
-            {list.error || err ? <div className="py-1.5 text-xs text-destructive">{list.error ?? err}</div> : null}
+            {err ? <div className="py-1.5 font-sans text-xs text-destructive">{err}</div> : null}
           </aside>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-[30px] shrink-0 items-center border-b border-border px-3 font-mono text-xs text-muted-foreground">
-            <span className="truncate">{open ? open.path : "No file open"}</span>
-          </div>
+          <nav aria-label="File path" className="flex h-[30px] shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-3 font-mono text-xs text-muted-foreground">
+            {open
+              ? crumbs.map((seg, i) => {
+                  const dirPath = crumbs.slice(0, i + 1).join("/");
+                  const isFile = i === crumbs.length - 1;
+                  return (
+                    <span key={dirPath} className="flex shrink-0 items-center gap-0.5">
+                      {i > 0 ? <span aria-hidden="true" className="text-faint">/</span> : null}
+                      {isFile ? (
+                        <span className="text-foreground">{seg}</span>
+                      ) : (
+                        <button className="border-0 bg-transparent p-0 font-mono text-inherit hover:text-foreground" onClick={() => reveal(dirPath)}>
+                          {seg}
+                        </button>
+                      )}
+                    </span>
+                  );
+                })
+              : "No file open"}
+          </nav>
           <div className="min-h-0 flex-1 overflow-auto py-2 font-mono leading-[1.7]" style={{ fontSize: editor.fontSize }}>
             {open
               ? lines.map((line, i) => (
                   <div key={i} className={cn("grid pr-2.5", editor.lineNumbers ? "grid-cols-[minmax(28px,auto)_1fr]" : "grid-cols-1 pl-3")}>
                     {editor.lineNumbers ? <span className="pr-2.5 text-right text-faint/70">{i + 1}</span> : null}
-                    <span className={editor.wrap ? "whitespace-pre-wrap break-all" : "truncate whitespace-pre"}>{line || " "}</span>
+                    <span className={editor.wrap ? "whitespace-pre-wrap break-all" : "truncate whitespace-pre"}>{line.length ? line : " "}</span>
                   </div>
                 ))
               : null}

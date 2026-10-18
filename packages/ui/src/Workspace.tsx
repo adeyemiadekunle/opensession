@@ -191,6 +191,12 @@ export function Workspace({
   const [conn, setConn] = useState<{ lost: boolean; retryIn: number }>({ lost: false, retryIn: 0 });
   const retryNow = useRef<(() => void) | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findPos, setFindPos] = useState(0);
+  const [findCount, setFindCount] = useState(0);
+  const findInput = useRef<HTMLInputElement>(null);
+  const findRanges = useRef<Range[]>([]);
   /** When the live stream last delivered an event (the busy poll backs off while it flows). */
   const lastEvent = useRef(0);
 
@@ -227,9 +233,85 @@ export function Workspace({
 
   const onOpenSettingsRef = useRef(onOpenSettings);
   onOpenSettingsRef.current = onOpenSettings;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   useEffect(() => {
     storageSet(SIDEBAR_KEY, sidebarOpen ? "shown" : "hidden");
   }, [sidebarOpen]);
+
+  // Find in conversation (Ctrl F): CSS.highlights paints matches without touching React's DOM,
+  // so it's safe while a reply is still streaming in.
+  const findSupport =
+    (CSS as unknown as { highlights?: Map<string, unknown> }).highlights ??
+    null;
+  const applyFind = useCallback(
+    (pos: number) => {
+      const HighlightCtor = (window as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+      if (!findSupport || !HighlightCtor) return;
+      const ranges = findRanges.current;
+      findSupport.set("find", new HighlightCtor(...ranges));
+      if (ranges[pos]) findSupport.set("find-current", new HighlightCtor(ranges[pos]));
+      else findSupport.delete("find-current");
+    },
+    [findSupport],
+  );
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+  }, []);
+  // Rebuild the match ranges whenever the text or the query changes.
+  useEffect(() => {
+    findSupport?.delete("find");
+    findSupport?.delete("find-current");
+    findRanges.current = [];
+    const root = listRef.current;
+    const q = findQuery.trim().toLowerCase();
+    if (!findOpen || !q || !root) {
+      setFindCount(0);
+      return;
+    }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const skip = (n: Node) => {
+      for (let el = n.parentElement; el && el !== root; el = el.parentElement) {
+        if (el.tagName === "BUTTON" || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+      }
+      return false;
+    };
+    const ranges: Range[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (skip(node)) continue;
+      const text = node.textContent ?? "";
+      const low = text.toLowerCase();
+      for (let i = low.indexOf(q); i !== -1 && q.length; i = low.indexOf(q, i + q.length)) {
+        const r = new Range();
+        r.setStart(node, i);
+        r.setEnd(node, Math.min(i + q.length, text.length));
+        ranges.push(r);
+      }
+    }
+    findRanges.current = ranges;
+    setFindCount(ranges.length);
+    setFindPos(0);
+    applyFind(0);
+    ranges[0]?.startContainer.parentElement?.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, findQuery, messages, findSupport]);
+  // Jump between matches.
+  useEffect(() => {
+    applyFind(findPos);
+    findRanges.current[findPos]?.startContainer.parentElement?.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findPos, applyFind]);
+  useEffect(() => {
+    if (findOpen) {
+      findInput.current?.focus();
+      findInput.current?.select();
+    }
+  }, [findOpen]);
+  // A different conversation: the old matches no longer apply.
+  useEffect(() => setFindOpen(false), [active]);
+  const findCur = findCount ? Math.min(findPos, findCount - 1) : 0;
+  const stepFind = (d: number) => setFindPos((p) => (findCount ? (p + d + findCount) % findCount : 0));
   // The drawer closes once a session is picked, and when the window widens again.
   useEffect(() => setDrawerOpen(false), [active, narrow]);
   // The drawer takes focus when it opens (its search field) and hands it back to the toggle when it
@@ -243,13 +325,22 @@ export function Workspace({
     drawerWasOpen.current = drawerOpen;
   }, [drawerOpen]);
 
-  // Ctrl K opens the palette, Ctrl / the shortcuts, Ctrl , settings; online/offline drive the offline notice.
+  // Ctrl K opens the palette, Ctrl / the shortcuts, Ctrl , settings, Ctrl F finds in the
+  // conversation; online/offline drive the offline notice.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key.toLowerCase() === "k") {
+      const key = e.key.toLowerCase();
+      if (key === "k") {
         e.preventDefault();
         setPaletteOpen(true);
+      } else if (key === "f" && activeRef.current) {
+        e.preventDefault();
+        setFindOpen(true);
+        requestAnimationFrame(() => {
+          findInput.current?.focus();
+          findInput.current?.select();
+        });
       } else if (e.key === "/") {
         e.preventDefault();
         setShortcutsOpen(true);
@@ -699,6 +790,20 @@ export function Workspace({
         </button>
         {projectName ? <span className="min-w-0 truncate text-[13px] text-faint max-sm:hidden">{projectName}</span> : null}
         <span className="flex-1" />
+        {active ? (
+          <Tip label="Find in this conversation (Ctrl F)">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Find in this conversation"
+              aria-pressed={findOpen}
+              className="aria-pressed:bg-muted aria-pressed:text-primary"
+              onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
+            >
+              <NamedIcon name="search" />
+            </Button>
+          </Tip>
+        ) : null}
         {togglable.map((id) => toggleButton(id, panelShown(id), () => showPanel(id)))}
       </header>
 
@@ -840,7 +945,41 @@ export function Workspace({
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden [&_.os-terminal]:min-h-0">{panelBody(full, true)}</div>
           </section>
         ) : null}
-        <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
+        <main className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", full && "hidden")} style={centered ? CENTERED_GUTTERS : undefined}>
+          {findOpen ? (
+            <div className="absolute right-[var(--gutter-r,1.75rem)] top-2 z-20 flex h-9 items-center gap-1 rounded-lg border border-border bg-card px-2 shadow-pop max-sm:right-4">
+              <input
+                ref={findInput}
+                value={findQuery}
+                onChange={(e) => setFindQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    stepFind(e.shiftKey ? -1 : 1);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeFind();
+                  }
+                }}
+                placeholder="Find in conversation"
+                aria-label="Find in this conversation"
+                className="h-full w-44 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none placeholder:text-faint"
+              />
+              <span aria-live="polite" className="w-10 shrink-0 text-center text-xs tabular-nums text-faint">
+                {findQuery.trim() ? `${findCount ? findCur + 1 : 0}/${findCount}` : ""}
+              </span>
+              <Button variant="ghost" size="icon-sm" aria-label="Previous match" disabled={!findCount} onClick={() => stepFind(-1)}>
+                <NamedIcon name="chevronUp" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Next match" disabled={!findCount} onClick={() => stepFind(1)}>
+                <NamedIcon name="chevronDown" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Close find" onClick={closeFind}>
+                <NamedIcon name="close" />
+              </Button>
+            </div>
+          ) : null}
           {conn.lost && active ? (
             <Alert
               tone="danger"
@@ -928,7 +1067,7 @@ export function Workspace({
             <ul className="m-0 flex shrink-0 list-none flex-wrap gap-1.5 py-1 pl-[var(--gutter-l,2.5rem)] pr-[var(--gutter-r,1.75rem)] max-sm:px-4">
               {commandHints.map((c) => (
                 <li key={c.name}>
-                  <Button size="sm" variant="outline" title={c.description} onClick={() => setText(`/${c.name} `)}>
+                  <Button size="sm" variant="outline" aria-label={c.description} onClick={() => setText(`/${c.name} `)}>
                     /{c.name}
                   </Button>
                 </li>

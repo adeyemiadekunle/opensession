@@ -69,7 +69,7 @@ export function SettingsShell({
               className={cn(
                 "flex h-[34px] shrink-0 items-center gap-2 rounded-md border-0 px-2.5 text-left",
                 p.id === page.id
-                  ? "bg-sunken font-medium text-foreground shadow-[inset_2px_0_0_var(--os-accent)]"
+                  ? "bg-sunken font-medium text-foreground shadow-[inset_2px_0_0_var(--color-primary)]"
                   : "bg-transparent text-muted-foreground hover:bg-sunken/50 hover:text-foreground",
               )}
               onClick={() => open(p.id)}

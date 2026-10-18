@@ -92,7 +92,6 @@ export function SectionHeader({ title, onAdd, addLabel }: { title: string; onAdd
         <button
           className="grid size-5 place-items-center rounded border-0 bg-transparent p-0 text-faint hover:bg-sunken hover:text-foreground"
           aria-label={addLabel ?? `Add to ${title}`}
-          title={addLabel}
           onClick={onAdd}
         >
           <NamedIcon name="plus" className="size-3.5" />
@@ -245,6 +244,7 @@ export function AccountFooter({ account, onShortcuts }: { account: Account; onSh
 /** Keyboard shortcuts the workspace handles. */
 export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: "Ctrl K", action: "Search sessions and actions" },
+  { keys: "Ctrl F", action: "Find in this conversation" },
   { keys: "Ctrl /", action: "Show keyboard shortcuts" },
   { keys: "Ctrl ,", action: "Open settings" },
   { keys: "Enter", action: "Send the message" },
