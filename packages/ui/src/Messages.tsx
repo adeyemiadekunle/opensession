@@ -138,12 +138,13 @@ function pastTitle(p: ContentPart): { verb: string; target?: string } {
   }
 }
 
-function Spinner({ className }: { className?: string }) {
+function ActivityIndicator() {
   return (
-    <span
-      aria-hidden="true"
-      className={cn("inline-block size-3 shrink-0 animate-spin rounded-full border-2 border-input border-t-primary motion-reduce:animate-none", className)}
-    />
+    <span aria-hidden="true" className="inline-flex size-3 shrink-0 items-center justify-between">
+      <span className="size-0.5 animate-pulse rounded-full bg-current motion-reduce:animate-none" />
+      <span className="size-0.5 animate-pulse rounded-full bg-current [animation-delay:150ms] motion-reduce:animate-none" />
+      <span className="size-0.5 animate-pulse rounded-full bg-current [animation-delay:300ms] motion-reduce:animate-none" />
+    </span>
   );
 }
 
@@ -168,7 +169,7 @@ function ToolRow({ part, onOpenFile }: { part: ContentPart; onOpenFile?: (path: 
   const expanded = failed || open;
   const line = (
     <>
-      {running ? <Spinner /> : output || failed ? <NamedIcon name={expanded ? "chevronDown" : "chevronRight"} className="size-3" /> : <span className="size-3 shrink-0" />}
+      {running ? <ActivityIndicator /> : output || failed ? <NamedIcon name={expanded ? "chevronDown" : "chevronRight"} className="size-3" /> : <span className="size-3 shrink-0" />}
       <span className="shrink-0">{verb}</span>
       {target ? <span className="min-w-0 truncate font-mono text-xs text-foreground/80">{target}</span> : null}
       {running ? <span className="shrink-0 text-faint">…</span> : null}
@@ -306,7 +307,7 @@ function RetryLine({ retry }: { retry: { attempt: number; at: number; error?: St
   const why = usageLimit(retry.error) === "rate" ? "Rate limited" : (retry.error?.message ?? "The provider failed");
   return (
     <div role="status" className="flex items-center gap-2.5 text-[13px] text-warning">
-      <Spinner />
+      <ActivityIndicator />
       <span className="min-w-0 truncate">
         {why.length > 80 ? `${why.slice(0, 80)}…` : why} · {secs > 0 ? `retrying in ${secs} s` : "retrying now"} (attempt {retry.attempt})
       </span>
@@ -349,7 +350,7 @@ export function MessageView({
         ) : null}
         {m.status && m.status !== "exited" ? (
           <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-            {m.status === "running" ? <Spinner /> : null}
+            {m.status === "running" ? <ActivityIndicator /> : null}
             {m.status}
           </div>
         ) : null}
@@ -361,8 +362,7 @@ export function MessageView({
     const error = m.error as StructuredError | undefined;
     const limit = usageLimit(error);
     const retry = m.retry as { attempt: number; at: number; error?: StructuredError } | undefined;
-    const runningTool = [...parts].reverse().find((p) => p.type === "tool" && ["running", "streaming", "pending"].includes(stateOf(p).status ?? ""));
-    const step = runningTool ? toolTitle(runningTool) : null;
+    const hasRunningTool = parts.some((p) => p.type === "tool" && isRunning(p));
     const footer = [m.model && showModel ? `${m.model.providerID}/${m.model.id}` : null, tokenLine(m)].filter(Boolean).join(" · ");
     return (
       <div className="flex w-full flex-col gap-1.5">
@@ -398,12 +398,10 @@ export function MessageView({
         ) : null}
         {!m.time?.completed && !error && retry ? (
           <RetryLine retry={retry} />
-        ) : !m.time?.completed && !error ? (
+        ) : !m.time?.completed && !error && !hasRunningTool ? (
           <div className="flex items-center gap-2.5 text-[13px] text-muted-foreground">
-            <Spinner />
-            <span>
-              Working{step ? ` · ${step.verb}${step.target ? ` ${step.target}` : ""}` : "…"}
-            </span>
+            <ActivityIndicator />
+            <span>Working…</span>
           </div>
         ) : null}
         {footer ? <div className="text-[11px] text-faint">{footer}</div> : null}
