@@ -98,6 +98,42 @@ describe("LocalClient", () => {
   });
 });
 
+describe.each(["cloud", "local"] as const)("%s file reads", (mode) => {
+  const client = (fetch: typeof globalThis.fetch) =>
+    mode === "cloud"
+      ? new CloudClient({ gatewayUrl: "https://gw.test", getToken: () => "tok", workspace: "w1", fetch })
+      : new LocalClient({ baseUrl: "http://127.0.0.1:4096", password: "pw", directory: "/proj", fetch });
+
+  it.each([
+    ["JSON object", "package.json", "application/json", '{\n  "name": "demo",\n  "scripts": { "dev": "vite" }\n}\n'],
+    ["JSON array", "items.json", "application/json; charset=utf-8", '[\n  "one",\n  "two"\n]\n'],
+    ["JSON string", "string.json", "application/json", '"hello\\nworld"\n'],
+    ["JSON number", "number.json", "application/json", "1.00\n"],
+    ["JSON boolean", "boolean.json", "application/json", "false\n"],
+    ["JSON null", "null.json", "application/json", "null\n"],
+    ["JSON with a data field", "data.json", "application/json", '{ "data": { "value": 1 } }\n'],
+    ["invalid JSON", "unfinished.json", "application/json", '{\n  "unfinished":'],
+    ["empty JSON", "empty.json", "application/json", ""],
+    ["plain text", "notes.txt", "text/plain", "Hello, café!\n\n"],
+    ["source code", "src/main.ts", "application/octet-stream", 'export const name = "demo";\n'],
+    ["empty text", "empty.txt", "text/plain", ""],
+  ])("preserves %s as file text", async (_label, path, contentType, contents) => {
+    const { f, calls } = mockFetch(() => new Response(contents, { headers: { "content-type": contentType } }));
+    expect(await client(f).readFile(path)).toBe(contents);
+    expect(calls[0]!.url).toBe(
+      `${mode === "cloud" ? "https://gw.test/p/w1" : "http://127.0.0.1:4096"}/api/fs/read/${path}`,
+    );
+  });
+
+  it("still reports HTTP errors instead of displaying them as file content", async () => {
+    const { f } = mockFetch(() => json({ message: "File not found" }, 404));
+    await expect(client(f).readFile("missing.json")).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining("File not found"),
+    });
+  });
+});
+
 describe("parseSSE", () => {
   it("parses events split across chunks", async () => {
     const enc = new TextEncoder();

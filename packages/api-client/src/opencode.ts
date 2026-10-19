@@ -145,7 +145,8 @@ export abstract class OpenCodeClient implements OpenSessionClient {
   }
   async readFile(path: string): Promise<string> {
     const clean = path.split("/").filter((p) => p && p !== ".").map(enc).join("/");
-    return String((await this.api.get(`/api/fs/read/${clean}`)) ?? "");
+    const res: Response = await this.api.get(`/api/fs/read/${clean}`, { raw: true });
+    return res.text();
   }
   async diff(mode: "working" | "branch" | "committed" = "working"): Promise<DiffFile[]> {
     return unwrap<DiffFile[]>(await this.api.get("/api/vcs/diff", { query: { mode } }));
