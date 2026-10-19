@@ -39,6 +39,9 @@ export interface Message {
   type: "user" | "assistant" | "shell" | "system" | "synthetic" | "skill" | string;
   time?: { created: number; completed?: number };
   text?: string;
+  /** Short label OpenCode attaches to system/synthetic entries (e.g. "Instructions
+   *  updated: core/mcp-guidance"); text then holds the raw injected context. */
+  description?: string;
   content?: ContentPart[];
   command?: string;
   status?: string;

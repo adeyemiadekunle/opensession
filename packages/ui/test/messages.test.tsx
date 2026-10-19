@@ -86,4 +86,19 @@ describe("message activity", () => {
     expect(dotCount(html)).toBe(3);
     expect(html).not.toContain("Working");
   });
+
+  it("shows a system message label instead of the raw injected context", () => {
+    const html = render({
+      type: "system",
+      text: "<mcp_instructions>\n  <server name=\"opensession\">…</server>\n</mcp_instructions>",
+      description: "Instructions updated: core/mcp-guidance",
+    });
+    expect(html).toContain("Instructions updated: core/mcp-guidance");
+    expect(html).not.toContain("mcp_instructions");
+  });
+
+  it("keeps showing synthetic text that has no label", () => {
+    const html = render({ type: "synthetic", text: "Summary of earlier conversation." });
+    expect(html).toContain("Summary of earlier conversation.");
+  });
 });
