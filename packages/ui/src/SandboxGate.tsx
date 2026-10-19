@@ -7,6 +7,7 @@ import { cn } from "./lib/utils";
 type Phase =
   | { kind: "checking" }
   | { kind: "waking"; from: WorkspaceStatus["state"] }
+  | { kind: "unreachable" }
   | { kind: "ready" }
   | { kind: "limit"; message: string; running: string[] }
   | { kind: "error"; message: string };
@@ -45,22 +46,23 @@ function StatusCard({ tone, title, children, actions }: { tone: "muted" | "warni
   );
 }
 
-/** How long to keep retrying a wake whose request the browser dropped. */
+/** How long to keep retrying a request the browser couldn't complete. */
 const WAKE_RETRY_MS = 3 * 60_000;
 
 /**
- * The health call waits while the gateway starts the sandbox, which can take longer
- * than a mobile browser keeps a quiet request open (iOS Safari gives up with "Load
- * failed"). The sandbox keeps starting on the gateway, so a network failure, as
- * opposed to an answer from the gateway, is retried until it is up.
+ * Retries a call while it fails without an answer from the gateway ("Load failed",
+ * "Failed to fetch"): the gateway is restarting (a deploy), or the health call waited
+ * on a starting sandbox longer than a mobile browser keeps a quiet request open. An
+ * answer from the gateway (ApiError) is final.
  */
-async function healthWhileWaking(client: CloudClient) {
+async function untilAnswered<T>(call: () => Promise<T>, onRetry: () => void): Promise<T> {
   const deadline = Date.now() + WAKE_RETRY_MS;
   for (;;) {
     try {
-      return await client.health();
+      return await call();
     } catch (e) {
       if (e instanceof ApiError || Date.now() > deadline) throw e;
+      onRetry();
       await new Promise((r) => setTimeout(r, 3000));
     }
   }
@@ -84,16 +86,21 @@ export function SandboxGate({
 
   const wake = useCallback(async () => {
     try {
-      const st = await client.workspaceStatus();
-      if (st.state !== "running") setPhase({ kind: "waking", from: st.state });
-      await healthWhileWaking(client);
+      const st = await untilAnswered(() => client.workspaceStatus(), () => setPhase({ kind: "unreachable" }));
+      const waking = st.state !== "running";
+      if (waking) setPhase({ kind: "waking", from: st.state });
+      // While waking, a dropped request is the slow start, not an outage: keep that card.
+      await untilAnswered(() => client.health(), () => !waking && setPhase({ kind: "unreachable" }));
       setPhase({ kind: "ready" });
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) {
         const lim = await client.limits().catch(() => null);
         setPhase({ kind: "limit", message: e.message, running: lim?.running.filter((w) => w !== client.workspace) ?? [] });
       } else {
-        setPhase({ kind: "error", message: errText(e) });
+        setPhase({
+          kind: "error",
+          message: e instanceof ApiError ? errText(e) : "OpenSession didn't answer for a few minutes. Check your connection.",
+        });
       }
     }
   }, [client]);
@@ -113,6 +120,17 @@ export function SandboxGate({
           <Spinner />
           Opening {here}…
         </div>
+      ) : null}
+      {phase.kind === "unreachable" ? (
+        <>
+          <StatusCard tone="warning" title="Can't reach OpenSession right now">
+            It may be restarting after an update, or your connection dropped. Nothing in {here} was changed.
+          </StatusCard>
+          <div role="status" className="flex w-full max-w-[600px] items-center gap-2.5 px-4 text-[13px] text-muted-foreground">
+            <Spinner />
+            Trying again…
+          </div>
+        </>
       ) : null}
       {phase.kind === "waking" ? (
         <>

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import json
 import os
 import time
@@ -176,6 +177,8 @@ def config_warnings(app) -> list[dict]:
         out.append({"level": "info", "text": "ADMIN_USER_IDS is empty: nobody can open this page or change limits."})
     return out
 
+
+log = logging.getLogger("opensession.gateway")
 
 PtyId = Annotated[str, Path(pattern=r"^pty_[A-Za-z0-9]{1,80}$")]
 TERMINAL_TICKET_SECONDS = 60
@@ -397,9 +400,23 @@ def create_app(
     app.state.limiter = rl.RateLimiter()
     app.state.ws_connect = _ws_connect
 
-    # Middleware order, outermost first: preview_host, CORS, observe, block_sandboxes, rate_limit.
+    # Middleware order, outermost first: preview_host, CORS, observe, block_sandboxes, rate_limit,
+    # unexpected_errors.
     # CORS is added after the others so their own answers (429, 403) carry its headers too:
     # without them a browser on another origin sees only a network error ("Load failed").
+    @app.middleware("http")
+    async def unexpected_errors(request: Request, call_next):
+        """A bug answers 500 with its message from inside the CORS middleware. Starlette's
+        own 500 comes from outside it, without CORS headers, so the web app would only
+        see a network error ("Load failed") and never the reason."""
+        try:
+            return await call_next(request)
+        except Exception as e:
+            from fastapi.responses import JSONResponse
+
+            log.exception("unhandled error on %s %s", request.method, request.url.path)
+            return JSONResponse({"detail": f"internal error: {type(e).__name__}: {e}"[:300]}, status_code=500)
+
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):
         """Per-caller and per-action limits, and slowing down failed sign-ins (ratelimit.py)."""
