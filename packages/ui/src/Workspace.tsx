@@ -1426,10 +1426,32 @@ export function Workspace({
       >
         {agentContext ? (
           <>
+            {chosen ? (
+              <div className="flex flex-col gap-1">
+                <div className="text-xs font-medium text-faint">Model</div>
+                <div className="text-[13px]">
+                  <span className="font-medium text-foreground">{chosen.name ?? chosen.id}</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    — {chosen.providerID === "opencode" ? "OpenCode, no API key needed" : chosen.providerID}
+                    {chosen.variants?.length ? `, ${variant ? `${variant} effort` : "default effort"}` : ""}
+                  </span>
+                </div>
+                {chosen.limit?.context ? (
+                  <div className="text-[12px] text-faint">
+                    {context
+                      ? `Context ${Math.round((context.used / context.limit) * 100)}% full: ${compactNum(context.used)} of ${compactNum(context.limit)} tokens.`
+                      : `Holds up to ${compactNum(chosen.limit.context)} tokens of conversation.`}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1">
               <div className="text-xs font-medium text-faint">This session</div>
               <div className="text-[13px] text-muted-foreground">
-                {sessionTokens.input || sessionTokens.output ? (
+                {!active ? (
+                  "Starts with your first message."
+                ) : sessionTokens.input || sessionTokens.output ? (
                   <>
                     {compactNum(sessionTokens.input)} in · {compactNum(sessionTokens.output)} out
                     {sessionTokens.cacheRead ? ` · ${compactNum(sessionTokens.cacheRead)} cached` : ""}
@@ -1453,13 +1475,25 @@ export function Workspace({
               </div>
             </div>
             <div className="flex flex-col gap-1">
+              <div className="text-xs font-medium text-faint">Tools</div>
+              <div className="text-[13px] text-muted-foreground">
+                Reads and edits files, runs shell commands, fetches and searches the web, and starts subagents.
+              </div>
+              {preview?.live && agentContext.browser !== false ? (
+                <div className="text-[12px] text-faint">
+                  Drives a browser (the Browser panel) that reaches only the domains you allow, asks you before reaching a new
+                  one, and hands the browser to you for sign-ins.
+                </div>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-1">
               <div className="text-xs font-medium text-faint">Instructions (AGENTS.md)</div>
               {agentContext.instructions.trim() ? (
                 <pre className="max-h-32 overflow-auto rounded-md border border-border bg-code p-2.5 font-mono text-[12px] whitespace-pre-wrap text-foreground">
                   {agentContext.instructions}
                 </pre>
               ) : (
-                <div className="text-[13px] text-muted-foreground">The default reply guide only.</div>
+                <div className="text-[13px] text-muted-foreground">None of your own; the agent follows OpenSession's default guidance.</div>
               )}
             </div>
             {agentContext.skills.length ? (
@@ -1500,7 +1534,9 @@ export function Workspace({
               </div>
             ) : null}
             {agentContext.permissions.length ? (
-              <div className="text-[12px] text-faint">{agentContext.permissions.length} custom permission rules apply.</div>
+              <div className="text-[12px] text-faint">
+                {agentContext.permissions.length} custom permission {agentContext.permissions.length === 1 ? "rule applies" : "rules apply"}.
+              </div>
             ) : null}
           </>
         ) : null}
