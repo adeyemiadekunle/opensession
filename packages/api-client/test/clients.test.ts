@@ -77,6 +77,15 @@ describe("CloudClient", () => {
   });
 });
 
+describe("readFile", () => {
+  it("returns a JSON file's text, not a parsed object", async () => {
+    const text = '{\n  "name": "app"\n}\n';
+    const { f } = mockFetch(() => new Response(text, { headers: { "content-type": "application/json" } }));
+    const c = new LocalClient({ baseUrl: "http://127.0.0.1:4096", password: "pw", fetch: f });
+    expect(await c.readFile("package.json")).toBe(text);
+  });
+});
+
 describe("LocalClient", () => {
   it("uses basic auth and the OpenCode V2 routes", async () => {
     const { f, calls } = mockFetch((c) =>

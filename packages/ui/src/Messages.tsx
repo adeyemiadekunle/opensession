@@ -398,12 +398,11 @@ export function MessageView({
         ) : null}
         {!m.time?.completed && !error && retry ? (
           <RetryLine retry={retry} />
-        ) : !m.time?.completed && !error ? (
+        ) : !m.time?.completed && !error && !step ? (
+          // A running tool shows its own spinner row; this line covers thinking and writing.
           <div className="flex items-center gap-2.5 text-[13px] text-muted-foreground">
             <Spinner />
-            <span>
-              Working{step ? ` · ${step.verb}${step.target ? ` ${step.target}` : ""}` : "…"}
-            </span>
+            <span>Working…</span>
           </div>
         ) : null}
         {footer ? <div className="text-[11px] text-faint">{footer}</div> : null}
