@@ -395,17 +395,9 @@ def create_app(
     app.state.limiter = rl.RateLimiter()
     app.state.ws_connect = _ws_connect
 
-    origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
-    if origins:  # the web app (Vite dev server, production site) calls from another origin
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=origins,
-            allow_methods=["*"],
-            allow_headers=["authorization", "content-type", "x-workspace", "last-event-id"],
-            allow_credentials=False,
-        )
-
-    # Middleware order, outermost first: preview_host, observe, block_sandboxes, rate_limit.
+    # Middleware order, outermost first: preview_host, CORS, observe, block_sandboxes, rate_limit.
+    # CORS is added after the others so their own answers (429, 403) carry its headers too:
+    # without them a browser on another origin sees only a network error ("Load failed").
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):
         """Per-caller and per-action limits, and slowing down failed sign-ins (ratelimit.py)."""
@@ -449,6 +441,16 @@ def create_app(
                 request.app.state.metrics.request(request.method, path, status, ms, getattr(request.state, "user", None))
                 if LOG_REQUESTS:
                     obs.log_request(request.method, path, status, ms)
+
+    origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+    if origins:  # the web app (Vite dev server, production site) calls from another origin
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["*"],
+            allow_headers=["authorization", "content-type", "x-workspace", "last-event-id"],
+            allow_credentials=False,
+        )
 
     @app.middleware("http")
     async def preview_host(request: Request, call_next):

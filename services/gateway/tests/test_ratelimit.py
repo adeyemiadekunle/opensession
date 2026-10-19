@@ -33,6 +33,17 @@ def test_default_limit_covers_every_request(monkeypatch):
         assert c.get("/health").status_code == 200  # exempt
 
 
+def test_refusals_carry_cors_headers(monkeypatch):
+    # Without them a browser on the web app's origin sees "Load failed", not the 429.
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173")
+    origin = {**ALICE, "Origin": "http://localhost:5173"}
+    with client(monkeypatch, default=1) as c:
+        assert c.get("/me", headers=origin).status_code == 200
+        r = c.get("/me", headers=origin)
+        assert r.status_code == 429
+        assert r.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
 def test_failed_sign_ins_slow_down_the_address(monkeypatch):
     with client(monkeypatch, auth_failures=3) as c:
         for _ in range(3):

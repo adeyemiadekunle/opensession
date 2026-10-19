@@ -45,6 +45,27 @@ function StatusCard({ tone, title, children, actions }: { tone: "muted" | "warni
   );
 }
 
+/** How long to keep retrying a wake whose request the browser dropped. */
+const WAKE_RETRY_MS = 3 * 60_000;
+
+/**
+ * The health call waits while the gateway starts the sandbox, which can take longer
+ * than a mobile browser keeps a quiet request open (iOS Safari gives up with "Load
+ * failed"). The sandbox keeps starting on the gateway, so a network failure, as
+ * opposed to an answer from the gateway, is retried until it is up.
+ */
+async function healthWhileWaking(client: CloudClient) {
+  const deadline = Date.now() + WAKE_RETRY_MS;
+  for (;;) {
+    try {
+      return await client.health();
+    } catch (e) {
+      if (e instanceof ApiError || Date.now() > deadline) throw e;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+}
+
 /**
  * Wakes the project's sandbox before showing the workspace. A sleeping project starts
  * again with its files and sessions; at the per-user limit, offers to put another
@@ -65,7 +86,7 @@ export function SandboxGate({
     try {
       const st = await client.workspaceStatus();
       if (st.state !== "running") setPhase({ kind: "waking", from: st.state });
-      await client.health();
+      await healthWhileWaking(client);
       setPhase({ kind: "ready" });
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) {
