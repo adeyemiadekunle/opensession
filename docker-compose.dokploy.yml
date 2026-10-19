@@ -37,6 +37,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      # Traefik routes to a container only once it is healthy: check every 2 s while it
+      # starts, or each deploy answers "404 page not found" until the first 30 s check.
+      start_period: 30s
+      start_interval: 2s
 
   gateway:
     build: services/gateway
@@ -58,7 +62,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 60s
+      start_interval: 2s
     labels:
       # The gateway also joins every sandbox's network; Traefik must use Dokploy's.
       - traefik.docker.network=dokploy-network

@@ -8,6 +8,7 @@ export const PREF = {
   codeFont: "opensession.codeFont",
   openTerminal: "opensession.openTerminal",
   notifyCi: "opensession.notifyCi",
+  filesTree: "opensession.filesTree", // the Files panel's tree width (px)
 } as const;
 
 /** The default model ("provider/model") and the chosen effort per model; the composer reads and changes them too. */
