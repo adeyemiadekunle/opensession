@@ -148,7 +148,7 @@ gateway, which also sits on every sandbox's network.
 
 Press **Deploy**. The first deploy takes a few minutes: it builds the web app, the
 gateway, the egress proxy and the sandbox image (`sandbox-image` builds
-`opencode-sandbox:latest` and then exits; that's expected).
+`opencode-sandbox:latest` and then just sleeps, so Docker cleanups keep the image).
 
 Check:
 
@@ -237,12 +237,13 @@ See `scripts/build-desktop.mjs` for signing.
 
 ## Keep Dokploy's Docker cleanup off on this server
 
-Asleep projects are **stopped containers**, and the sandbox image is only used by
-containers the gateway creates. Dokploy's daily Docker cleanup (Server settings) and
-`docker system prune` remove stopped containers and unused images: that would
-delete asleep sandboxes' containers (their volumes, the files, survive) and the
-sandbox image until the next deploy. Leave that cleanup off for this server; clean
-build caches with `docker builder prune` instead.
+Asleep projects are **stopped containers**. Dokploy's daily Docker cleanup (Server
+settings) and `docker system prune` remove stopped containers, so they delete asleep
+sandboxes' containers. Their volumes, the files, survive, and the gateway recreates
+the container on the next open, but the cleanup also interrupts that wake. The
+sandbox image itself is safe: the running `sandbox-image` container keeps it in use.
+Leave that cleanup off for this server; clean build caches with `docker builder
+prune` instead.
 
 ## The agent's browser and internet access
 
