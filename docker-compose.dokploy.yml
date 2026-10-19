@@ -70,22 +70,27 @@ services:
       - ./services/egress/allowlist.txt:/etc/opensession/egress-allowlist.txt:ro
     depends_on:
       sandbox-image:
-        condition: service_completed_successfully
+        condition: service_started
       egress:
         condition: service_started
       db:
         condition: service_healthy
 
-  # Builds the sandbox image (opencode-sandbox:latest) on each deploy, then exits.
-  # The gateway starts one container from it per user and project.
+  # Builds the sandbox image (opencode-sandbox:latest) on each deploy. The gateway
+  # starts one container from it per user and project.
+  # It then just sleeps: a running container that uses the image keeps `docker image
+  # prune --all` (Dokploy's daily Docker cleanup, "Clean unused images") from deleting
+  # it while every sandbox is asleep, which would leave no image to wake them from.
   sandbox-image:
     build:
       context: services/sandbox
       args:
         OPENCODE_VERSION: ${OPENCODE_VERSION:-2.0.0}
     image: ${SANDBOX_IMAGE:-opencode-sandbox:latest}
-    entrypoint: ["true"]
-    restart: "no"
+    entrypoint: ["sleep", "infinity"]
+    restart: unless-stopped
+    network_mode: none
+    mem_limit: 16m
     logging: *logging
 
   # The gateway's database. Not published and not on any sandbox network.

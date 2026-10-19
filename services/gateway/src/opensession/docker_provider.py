@@ -145,7 +145,19 @@ class DockerProvider(SandboxProvider):
     # ---- SandboxProvider ------------------------------------------------------
 
     async def start(self, ref, env, env_digest, config_tar) -> None:
-        await asyncio.to_thread(self._start, ref, env, env_digest, config_tar)
+        try:
+            await asyncio.to_thread(self._start, ref, env, env_digest, config_tar)
+        except NotFound as e:
+            # Usually `docker image prune` (e.g. Dokploy's daily Docker cleanup) removed
+            # the image once no container used it; the next deploy builds it again.
+            if "image" in str(e).lower():
+                raise SandboxError(
+                    f"the sandbox image {self.cfg.image} is missing on the server; redeploy to rebuild it "
+                    "(and turn off Dokploy's daily Docker cleanup, which deletes it)"
+                ) from e
+            raise SandboxError(f"docker: {e}") from e
+        except APIError as e:
+            raise SandboxError(f"docker: {e}") from e
         await self._notify_networks()
 
     async def endpoint(self, ref: SandboxRef) -> Endpoint | None:

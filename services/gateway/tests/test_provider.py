@@ -157,3 +157,19 @@ def test_startup_failure_is_reported():
 def test_unknown_provider_is_refused():
     with pytest.raises(ValueError, match="unknown SANDBOX_PROVIDER"):
         make_provider(SandboxConfig(provider="nope"))
+
+
+def test_missing_docker_image_is_a_sandbox_error(monkeypatch):
+    # Dokploy's daily cleanup prunes stopped sandboxes and then their image: waking
+    # one must answer with a clear error, not an unhandled 500 (no CORS headers).
+    from opensession.docker_provider import DockerProvider, NotFound
+    from opensession.provider import SandboxRef
+
+    p = DockerProvider(SandboxConfig(), docker_client=object())
+
+    def gone(*_):
+        raise NotFound("No such image: opencode-sandbox:latest")
+
+    monkeypatch.setattr(p, "_start", gone)
+    with pytest.raises(SandboxError, match="image opencode-sandbox:latest is missing"):
+        asyncio.run(p.start(SandboxRef("alice", "a", "k"), {}, None, None))
