@@ -99,7 +99,11 @@ def test_render_files_matches_opencode_v2_layout():
 def test_cloud_sandboxes_get_the_browser_and_the_network_tool():
     oc = json.loads(agentconfig.render_files(AgentConfig())["opencode.json"])
     assert oc["mcp"]["servers"] == {
-        "opensession": {"type": "local", "command": ["node", "/usr/local/lib/opensession/opensession-mcp.mjs"]},
+        "opensession": {
+            "type": "local",
+            "command": ["node", "/usr/local/lib/opensession/opensession-mcp.mjs"],
+            "codemode": False,
+        },
         "sandbox": {"type": "local", "command": ["opensession-browser"]},
     }
     # Asking for a domain always waits for the user, whatever the user's own rules say.

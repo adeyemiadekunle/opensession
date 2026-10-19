@@ -278,7 +278,11 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True, model_proxy: dict[str,
     servers: dict[str, dict] = {}
     if cloud:
         # Built into the sandbox image; a user's server with the same name replaces it.
-        servers[USER_MCP] = {"type": "local", "command": ["node", "/usr/local/lib/opensession/opensession-mcp.mjs"]}
+        servers[USER_MCP] = {
+            "type": "local",
+            "command": ["node", "/usr/local/lib/opensession/opensession-mcp.mjs"],
+            "codemode": False,  # approval cards need the tool's input, not an execute script
+        }
         if cfg.browser:
             servers[BROWSER_MCP] = {"type": "local", "command": ["opensession-browser"]}
     if cfg.mcp:

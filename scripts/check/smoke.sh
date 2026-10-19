@@ -95,6 +95,9 @@ check "alice -> example.com via proxy" "*connect=403" "$(probe alice https://exa
 check "alice -> cloud metadata" "http=403*" "$(probe alice http://169.254.169.254/latest/meta-data/)"
 check "alice -> npm registry" "http=200*" "$(probe alice https://registry.npmjs.org/left-pad)"
 check "alice -> api.anthropic.com" "*connect=200" "$(probe alice https://api.anthropic.com/v1/models)"
+for domain in ui.shadcn.com fonts.googleapis.com fonts.gstatic.com; do
+  check "alice -> $domain" "*connect=200" "$(probe alice "https://$domain")"
+done
 
 echo "== per-user domains"
 check "alice allows example.com" 200 "$(api PUT alice /egress/domains '{"domains":["example.com"]}')"
@@ -118,6 +121,8 @@ echo "== browser"
 [[ "$CFG" == *opensession-browser* && "$CFG" == *opensession_request_access* ]] && ok "browser and user tools configured" || bad "opencode.json: $CFG"
 NET=$(docker exec "$(sandbox_of alice)" sh -c 'printf "%s\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}" | node /usr/local/lib/opensession/opensession-mcp.mjs')
 [[ "$NET" == *request_access* && "$NET" == *hand_over* ]] && ok "user tools answer" || bad "user tools: $NET"
+docker exec -i "$(sandbox_of alice)" node --input-type=module < scripts/check/requests.mjs
+ok "agent access and hand-over tools wait for approval and expose their inputs"
 # The browser runs in its own container beside the sandbox (SANDBOX_BROWSER=container).
 B=$(browser_of alice)
 [ -n "$B" ] && ok "browser container runs beside the sandbox" || bad "no browser container: $(docker ps -a --format '{{.Names}} {{.Status}}' | grep ocbr- | head -3)"
