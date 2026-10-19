@@ -33,6 +33,7 @@ apiw() { # apiw METHOD USER WORKSPACE PATH [JSON]
 }
 body_has() { grep -q -- "$1" /tmp/os_body; }
 sandbox_of() { docker ps -q --filter label=oc.managed=true --filter "label=oc.user=$1" | head -n1; }
+browser_of() { docker ps -q --filter label=oc.browser-of --filter "label=oc.user=$1" | head -n1; }
 probe() { # probe USER CURL_ARGS... -> "http=X connect=Y"
   local c; c=$(sandbox_of "$1"); shift
   docker exec "$c" curl -s -m 10 -o /dev/null -w 'http=%{http_code} connect=%{http_connect}' "$@" || true
@@ -41,9 +42,9 @@ probe() { # probe USER CURL_ARGS... -> "http=X connect=Y"
 cleanup() {
   echo "== cleanup"
   OPENSESSION_ENV_FILE=.env.smoke docker compose --env-file .env.smoke down -v >/dev/null 2>&1 || true
-  ids=$(docker ps -aq --filter label=oc.managed=true); [ -n "$ids" ] && docker rm -f $ids >/dev/null || true
+  ids=$(docker ps -aq --filter label=oc.managed=true; docker ps -aq --filter label=oc.browser-of); [ -n "$ids" ] && docker rm -f $ids >/dev/null || true
   nets=$(docker network ls -q --filter label=oc.managed=true); [ -n "$nets" ] && docker network rm $nets >/dev/null || true
-  vols=$(docker volume ls -q | grep -E '^oc(ws|st)-' || true); [ -n "$vols" ] && docker volume rm $vols >/dev/null || true
+  vols=$(docker volume ls -q | grep -E '^oc(ws|st|bv)-' || true); [ -n "$vols" ] && docker volume rm $vols >/dev/null || true
   rm -f .env.smoke
 }
 on_error() { # a command failed under set -e: say which, with the gateway's last log lines
@@ -117,10 +118,18 @@ echo "== browser"
 [[ "$CFG" == *opensession-browser* && "$CFG" == *opensession_request_access* ]] && ok "browser and user tools configured" || bad "opencode.json: $CFG"
 NET=$(docker exec "$(sandbox_of alice)" sh -c 'printf "%s\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}" | node /usr/local/lib/opensession/opensession-mcp.mjs')
 [[ "$NET" == *request_access* && "$NET" == *hand_over* ]] && ok "user tools answer" || bad "user tools: $NET"
-BROWSER=$(docker exec "$(sandbox_of alice)" sh -c 'opensession-browser </dev/null >/dev/null 2>&1; curl -fs http://127.0.0.1:9222/json/version' || true)
-[[ "$BROWSER" == *Chrome* ]] && ok "Chromium starts in the sandbox" || bad "browser: $BROWSER $(docker exec "$(sandbox_of alice)" tail -c 600 /home/agent/.cache/browser.log 2>&1)"
-VIEW=$(docker exec "$(sandbox_of alice)" sh -c 'a=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9223/health); b=$(curl -s -o /dev/null -w "%{http_code}" -u "opencode:$OPENCODE_SERVER_PASSWORD" http://127.0.0.1:9223/health); echo "$a $b"')
-[[ "$VIEW" == "401 200" ]] && ok "browser view needs the sandbox password ($VIEW)" || bad "browser view: $VIEW $(docker exec "$(sandbox_of alice)" tail -c 400 /home/agent/.cache/browser-view.log 2>&1)"
+# The browser runs in its own container beside the sandbox (SANDBOX_BROWSER=container).
+B=$(browser_of alice)
+[ -n "$B" ] && ok "browser container runs beside the sandbox" || bad "no browser container: $(docker ps -a --format '{{.Names}} {{.Status}}' | grep ocbr- | head -3)"
+BROWSER=$(docker exec "$B" sh -c 'opensession-chromium && curl -fs http://127.0.0.1:9222/json/version' || true)
+[[ "$BROWSER" == *Chrome* ]] && ok "Chromium starts in the browser container" || bad "browser: $BROWSER $(docker exec "$B" tail -c 600 /home/agent/.cache/browser.log 2>&1)"
+VIEW=$(docker exec "$(sandbox_of alice)" sh -c 'a=$(curl -s --noproxy "*" -o /dev/null -w "%{http_code}" http://opensession-browser:9223/health); b=$(curl -s --noproxy "*" -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $OPENCODE_SERVER_PASSWORD" http://opensession-browser:9223/health); echo "$a $b"')
+[[ "$VIEW" == "401 200" ]] && ok "browser view needs the sandbox password ($VIEW)" || bad "browser view: $VIEW $(docker logs --tail 20 "$B" 2>&1 | tr "\n" " ")"
+bprobe() { docker exec "$B" curl -s -m 10 -o /dev/null -w 'http=%{http_code} connect=%{http_connect}' "$@" || true; }
+check "browser -> sandbox localhost via relay" "http=401*" "$(bprobe -x http://opensession-sandbox:9224 http://localhost:4096/api/health)"
+check "browser -> allowed domain via relay" "*connect=200" "$(bprobe -x http://opensession-sandbox:9224 https://example.com)"
+check "browser -> other domain via relay" "*connect=403" "$(bprobe -x http://opensession-sandbox:9224 https://example.org)"
+check "browser -> internet without the relay" "http=000*" "$(bprobe https://example.com)"
 check "browser view ticket" 200 "$(api POST alice /browser/ticket)"
 check "secret stored" 200 "$(api PUT alice /secrets/DOCS_TOKEN '{"value":"smoke-value"}')"
 check "literal token in MCP refused" 422 "$(api PUT alice /agent-config '{"mcp":{"x":{"type":"remote","url":"https://x.dev","headers":{"Authorization":"Bearer sk-abcdefghijklmnopqrstuvwx"}}}}')"

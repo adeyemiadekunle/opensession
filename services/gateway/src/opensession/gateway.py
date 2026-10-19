@@ -41,6 +41,7 @@ and re-run scripts/check when upgrading.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import time
@@ -178,7 +179,8 @@ def config_warnings(app) -> list[dict]:
 
 PtyId = Annotated[str, Path(pattern=r"^pty_[A-Za-z0-9]{1,80}$")]
 TERMINAL_TICKET_SECONDS = 60
-# Browser live view: the sandbox's browser-view server (services/sandbox/browser-view.mjs).
+# Browser live view: the browser-view server (services/sandbox/browser-view.mjs) in the
+# sandbox's browser container, or in the sandbox itself (SANDBOX_BROWSER=sandbox, E2B).
 BROWSER_VIEW_PORT = 9223
 BROWSER_TICKET = "browser"
 
@@ -1351,8 +1353,10 @@ def create_app(
             await websocket.close(code=4403)
             return
 
-        def url(entry, mgr: SandboxManager) -> str:
-            return sandbox_ws_url(pv.port_url(entry.url, mgr.cfg.port, BROWSER_VIEW_PORT)) + "/cdp"
+        async def url(entry, mgr: SandboxManager) -> str:
+            # Its own container (Docker's default), or the sandbox's port 9223.
+            base = await mgr.browser_url(held[0], held[1])
+            return sandbox_ws_url(base or pv.port_url(entry.url, mgr.cfg.port, BROWSER_VIEW_PORT)) + "/cdp"
 
         await relay_socket(websocket, held[0], held[1], url)
 
@@ -1382,7 +1386,10 @@ def create_app(
         await websocket.accept()
         try:
             async with mgr.lease_entry(user, ws_id) as entry:  # stays awake while connected
-                upstream = await websocket.app.state.ws_connect(upstream_url(entry, mgr), mgr.auth_headers(entry))
+                target = upstream_url(entry, mgr)
+                if inspect.isawaitable(target):
+                    target = await target
+                upstream = await websocket.app.state.ws_connect(target, mgr.auth_headers(entry))
                 try:
                     async def down():
                         async for msg in upstream:

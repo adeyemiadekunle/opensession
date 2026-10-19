@@ -18,7 +18,9 @@ RUN apt-get update \
 # Browser for the agent: Playwright MCP attached to one Chromium per sandbox
 # (chromium.sh, browser-mcp.sh), its live view for the Browser card (browser-view.mjs,
 # port 9223), and the tools that need the user: asking for a domain and handing the
-# browser over for a sign-in (opensession-mcp.mjs).
+# browser over for a sign-in (opensession-mcp.mjs). With Docker, Chromium runs in a
+# second container from this same image (command: browser-view.mjs), which reaches
+# the sandbox's localhost and the egress proxy through localhost-relay.mjs (port 9224).
 # Chromium's system libraries and fonts come with --with-deps.
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
@@ -28,7 +30,7 @@ RUN mkdir -p /opt/opensession/browser \
  && rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache
 COPY --chmod=755 chromium.sh /usr/local/bin/opensession-chromium
 COPY --chmod=755 browser-mcp.sh /usr/local/bin/opensession-browser
-COPY --chmod=644 opensession-mcp.mjs browser-view.mjs /usr/local/lib/opensession/
+COPY --chmod=644 opensession-mcp.mjs browser-view.mjs localhost-relay.mjs /usr/local/lib/opensession/
 
 # Non-root user; /workspace is the persistent volume mounted by the orchestrator.
 # The node base image already has a "node" user with UID 1000; rename it to "agent".

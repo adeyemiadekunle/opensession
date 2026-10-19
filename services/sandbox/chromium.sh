@@ -8,6 +8,9 @@
 # - Network: through the sandbox's egress proxy when it has one (Docker: Squid, so only
 #   allowed domains load); Chromium never sends localhost through a proxy, so the
 #   project's own dev servers always load. E2B applies its allowlist itself.
+# - In its own container (OPENSESSION_BROWSER_PROXY set, see localhost-relay.mjs): every
+#   request, localhost included, goes through the sandbox's relay, which serves
+#   localhost from the sandbox and passes the rest to the same egress proxy.
 # - --no-sandbox: the container is the sandbox; Chromium's own needs privileges it lacks.
 set -eu
 PORT="${OPENSESSION_BROWSER_PORT:-9222}"
@@ -22,7 +25,9 @@ if [ -z "$CHROME" ]; then
   CHROME="$(ls -d "${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"/chromium-*/chrome-linux*/chrome 2>/dev/null | sort | tail -n1)"
 fi
 [ -x "$CHROME" ] || { echo "opensession-chromium: Chromium not found" >&2; exit 1; }
-PROXY="${HTTPS_PROXY:-${https_proxy:-}}"
+PROXY="${OPENSESSION_BROWSER_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
+# "<-loopback>" stops Chromium from skipping the proxy for localhost.
+BYPASS="${OPENSESSION_BROWSER_PROXY:+<-loopback>}"
 mkdir -p "$PROFILE" "$(dirname "$LOG")"
 # A crash leaves a lock behind that would stop the next start.
 rm -f "$PROFILE/SingletonLock" "$PROFILE/SingletonSocket" "$PROFILE/SingletonCookie"
@@ -32,6 +37,7 @@ nohup "$CHROME" \
   --remote-debugging-address=127.0.0.1 --remote-debugging-port="$PORT" \
   --user-data-dir="$PROFILE" --window-size=1280,800 \
   ${PROXY:+--proxy-server="$PROXY"} \
+  ${BYPASS:+--proxy-bypass-list="$BYPASS"} \
   about:blank >"$LOG" 2>&1 &
 i=0
 until running; do
