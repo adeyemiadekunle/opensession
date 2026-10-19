@@ -871,6 +871,7 @@ export function Workspace({
             client={client}
             sessionId={active}
             permissions={perms}
+            messages={messages}
             forms={forms}
             onDone={refresh}
             allowDomain={allowDomain}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FormRequest, OpenSessionClient, PermissionRequest } from "@opensession/api-client";
+import type { FormRequest, Message, OpenSessionClient, PermissionRequest } from "@opensession/api-client";
 import { errText } from "./hooks";
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
@@ -30,6 +30,7 @@ export function Requests({
   client,
   sessionId,
   permissions,
+  messages,
   forms,
   onDone,
   allowDomain,
@@ -38,6 +39,7 @@ export function Requests({
   client: OpenSessionClient;
   sessionId: string;
   permissions: PermissionRequest[];
+  messages: Message[];
   forms: FormRequest[];
   onDone: () => void;
   /** Cloud: adds a domain to the sandbox's allowed domains (for the agent's network requests). */
@@ -70,6 +72,7 @@ export function Requests({
           <HandOverCard
             key={p.id}
             request={p}
+            input={requestInput(p, messages)}
             onOpen={openBrowser}
             onDone={() => act(() => client.replyPermission(sessionId, p.id, "once"))}
             onCant={() => act(() => client.replyPermission(sessionId, p.id, "reject", "The user could not do it."))}
@@ -78,6 +81,7 @@ export function Requests({
           <DomainCard
             key={p.id}
             request={p}
+            input={requestInput(p, messages)}
             onAllow={(domain) =>
               act(async () => {
                 await allowDomain(domain); // open first, so the agent's retry works
@@ -154,6 +158,16 @@ const NETWORK_ACTION = "opensession_request_access";
 const HAND_OVER_ACTION = "opensession_hand_over";
 const DOMAIN_RE = /^(?=.{1,253}$)(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
+function requestInput(request: PermissionRequest, messages: Message[]): Record<string, unknown> {
+  const source = request.source as { type?: string; messageID?: string; id?: string } | undefined;
+  const message = source?.type === "tool" && source.messageID && source.id ? messages.find((m) => m.id === source.messageID) : undefined;
+  const part = message?.content?.find((p) => p.type === "tool" && p.id === source?.id && p.name === request.action);
+  const input =
+    (request.metadata as { input?: unknown } | undefined)?.input ??
+    (part?.state as { input?: unknown } | undefined)?.input;
+  return input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+}
+
 /** "https://Docs.Stripe.com/api" -> "docs.stripe.com"; null for anything that isn't a host name. */
 export function requestedDomain(input: unknown): string | null {
   const d = String(input ?? "")
@@ -167,11 +181,17 @@ export function requestedDomain(input: unknown): string | null {
 }
 
 /** Design (approvals): the agent asks to reach a domain; allowing it adds the domain for this account. */
-function DomainCard({ request, onAllow, onDeny }: { request: PermissionRequest; onAllow: (domain: string) => void; onDeny: () => void }) {
-  const input = ((request.metadata as { input?: { domain?: unknown; reason?: unknown } } | undefined)?.input ?? {}) as {
-    domain?: unknown;
-    reason?: unknown;
-  };
+function DomainCard({
+  request,
+  input,
+  onAllow,
+  onDeny,
+}: {
+  request: PermissionRequest;
+  input: Record<string, unknown>;
+  onAllow: (domain: string) => void;
+  onDeny: () => void;
+}) {
   const domain = requestedDomain(input.domain);
   const reason = typeof input.reason === "string" ? input.reason.trim() : "";
   return (
@@ -211,16 +231,17 @@ function DomainCard({ request, onAllow, onDeny }: { request: PermissionRequest; 
 /** The agent hands the browser over for a step only the user can do (sign in, 2FA, CAPTCHA). */
 function HandOverCard({
   request,
+  input,
   onOpen,
   onDone,
   onCant,
 }: {
   request: PermissionRequest;
+  input: Record<string, unknown>;
   onOpen?: () => void;
   onDone: () => void;
   onCant: () => void;
 }) {
-  const input = ((request.metadata as { input?: { task?: unknown; url?: unknown } } | undefined)?.input ?? {}) as { task?: unknown; url?: unknown };
   const task = typeof input.task === "string" && input.task.trim() ? input.task.trim() : "The agent needs you to do a step in the browser.";
   const url = typeof input.url === "string" ? input.url.trim() : "";
   return (

@@ -27,3 +27,8 @@ registry.npmjs.org
 registry.yarnpkg.com
 pypi.org
 files.pythonhosted.org
+
+# UI components and fonts
+ui.shadcn.com
+fonts.googleapis.com
+fonts.gstatic.com
