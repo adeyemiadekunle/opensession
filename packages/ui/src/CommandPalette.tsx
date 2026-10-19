@@ -41,7 +41,7 @@ export function CommandPalette({ open, onClose, items }: { open: boolean; onClos
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-center pt-24">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 max-sm:pt-16">
       <div aria-hidden="true" className="absolute inset-0 bg-[rgba(10,10,9,0.55)]" onClick={onClose} />
       <div
         role="dialog"
@@ -80,9 +80,9 @@ export function CommandPalette({ open, onClose, items }: { open: boolean; onClos
               }
             }}
           />
-          <kbd className="rounded-md border border-input px-1.5 py-0.5 font-mono text-[11px] text-faint">Esc</kbd>
+          <kbd className="rounded-md border border-input px-1.5 py-0.5 font-mono text-[11px] text-faint [@media(pointer:coarse)]:hidden">Esc</kbd>
         </div>
-        <div id="palette-results" role="listbox" aria-label="Results" className="flex max-h-[420px] flex-col overflow-auto p-1.5">
+        <div id="palette-results" role="listbox" aria-label="Results" className="flex max-h-[min(420px,60dvh)] flex-col overflow-auto p-1.5">
           {shown.length === 0 ? <div className="px-2.5 py-6 text-center text-muted-foreground">No results. Try a session name or an action.</div> : null}
           {shown.map((item, i) => (
             <div key={item.id}>
@@ -103,7 +103,8 @@ export function CommandPalette({ open, onClose, items }: { open: boolean; onClos
             </div>
           ))}
         </div>
-        <div className="flex h-9 items-center gap-3.5 border-t border-border px-3.5 text-xs text-faint">
+        {/* Keyboard hints; not on touch screens. */}
+        <div className="flex h-9 items-center gap-3.5 border-t border-border px-3.5 text-xs text-faint [@media(pointer:coarse)]:hidden">
           <span>↑↓ move</span>
           <span>Enter open</span>
           <span className="ml-auto">Ctrl K</span>

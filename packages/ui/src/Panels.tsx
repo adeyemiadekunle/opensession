@@ -52,6 +52,13 @@ export function FilesPanel({
   const [err, setErr] = useState<string | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const treeRef = useRef<HTMLElement>(null);
+  // The divider between the tree and the file: drag it (mouse or touch) or use the arrow keys.
+  const [treeWidth, setTreeWidth] = usePref<number>(PREF.filesTree, 168);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const clampTree = (w: number) => {
+    const total = splitRef.current?.getBoundingClientRect().width ?? 600;
+    return Math.round(Math.min(Math.max(w, 96), Math.max(96, total - 96)));
+  };
   const [editor] = usePref<EditorPrefs>(PREF.editor, EDITOR_DEFAULTS);
 
   const loadDir = useCallback(
@@ -252,9 +259,9 @@ export function FilesPanel({
           </Button>
         ) : null}
       </PanelHeader>
-      <div className="flex min-h-0 flex-1">
+      <div ref={splitRef} className="flex min-h-0 flex-1">
         {showTree ? (
-          <aside aria-label="File tree" ref={treeRef} className="flex w-[168px] shrink-0 flex-col gap-1.5 overflow-hidden border-r border-border p-2">
+          <aside aria-label="File tree" ref={treeRef} style={{ width: clampTree(treeWidth) }} className="flex shrink-0 flex-col gap-1.5 overflow-hidden p-2">
             <label className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-faint">
               <NamedIcon name="search" className="size-3" />
               <input
@@ -305,6 +312,42 @@ export function FilesPanel({
             </ul>
             {err ? <div className="py-1.5 font-sans text-xs text-destructive">{err}</div> : null}
           </aside>
+        ) : null}
+        {showTree ? (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the file tree"
+            aria-valuenow={clampTree(treeWidth)}
+            tabIndex={0}
+            className="group relative w-px shrink-0 cursor-col-resize touch-none bg-border outline-none focus-visible:bg-primary"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const start = e.clientX;
+              const from = clampTree(treeWidth);
+              const el = e.currentTarget;
+              const move = (ev: PointerEvent) => setTreeWidth(clampTree(from + ev.clientX - start));
+              const up = () => {
+                el.removeEventListener("pointermove", move);
+                el.removeEventListener("pointerup", up);
+                el.removeEventListener("pointercancel", up);
+              };
+              el.addEventListener("pointermove", move);
+              el.addEventListener("pointerup", up);
+              el.addEventListener("pointercancel", up);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                e.preventDefault();
+                setTreeWidth(clampTree(clampTree(treeWidth) + (e.key === "ArrowLeft" ? -16 : 16)));
+              }
+            }}
+          >
+            {/* A wider, invisible grab area (fingers), with a handle that shows on hover and drag. */}
+            <span className="absolute inset-y-0 -left-2 -right-2" />
+            <span className="absolute left-1/2 top-1/2 h-9 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm bg-input group-hover:bg-primary group-active:bg-primary" />
+          </div>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
           <nav aria-label="File path" className="flex h-[30px] shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-3 font-mono text-xs text-muted-foreground">
