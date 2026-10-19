@@ -409,7 +409,10 @@ export function MessageView({
     );
   }
   if (m.type === "system" || m.type === "synthetic") {
-    return <div className="text-muted-foreground">{m.text}</div>;
+    // Injected context (MCP guidance, env, instruction updates) arrives as a system
+    // message whose text is the raw model-facing payload; description is the label
+    // meant for people. Show the label, not the raw XML-ish block.
+    return <div className="text-muted-foreground">{m.description || m.text}</div>;
   }
   return null;
 }
