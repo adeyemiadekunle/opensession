@@ -86,6 +86,11 @@ class SandboxConfig:
     mem_limit: str = "2g"
     cpus: float = 1.0
     pids_limit: int = 512
+    # The agent's browser: "container" runs Chromium in its own container beside each
+    # sandbox, on the sandbox's network (so the same egress rules apply); "sandbox" runs
+    # it inside the sandbox. E2B always runs it inside.
+    browser: str = "container"
+    browser_mem_limit: str = "1g"
     # -- e2b provider ---------------------------------------------------------
     e2b_template: str = "opensession-sandbox"  # built by scripts/e2b/build_template.py
     e2b_timeout: int = 3600  # E2B pauses a sandbox the gateway stopped extending (safety net)
@@ -118,6 +123,8 @@ class SandboxConfig:
             mem_limit=e("SANDBOX_MEM_LIMIT", cls.mem_limit),
             cpus=float(e("SANDBOX_CPUS", cls.cpus)),
             pids_limit=int(e("SANDBOX_PIDS_LIMIT", cls.pids_limit)),
+            browser=e("SANDBOX_BROWSER", cls.browser),
+            browser_mem_limit=e("SANDBOX_BROWSER_MEM_LIMIT", cls.browser_mem_limit),
             e2b_template=e("E2B_TEMPLATE", cls.e2b_template),
             e2b_timeout=int(e("E2B_SANDBOX_TIMEOUT", cls.e2b_timeout)),
             e2b_user=e("E2B_SANDBOX_USER", cls.e2b_user),
@@ -165,6 +172,11 @@ class SandboxProvider(ABC):
     @abstractmethod
     async def endpoint(self, ref: SandboxRef) -> Endpoint | None:
         """URL and password of a running sandbox; None if it is not running (yet)."""
+
+    async def browser_url(self, ref: SandboxRef) -> str | None:
+        """Base URL of the browser live-view server (browser-view.mjs) when the browser
+        runs outside the sandbox; None means it runs in the sandbox, on its port 9223."""
+        return None
 
     @abstractmethod
     async def startup_failure(self, ref: SandboxRef) -> str | None:

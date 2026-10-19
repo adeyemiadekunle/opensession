@@ -263,7 +263,8 @@ def sandbox_transport(seen):
 def make_manager(**cfg_kw):
     seen = []
     docker = FakeDocker()
-    cfg = SandboxConfig(start_timeout=3, **cfg_kw)
+    # One container per sandbox unless a test asks for the browser container.
+    cfg = SandboxConfig(start_timeout=3, **{"browser": "sandbox", **cfg_kw})
 
     def factory(url, password):
         # Same auth wiring as production, but over the fake transport.

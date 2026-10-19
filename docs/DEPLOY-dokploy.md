@@ -18,9 +18,11 @@ both domains HTTPS.
 ## What you need
 
 - A VPS with Ubuntu 24.04 and Dokploy installed. Size it for the sandboxes: each
-  awake project gets up to `SANDBOX_MEM_LIMIT` (2 GB, which includes the agent's
-  browser and the sandbox's 512 MB `/tmp`) and `SANDBOX_CPUS` (1 CPU). 4 vCPU / 8 GB
-  runs about 2-3 awake projects next to Dokploy and the platform services (about
+  awake project gets up to `SANDBOX_MEM_LIMIT` (2 GB, including the sandbox's 512 MB
+  `/tmp`) and `SANDBOX_CPUS` (1 CPU), plus up to `SANDBOX_BROWSER_MEM_LIMIT` (1 GB)
+  for the agent's browser, which runs in its own container beside the sandbox.
+  Chromium only starts when the agent or the Browser card uses it. 4 vCPU / 8 GB
+  runs about 2 awake projects next to Dokploy and the platform services (about
   2.5 GB of memory caps); asleep projects only use disk. The sandbox image is a few
   GB (toolchains and Chromium).
 - Two DNS names pointing at the VPS (A records): `app.example.com` (web app) and
@@ -247,11 +249,20 @@ prune` instead.
 
 ## The agent's browser and internet access
 
-Each sandbox has a Chromium the agent drives (Playwright MCP) and the Browser card
-shows live. The sandbox reaches the internet only through the egress proxy: the
-platform list in `services/egress/allowlist.txt` (model providers, GitHub, package
-registries) plus each user's own domains (Settings > General). When the agent needs
-another domain it asks in the chat; allowing it adds the domain for that user.
+Each awake project has a Chromium the agent drives (Playwright MCP) and the Browser
+card shows live. It runs in its own container (`ocbr-<id>`, from the sandbox image)
+next to the sandbox, on the sandbox's private network only, so a crash or a memory-
+hungry page can't take the sandbox down. It is created when the project wakes and
+removed when it sleeps; sign-ins are kept on its own volume (`ocbv-<id>`). Its
+requests all go through a relay in the sandbox (port 9224): `localhost` is served
+from the sandbox, so the project's dev servers load, and everything else goes on to
+the egress proxy, so the browser reaches exactly what the sandbox can.
+`SANDBOX_BROWSER=sandbox` runs Chromium inside the sandbox instead, as before.
+
+The sandbox reaches the internet only through the egress proxy: the platform list in
+`services/egress/allowlist.txt` (model providers, GitHub, package registries) plus
+each user's own domains (Settings > General). When the agent needs another domain it
+asks in the chat; allowing it adds the domain for that user.
 
 ## Previews on their own domain (optional)
 

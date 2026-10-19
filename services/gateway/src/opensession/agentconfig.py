@@ -154,8 +154,9 @@ class AgentConfig(BaseModel):
     default_agent: str | None = Field(default=None, pattern=ID_RE, max_length=64)
     # The agent's own `git commit` / `git push` wait for the user's approval.
     git_approval: bool = True
-    # Cloud: a browser in the sandbox the agent can drive (Playwright MCP; see
-    # services/sandbox/browser-mcp.sh). It reaches only the allowed domains.
+    # Cloud: a browser the agent can drive (Playwright MCP; see services/sandbox/
+    # browser-mcp.sh), in its own container beside the sandbox or in the sandbox.
+    # It reaches only the allowed domains.
     browser: bool = True
 
     @field_validator("mcp")

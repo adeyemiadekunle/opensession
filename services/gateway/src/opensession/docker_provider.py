@@ -27,6 +27,14 @@ Network isolation
   them nothing in a sandbox resolves and model calls fail with "getaddrinfo
   ETIMEOUT opensession-gateway". The network, and so those IPs, can change on
   every wake, which is why this isn't done once at create time.
+- The agent's browser (SANDBOX_BROWSER=container, the default) runs in a second
+  container, "ocbr-<key>", from the same image: Chromium and its live-view server
+  (browser-view.mjs, port 9223) and nothing else, with its profile on its own volume.
+  It joins the sandbox's network only, so it has no route out either: every request
+  goes through the sandbox's relay (localhost-relay.mjs, port 9224), which serves
+  localhost from the sandbox and passes the rest to the egress proxy. The egress
+  rules (by source subnet) therefore apply to it as to the sandbox. It is created on
+  every start and removed on every stop, so it is never left on an old network.
 - Docker's default address pools allow only ~30 bridge networks. For more running
   sandboxes, configure "default-address-pools" in daemon.json with small (/24 or
   /28) subnets.
@@ -47,6 +55,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import secrets
 import socket
 from typing import Any
@@ -74,9 +83,15 @@ except ImportError:  # pragma: no cover
         pass
 
 
+log = logging.getLogger("opensession.docker")
+
 LABEL = "oc.managed"
 PROXY_ALIAS = "opensession-egress"  # the egress proxy's name inside every sandbox network
 GATEWAY_ALIAS = "opensession-gateway"  # the gateway's (modelproxy.py: sandboxes call models through it)
+BROWSER_ALIAS = "opensession-browser"  # the browser container, seen from its sandbox
+SANDBOX_ALIAS = "opensession-sandbox"  # the sandbox, seen from its browser container
+BROWSER_VIEW_PORT = 9223  # browser-view.mjs
+BROWSER_RELAY_PORT = 9224  # localhost-relay.mjs, in the sandbox
 
 
 class DockerProvider(SandboxProvider):
@@ -139,8 +154,20 @@ class DockerProvider(SandboxProvider):
     def state_volume(key: str) -> str:
         return f"ocst-{key}"
 
+    @staticmethod
+    def browser_name(key: str) -> str:
+        return f"ocbr-{key}"
+
+    @staticmethod
+    def browser_volume(key: str) -> str:
+        return f"ocbv-{key}"
+
     def net_name(self, key: str) -> str:
         return f"{self.cfg.network_prefix}-{key}"
+
+    @property
+    def browser_outside(self) -> bool:
+        return self.cfg.browser == "container"
 
     # ---- SandboxProvider ------------------------------------------------------
 
@@ -169,6 +196,11 @@ class DockerProvider(SandboxProvider):
             return None
         return Endpoint(f"http://{ip}:{self.cfg.port}", self._password(c))
 
+    async def browser_url(self, ref: SandboxRef) -> str | None:
+        if not self.browser_outside:
+            return None
+        return await asyncio.to_thread(self._browser_url, ref)
+
     async def startup_failure(self, ref: SandboxRef) -> str | None:
         c = await asyncio.to_thread(self._get_container, self.container_name(ref.key))
         if c is None:
@@ -193,6 +225,7 @@ class DockerProvider(SandboxProvider):
         return await asyncio.to_thread(self._list, user, include_stopped)
 
     async def stop(self, ref: SandboxRef) -> None:
+        await asyncio.to_thread(self._remove_browser, ref.key)
         c = await asyncio.to_thread(self._get_container, self.container_name(ref.key))
         if c is not None:
             await asyncio.to_thread(c.stop, timeout=10)
@@ -200,13 +233,14 @@ class DockerProvider(SandboxProvider):
         await self._notify_networks()
 
     async def destroy(self, ref: SandboxRef, delete_data: bool) -> None:
+        await asyncio.to_thread(self._remove_browser, ref.key)
         c = await asyncio.to_thread(self._get_container, self.container_name(ref.key))
         if c is not None:
             await asyncio.to_thread(c.remove, force=True)
         await asyncio.to_thread(self._teardown_network, self.net_name(ref.key), None)
         await self._notify_networks()
         if delete_data:
-            for vol in (self.workspace_volume(ref.key), self.state_volume(ref.key)):
+            for vol in (self.workspace_volume(ref.key), self.state_volume(ref.key), self.browser_volume(ref.key)):
                 try:
                     await asyncio.to_thread(self._d().volumes.get(vol).remove)
                 except NotFound:
@@ -293,7 +327,11 @@ class DockerProvider(SandboxProvider):
     def _start(self, ref: SandboxRef, env, want: str | None, config_tar: bytes | None) -> None:
         net_name = self.net_name(ref.key)
         c = self._get_container(self.container_name(ref.key))
-        if c is not None and want is not None and self._label(c, "oc.env") != want:
+        if c is not None and (
+            (want is not None and self._label(c, "oc.env") != want)
+            # Created with the browser on the other side (SANDBOX_BROWSER changed).
+            or self._label(c, "oc.browser") != self._browser_label
+        ):
             # Created with an older env (API key changed): recreate, keeping the volumes.
             c.remove(force=True)
             c = None
@@ -303,20 +341,104 @@ class DockerProvider(SandboxProvider):
                 # Running already (e.g. gateway restarted): make sure we can reach it.
                 self._ensure_network(net_name, ref.user)
                 self._pin_hosts(c, net_name)
+                if self._browser_running(ref.key) is None:
+                    self._start_browser(ref, c, net_name)
                 return
         self._ensure_network(net_name, ref.user)
         if c is None:
-            self._create(ref, env, net_name, config_tar)
+            c = self._create(ref, env, net_name, config_tar)
+        else:
+            try:
+                self._attach(c, net_name, ref.user)
+                c.start()
+                c.reload()
+                self._pin_hosts(c, net_name)
+            except APIError:
+                # e.g. the container still points at a network that was removed while
+                # the gateway was down. Recreate it; the volumes are kept.
+                c.remove(force=True)
+                c = self._create(ref, env, net_name, config_tar)
+        self._start_browser(ref, c, net_name)
+
+    # ---- the browser container (SANDBOX_BROWSER=container) ---------------------------
+
+    @property
+    def _browser_label(self) -> str:
+        return "container" if self.browser_outside else ""
+
+    def _browser_running(self, key: str) -> Any | None:
+        b = self._get_container(self.browser_name(key))
+        if b is None:
+            return None
+        b.reload()
+        return b if b.status == "running" else None
+
+    def _remove_browser(self, key: str) -> None:
+        b = self._get_container(self.browser_name(key))
+        if b is not None:
+            try:
+                b.remove(force=True)
+            except NotFound:
+                pass
+
+    def _start_browser(self, ref: SandboxRef, sandbox: Any, net_name: str) -> None:
+        """(Re)create the sandbox's browser container on its network. A failure leaves the
+        sandbox working without a browser; the Browser card asks again (browser_url)."""
+        if not self.browser_outside:
             return
+        self._remove_browser(ref.key)
+        kwargs: dict[str, Any] = dict(
+            name=self.browser_name(ref.key),
+            entrypoint=["node", "/usr/local/lib/opensession/browser-view.mjs"],
+            network=net_name,
+            environment={
+                # The live-view server takes the sandbox's password (gateway and agent).
+                "OPENCODE_SERVER_PASSWORD": self._password(sandbox),
+                "OPENSESSION_BROWSER_PROXY": f"http://{SANDBOX_ALIAS}:{BROWSER_RELAY_PORT}",
+            },
+            labels={"oc.browser-of": ref.key, "oc.user": ref.user},
+            volumes={self.browser_volume(ref.key): {"bind": "/home/agent/.state", "mode": "rw"}},
+            tmpfs={"/tmp": "size=256m"},
+            mem_limit=self.cfg.browser_mem_limit,
+            nano_cpus=int(self.cfg.cpus * 1_000_000_000),
+            pids_limit=self.cfg.pids_limit,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            restart_policy={"Name": "no"},
+            log_config={"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}},
+        )
+        if self.cfg.runtime:
+            kwargs["runtime"] = self.cfg.runtime
         try:
-            self._attach(c, net_name, ref.user)
-            c.start()
-            self._pin_hosts(c, net_name)
-        except APIError:
-            # e.g. the container still points at a network that was removed while
-            # the gateway was down. Recreate it; the volumes are kept.
-            c.remove(force=True)
-            self._create(ref, env, net_name, config_tar)
+            b = self._d().containers.create(self.cfg.image, **kwargs)
+            b.start()
+            b.reload()
+            sandbox.reload()
+            # No Docker DNS under gVisor: each side gets the other's IP in /etc/hosts.
+            self._pin_hosts(b, net_name, {SANDBOX_ALIAS: self._ip(sandbox, net_name)})
+            self._pin_hosts(sandbox, net_name, {BROWSER_ALIAS: self._ip(b, net_name)})
+        except Exception as e:  # the sandbox itself is fine; don't fail its start
+            log.warning("browser container for %s did not start: %s", ref.key, e)
+            try:
+                self._remove_browser(ref.key)
+            except Exception:
+                pass
+
+    def _browser_url(self, ref: SandboxRef) -> str:
+        """The browser container's live-view URL, starting it again if it went away
+        (e.g. Chromium ran out of memory and took the container with it)."""
+        net_name = self.net_name(ref.key)
+        b = self._browser_running(ref.key)
+        if b is None:
+            sandbox = self._get_running(ref.key)
+            if sandbox is None:
+                raise SandboxError("sandbox is not running")
+            self._start_browser(ref, sandbox, net_name)
+            b = self._browser_running(ref.key)
+        ip = self._ip(b, net_name) if b is not None else ""
+        if not ip:
+            raise SandboxError("the browser container did not start")
+        return f"http://{ip}:{BROWSER_VIEW_PORT}"
 
     def _list(self, user: str | None, include_stopped: bool) -> list[SandboxInfo]:
         labels = [f"{LABEL}=true"] + ([f"oc.user={user}"] if user else [])
@@ -456,7 +578,12 @@ class DockerProvider(SandboxProvider):
             for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
                 env[k] = proxy
             # The gateway is on the sandbox network itself (model calls go to it directly).
-            env["NO_PROXY"] = env["no_proxy"] = f"localhost,127.0.0.1,{GATEWAY_ALIAS}"
+            direct = ["localhost", "127.0.0.1", GATEWAY_ALIAS] + ([BROWSER_ALIAS] if self.browser_outside else [])
+            env["NO_PROXY"] = env["no_proxy"] = ",".join(direct)
+        if self.browser_outside:
+            # browser-mcp.sh connects the agent's browser tools here (localhost-relay.mjs
+            # is started by the entrypoint for the way back).
+            env["OPENSESSION_BROWSER_CDP"] = f"ws://{BROWSER_ALIAS}:{BROWSER_VIEW_PORT}/cdp"
         env["OPENCODE_SERVER_PASSWORD"] = password  # last, so extra_env can't override it
         kwargs: dict[str, Any] = dict(
             name=self.container_name(ref.key),
@@ -467,6 +594,7 @@ class DockerProvider(SandboxProvider):
                 "oc.user": ref.user,
                 "oc.workspace": ref.workspace,
                 "oc.env": env_digest(extra_env),
+                "oc.browser": self._browser_label,
             },
             volumes={
                 self.workspace_volume(ref.key): {"bind": "/workspace", "mode": "rw"},
@@ -494,10 +622,11 @@ class DockerProvider(SandboxProvider):
         self._pin_hosts(c, net_name)
         return c
 
-    def _pin_hosts(self, container: Any, net_name: str) -> None:
-        """Point the gateway and proxy aliases in the sandbox's /etc/hosts at their IPs on
-        its network, replacing earlier entries (the file is a bind mount: rewrite in place)."""
-        hosts = self._alias_hosts(net_name)
+    def _pin_hosts(self, container: Any, net_name: str, extra: dict[str, str] | None = None) -> None:
+        """Point the gateway and proxy aliases (and any extra ones) in a container's
+        /etc/hosts at their IPs on its network, replacing earlier entries (the file is a
+        bind mount: rewrite in place)."""
+        hosts = {**self._alias_hosts(net_name), **{a: ip for a, ip in (extra or {}).items() if ip}}
         if not hosts:
             return
         drop = " ".join(f"-e '[[:space:]]{a}$'" for a in hosts)

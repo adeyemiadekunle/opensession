@@ -175,6 +175,11 @@ class SandboxManager:
             kw["auth"] = httpx.BasicAuth(self.cfg.username, password)
         return httpx.AsyncClient(base_url=url, timeout=httpx.Timeout(30.0), **kw)
 
+    async def browser_url(self, user: str, workspace: str) -> str | None:
+        """Base URL of the sandbox's browser live view when the provider runs the browser
+        in its own container; None when it runs inside the sandbox."""
+        return await self.provider.browser_url(self._ref(user, workspace))
+
     def auth_headers(self, entry: _Entry) -> dict[str, str]:
         """How to authenticate to a sandbox's OpenCode server (e.g. for WebSockets)."""
         if self.cfg.auth == "bearer":
