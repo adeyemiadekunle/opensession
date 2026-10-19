@@ -148,9 +148,11 @@ export function Composer(p: ComposerProps) {
           </Icon>
         </button>
       </div>
-      <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+      {/* min-w-0 on the row and the pickers lets them shrink (their labels truncate) on phones
+          instead of pushing the effort picker off the edge. */}
+      <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
         <Select value={p.agent} onValueChange={p.onAgent}>
-          <SelectTrigger variant="ghost" aria-label="Agent" className="text-foreground">
+          <SelectTrigger variant="ghost" aria-label="Agent" className="shrink-0 text-foreground">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -163,7 +165,7 @@ export function Composer(p: ComposerProps) {
         </Select>
         <span className="flex-1" />
         <Select value={p.model ? modelKey(p.model) : ""} onValueChange={p.onModel}>
-          <SelectTrigger variant="ghost" aria-label="Model" className="text-foreground">
+          <SelectTrigger variant="ghost" aria-label="Model" className="min-w-0 text-foreground">
             <SelectValue placeholder="Model" />
           </SelectTrigger>
           <SelectContent>
@@ -183,7 +185,7 @@ export function Composer(p: ComposerProps) {
         </Select>
         {variants.length ? (
           <Select value={p.variant || "__default"} onValueChange={(v) => p.onVariant(v === "__default" ? "" : v)}>
-            <SelectTrigger variant="ghost" aria-label="Effort">
+            <SelectTrigger variant="ghost" aria-label="Effort" className="min-w-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

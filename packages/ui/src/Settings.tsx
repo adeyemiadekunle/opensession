@@ -118,7 +118,7 @@ export function CloudSettings({
       ),
     },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} aside="Applies to your cloud account" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} />;
 }
 
 /** Desktop app, this computer: the same settings pages, with keys and agent setup stored here. */
@@ -171,7 +171,7 @@ export function LocalSettings({
     { id: "git", title: "Git and review", description: "Which git actions ask you first.", body: <GitApprovalCard store={store} /> },
     { id: "shortcuts", title: "Keyboard shortcuts", description: "Shortcuts that work in the workspace.", body: <ShortcutsCard /> },
   ];
-  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} aside="Applies to this computer" />;
+  return <SettingsShell pages={pages} onBack={onBack} initial={initial} section={section} onSection={onSection} />;
 }
 
 function agentPage(body: ReactNode, description: string): SettingsPage[] {

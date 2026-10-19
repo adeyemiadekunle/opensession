@@ -241,15 +241,6 @@ export function CloudApp({ client, path, go, account, sectionsAfter, desktop, on
         account={account ? { ...account, items: menu } : { name: "Cloud account", items: menu }}
         notice={notice}
         onOpenSettings={() => go("/settings")}
-        noModels={
-          <>
-            Add a model API key in{" "}
-            <button className="border-0 bg-transparent p-0 text-primary hover:underline underline-offset-2" onClick={() => go("/settings/models")}>
-              Settings
-            </button>{" "}
-            to get started.
-          </>
-        }
       />
     </SandboxGate>
   );

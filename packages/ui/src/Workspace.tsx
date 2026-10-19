@@ -147,7 +147,14 @@ export function Workspace({
   notice,
   onOpenSettings,
 }: WorkspaceProps) {
-  const models = useAsync<Model[]>(() => client.listModels(), [client]);
+  // A sandbox that just woke can list no models until OpenCode has loaded its catalog.
+  const models = useAsync<Model[]>(async () => {
+    for (let i = 0; ; i++) {
+      const list = await client.listModels();
+      if (list.length || i >= 10) return list;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }, [client]);
   const commands = useAsync<CommandInfo[]>(() => client.listCommands().catch(() => []), [client]);
   const agentChoices = useMemo(
     () => [...new Set([...BUILTIN_AGENTS.filter((a) => a.mode === "primary").map((a) => a.id), ...agents])],
@@ -232,7 +239,7 @@ export function Workspace({
 
   const modelList = models.data ?? [];
   const chosen = useMemo(
-    () => modelList.find((m) => modelKey(m) === model) ?? modelList[0],
+    () => modelList.find((m) => modelKey(m) === model) ?? modelList.find((m) => m.providerID === "opencode") ?? modelList[0],
     [modelList, model],
   );
 
@@ -347,13 +354,14 @@ export function Workspace({
   const stepFind = (d: number) => setFindPos((p) => (findCount ? (p + d + findCount) % findCount : 0));
   // The drawer closes once a session is picked, and when the window widens again.
   useEffect(() => setDrawerOpen(false), [active, narrow]);
-  // The drawer takes focus when it opens (its search field) and hands it back to the toggle when it
-  // closes, so keyboard users don't lose their place behind the overlay.
+  // The drawer takes focus when it opens and hands it back to the toggle when it closes, so
+  // keyboard users don't lose their place behind the overlay. It focuses the drawer itself, not
+  // its search field, which would pop up the on-screen keyboard on phones.
   const drawerToggle = useRef<HTMLButtonElement>(null);
-  const drawerSearch = useRef<HTMLInputElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const drawerWasOpen = useRef(false);
   useEffect(() => {
-    if (drawerOpen) drawerSearch.current?.focus();
+    if (drawerOpen) drawerRef.current?.focus({ preventScroll: true });
     else if (drawerWasOpen.current && document.activeElement === document.body) drawerToggle.current?.focus();
     drawerWasOpen.current = drawerOpen;
   }, [drawerOpen]);
@@ -916,9 +924,11 @@ export function Workspace({
         ) : null}
         {showSidebar ? (
           <aside
+            ref={drawerRef}
+            tabIndex={-1}
             aria-label="Sidebar"
             className={cn(
-              "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar",
+              "flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar outline-none",
               narrow && "absolute inset-y-0 left-0 z-30 w-[min(300px,85vw)] shadow-pop",
             )}
           >
@@ -926,14 +936,13 @@ export function Workspace({
               <label className="mt-2.5 flex h-[34px] shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5 text-faint">
                 <NamedIcon name="search" className="size-3.5" />
                 <input
-                  ref={drawerSearch}
                   className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-foreground outline-none placeholder:text-faint"
                   placeholder="Search"
                   aria-label="Search sessions"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
-                <Kbd className="whitespace-nowrap border-0 px-0 text-[11px]">Ctrl K</Kbd>
+                {narrow ? null : <Kbd className="whitespace-nowrap border-0 px-0 text-[11px]">Ctrl K</Kbd>}
               </label>
               <Button variant="ghost" className="h-8 shrink-0 justify-start gap-2.5 px-2 text-sm font-normal text-foreground" onClick={openNew}>
                 <NamedIcon name="plus" className="size-[15px]" />
@@ -1025,7 +1034,6 @@ export function Workspace({
               {sectionsAfter.map((sec) => (
                 <SectionView key={sec.id} section={sec} />
               ))}
-              {models.data && !modelList.length ? <div className="rounded-md bg-sunken px-2.5 py-2 text-[13px] text-muted-foreground">{noModels ?? "No models available."}</div> : null}
               {models.error ? <div className="py-1.5 text-[13px] text-destructive">{models.error}</div> : null}
             </div>
             {account ? <AccountFooter account={account} onShortcuts={() => setShortcutsOpen(true)} /> : null}
@@ -1333,7 +1341,7 @@ export function Workspace({
           </>
         }
       >
-        {modelList.length ? null : <div className="rounded-md bg-sunken px-2.5 py-2 text-[13px] text-muted-foreground">{noModels ?? "No models available."}</div>}
+        {!models.data || modelList.length ? null : <div className="rounded-md bg-sunken px-2.5 py-2 text-[13px] text-muted-foreground">{noModels ?? "No models available."}</div>}
         {moveToCloud ? (
           <fieldset className="flex flex-col gap-1.5 text-xs text-muted-foreground">
             <legend className="mb-1.5">Where it runs</legend>
