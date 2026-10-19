@@ -30,7 +30,7 @@ RUN mkdir -p /opt/opensession/browser \
  && rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache
 COPY --chmod=755 chromium.sh /usr/local/bin/opensession-chromium
 COPY --chmod=755 browser-mcp.sh /usr/local/bin/opensession-browser
-COPY --chmod=644 opensession-mcp.mjs browser-view.mjs localhost-relay.mjs /usr/local/lib/opensession/
+COPY --chmod=755 opensession-mcp.mjs browser-view.mjs localhost-relay.mjs /usr/local/lib/opensession/
 
 # Non-root user; /workspace is the persistent volume mounted by the orchestrator.
 # The node base image already has a "node" user with UID 1000; rename it to "agent".
