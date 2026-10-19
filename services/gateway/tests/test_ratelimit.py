@@ -63,3 +63,18 @@ def test_limits_can_be_turned_off_and_show_on_the_admin_page(monkeypatch):
     monkeypatch.setenv("RATE_LIMITS", "0")
     with client(monkeypatch, tokens=1) as c:
         assert {c.post("/tokens", json={"name": "t"}, headers=BOB).status_code for _ in range(3)} == {201}
+
+
+def test_unexpected_errors_carry_cors_headers_and_the_reason(monkeypatch):
+    # Starlette's own 500 has no CORS headers: the web app would see only "Load failed".
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173")
+    app = create_app(manager=make_manager()[0], reaper=False, keystore=None, github=None)
+
+    async def broken(*_a, **_k):
+        raise RuntimeError("boom")
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        app.state.sandboxes.status = broken
+        r = c.get("/workspace", headers={**ALICE, "Origin": "http://localhost:5173"})
+        assert r.status_code == 500 and "RuntimeError: boom" in r.json()["detail"]
+        assert r.headers["access-control-allow-origin"] == "http://localhost:5173"
