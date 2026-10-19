@@ -130,6 +130,8 @@ check "browser -> sandbox localhost via relay" "http=401*" "$(bprobe -x http://o
 check "browser -> allowed domain via relay" "*connect=200" "$(bprobe -x http://opensession-sandbox:9224 https://example.com)"
 check "browser -> other domain via relay" "*connect=403" "$(bprobe -x http://opensession-sandbox:9224 https://example.org)"
 check "browser -> internet without the relay" "http=000*" "$(bprobe https://example.com)"
+docker exec -i "$(sandbox_of alice)" node --input-type=module < scripts/check/browser.mjs
+ok "agent browser tools navigate and read sandbox localhost through the companion browser"
 check "browser view ticket" 200 "$(api POST alice /browser/ticket)"
 check "secret stored" 200 "$(api PUT alice /secrets/DOCS_TOKEN '{"value":"smoke-value"}')"
 check "literal token in MCP refused" 422 "$(api PUT alice /agent-config '{"mcp":{"x":{"type":"remote","url":"https://x.dev","headers":{"Authorization":"Bearer sk-abcdefghijklmnopqrstuvwx"}}}}')"
