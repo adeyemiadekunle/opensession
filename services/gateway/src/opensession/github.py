@@ -118,6 +118,13 @@ class GitHubApp:
     def install_url(self, state: str) -> str:
         return f"{self.cfg.web_url}/apps/{self.cfg.slug}/installations/new?state={state}"
 
+    def authorize_url(self, state: str) -> str:
+        """Sign in with the app (no install step). GitHub sends the person to the app's callback
+        URL with a code, which lists the installations they can reach: for an app that is
+        already installed, whose configure page doesn't send them back unless the app has
+        "Redirect on update" set."""
+        return f"{self.cfg.web_url}/login/oauth/authorize?client_id={self.cfg.client_id}&state={state}"
+
     async def _req(self, method: str, path: str, token: str | None = None, *, bearer_app: bool = False, **kw) -> httpx.Response:
         headers = {"accept": "application/vnd.github+json", "x-github-api-version": "2022-11-28"}
         if bearer_app:

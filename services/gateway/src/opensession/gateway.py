@@ -870,6 +870,13 @@ def create_app(
         gh = require_github(request)
         return {"url": gh.install_url(gh.make_state(user))}
 
+    @app.post("/github/link")
+    async def github_link(request: Request, user: str = Depends(current_user)):
+        """URL that links installations the person already has (the app installed earlier,
+        or from GitHub), by signing in with the app; the callback records all of them."""
+        gh = require_github(request)
+        return {"url": gh.authorize_url(gh.make_state(user))}
+
     @app.get("/github/callback")
     async def github_callback(
         request: Request,
@@ -878,25 +885,30 @@ def create_app(
         installation_id: int | None = None,
         setup_action: str = "",
     ):
-        """Where GitHub sends the user after installing the app (no OpenSession auth
-        header here: the signed state identifies the user)."""
+        """Where GitHub sends the user after installing the app, or after signing in with it
+        to link installations they already have (no installation_id then). No OpenSession
+        auth header here: the signed state identifies the user."""
         from fastapi.responses import RedirectResponse
 
         gh = require_github(request)
         try:
             user = gh.verify_state(state)
-            if not code or installation_id is None:
+            if not code:
                 raise GitHubError("GitHub did not send the installation details; connect again", 400)
             user_token = await gh.exchange_code(code)
-            if installation_id not in await gh.user_installation_ids(user_token):
+            reachable = await gh.user_installation_ids(user_token)
+            if installation_id is not None and installation_id not in reachable:
                 raise GitHubError("that installation does not belong to your GitHub account", 403)
-            account = await gh.installation_account(installation_id)
-            await asyncio.to_thread(request.app.state.users.add_installation, user, installation_id, account)
+            if installation_id is None and not reachable:
+                raise GitHubError("the app isn't installed on your GitHub account yet: use Connect GitHub", 404)
+            for iid in [installation_id] if installation_id is not None else sorted(reachable):
+                account = await gh.installation_account(iid)
+                await asyncio.to_thread(request.app.state.users.add_installation, user, iid, account)
         except GitHubError as e:
             from urllib.parse import quote
 
-            return RedirectResponse(f"{WEB_URL}/settings?github=error&reason={quote(str(e))}", 302)
-        return RedirectResponse(f"{WEB_URL}/settings?github=connected", 302)
+            return RedirectResponse(f"{WEB_URL}/settings/connectors?github=error&reason={quote(str(e))}", 302)
+        return RedirectResponse(f"{WEB_URL}/settings/connectors?github=connected", 302)
 
     @app.delete("/github/installations/{installation_id}", status_code=204)
     async def github_forget(installation_id: int, request: Request, user: str = Depends(current_user)):

@@ -190,6 +190,10 @@ export class CloudClient extends OpenCodeClient {
   async githubConnectUrl(): Promise<string> {
     return (await this.http.post("/github/connect")).url;
   }
+  /** URL to sign in with the app and link installations that already exist (installed earlier or from GitHub). */
+  async githubLinkUrl(): Promise<string> {
+    return (await this.http.post("/github/link")).url;
+  }
   githubRepos(): Promise<GithubRepo[]> {
     return this.http.get("/github/repos");
   }
