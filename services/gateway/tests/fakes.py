@@ -240,7 +240,7 @@ def sandbox_transport(seen):
         if request.url.path == "/api/session/active":
             busy = request.url.host in BUSY_HOSTS
             return httpx.Response(200, json={"data": {"ses_1": {"status": "busy"}} if busy else {}})
-        if request.url.path == "/api/health":
+        if request.url.path in ("/api/health", "/api/info"):
             return httpx.Response(200, json={"healthy": True, "host": request.url.host})
         if request.url.path == "/api/session" and request.method == "POST":
             return httpx.Response(200, json={"data": {"id": "ses" + request.url.host.replace(".", "x")}})
@@ -253,6 +253,11 @@ def sandbox_transport(seen):
                 {"id": "claude-x", "providerID": "anthropic", "name": "Claude X",
                  "settings": {"apiKey": "sk-ant-SECRET"}, "variants": [{"id": "high", "settings": {}}]},
                 {"id": "free", "providerID": "opencode", "name": "Free", "settings": {"apiKey": "public"}}]})
+        if request.url.path == "/api/provider":
+            return httpx.Response(200, json={"location": {"directory": "/workspace"}, "data": [
+                {"id": "anthropic", "name": "Anthropic", "settings": {"apiKey": "sk-ant-SECRET", "baseURL": "http://gw"}}]})
+        if request.url.path == "/api/provider/anthropic":
+            return httpx.Response(200, json={"data": {"id": "anthropic", "name": "Anthropic", "settings": {"apiKey": "SECRET"}}})
         if request.url.path == "/api/agent":
             return httpx.Response(200, json={"data": [
                 {"id": "build", "name": "build", "description": "default", "mode": "primary",

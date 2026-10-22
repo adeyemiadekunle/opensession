@@ -2,6 +2,8 @@ interface ImportMetaEnv {
   readonly VITE_OPENCODE_SERVER_MODE?: "none" | "origin"
   readonly VITE_OPENCODE_SERVER_HOST: string
   readonly VITE_OPENCODE_SERVER_PORT: string
+  // OpenSession: a full server URL, e.g. a cloud project behind the gateway (<gateway>/p/<project>).
+  readonly VITE_OPENCODE_SERVER_URL?: string
   readonly VITE_OPENCODE_CHANNEL?: "local" | "dev" | "beta" | "prod"
 
   readonly VITE_SENTRY_DSN?: string

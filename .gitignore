@@ -23,6 +23,7 @@ build/
 # Local config and data
 .env
 .env.local
+.env.*.local
 *.db
 .trash/
 

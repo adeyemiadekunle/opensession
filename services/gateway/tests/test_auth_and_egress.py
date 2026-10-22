@@ -86,6 +86,26 @@ def test_betterauth_mode_requires_a_key():
         Authenticator(AuthConfig(mode="clerk", jwt_key=PEM), None)
 
 
+def test_basic_auth_carries_the_token_as_password(tmp_path):
+    # OpenCode's own apps log in to a server with Basic auth (user "opencode").
+    import base64
+
+    def basic(password, user="opencode"):
+        return {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
+
+    c, _, _ = app_client(tmp_path)
+    with c:
+        tok = c.post("/tokens", json={"name": "web app"}, headers=bearer(session_token())).json()["token"]
+        assert c.get("/me", headers=basic(tok)).json()["via"] == "token"
+        assert c.get("/me", headers=basic(session_token())).json()["via"] == "session"
+        assert c.get("/me", headers=basic(session_token(key=OTHER))).status_code == 401
+        assert c.get("/me", headers=basic("osk_madeup")).status_code == 401
+        assert c.get("/me", headers=basic("")).status_code == 401
+        assert c.get("/me", headers={"Authorization": "Basic %%%"}).status_code == 401  # not base64
+        # still a token: it can't mint more tokens
+        assert c.post("/tokens", json={"name": "x"}, headers=basic(tok)).status_code == 403
+
+
 def test_dev_mode_header(tmp_path):
     c, _, _ = app_client(tmp_path, mode="dev")
     with c:

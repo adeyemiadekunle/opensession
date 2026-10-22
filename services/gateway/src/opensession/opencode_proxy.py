@@ -6,10 +6,14 @@ clients speak the same API as a local `opencode serve`. This module holds the fe
 product rules that still apply (see docs/DESIGN-unified-runtime.md, D1):
 
 - deny: endpoints that conflict with how the gateway manages the sandbox
-  (credentials come from the keystore, debug/migration/server operations, provider
-  settings that carry API keys) and WebSocket endpoints (terminal tickets instead);
-- rewrite: new sessions always live in /workspace and need a model;
-- filter: model and agent lists return display fields only;
+  (credentials come from the keystore, debug/migration/server operations, changes
+  to provider settings or the config) and WebSocket endpoints (terminal tickets
+  instead). Config and providers can still be read: OpenCode's own apps need them;
+- rewrite: new sessions always live in /workspace and need a model, and the default
+  location (GET /api/location without a directory) is /workspace, not OpenCode's
+  home directory (where `opencode serve --service` runs);
+- filter: model and agent lists return display fields only, provider lists without
+  their settings (which can carry API keys);
 - agent work (prompt, command, generate) is refused over the disk limit.
 
 Everything is a pure function of (method, path segments, body) so it can be tested
@@ -19,7 +23,7 @@ without a sandbox.
 from __future__ import annotations
 
 import json
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode
 
 WORKSPACE_DIR = "/workspace"
 
@@ -58,17 +62,21 @@ def _match(segs: list[str], pattern: tuple[str, ...]) -> bool:
     return all(p == "*" or p == s for p, s in zip(pattern, segs))
 
 
-# (path prefix, reason). Checked for every method.
+# Path prefixes refused for every method.
 DENIED: tuple[tuple[tuple[str, ...], str], ...] = (
     (("credential",), "API keys are managed by OpenSession: use /keys"),
     (("integration", "*", "connect"), "API keys are managed by OpenSession: use /keys"),
-    (("provider",), "provider settings carry API keys: use /keys and /p/{project}/api/model"),
-    (("config",), "the sandbox's config is written from your agent setup: use /agent-config"),
     (("debug",), "not available in the cloud"),
     (("experimental", "migration"), "not available in the cloud"),
     (("experimental", "persistent-pty", "handoff"), "not available in the cloud"),
     (("experimental", "persistent-pty", "shutdown"), "not available in the cloud"),
     (("plugin", "update"), "plugins come from your agent setup: use /agent-config"),
+)
+
+# Path prefixes that can be read (GET) but not changed.
+READ_ONLY: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("provider",), "provider settings carry API keys: use /keys"),
+    (("config",), "the sandbox's config is written from your agent setup: use /agent-config"),
 )
 
 # WebSocket endpoints: a browser cannot authenticate them with a header.
@@ -82,6 +90,10 @@ def check(method: str, segs: list[str]) -> None:
     for pattern, reason in DENIED:
         if _match(segs, pattern):
             raise ProxyRefused(403, reason)
+    if method != "GET":
+        for pattern, reason in READ_ONLY:
+            if _match(segs, pattern):
+                raise ProxyRefused(403, reason)
     for pattern in WEBSOCKETS:
         if _match(segs, pattern) and len(segs) == len(pattern):
             raise ProxyRefused(400, "WebSocket endpoint: use POST /terminals/{pty}/ticket, then /terminals/{pty}/connect")
@@ -114,13 +126,27 @@ def rewrite_request(method: str, segs: list[str], body: bytes, allow_opencode_pr
     return json.dumps(payload).encode()
 
 
+def rewrite_query(method: str, segs: list[str], query: str) -> str:
+    """The project is /workspace: asking for the default location (no directory, or an
+    empty one) gets that, so OpenCode's apps open the project instead of $HOME."""
+    if method != "GET" or segs != ["location"]:
+        return query
+    params = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k != "location[directory]"]
+    directory = dict(parse_qsl(query, keep_blank_values=True)).get("location[directory]", "")
+    params.append(("location[directory]", directory or WORKSPACE_DIR))
+    return urlencode(params)
+
+
 def filters_response(method: str, segs: list[str]) -> bool:
-    return method == "GET" and segs in (["model"], ["agent"])
+    return method == "GET" and (segs in (["model"], ["agent"]) or segs[:1] == ["provider"])
 
 
 def filter_response(segs: list[str], body: dict | list, allow_opencode_provider: bool):
     """Model and agent entries carry provider settings (which can include API keys):
-    return display fields only, in OpenCode's own {"data": [...]} shape."""
+    return display fields only, in OpenCode's own {"data": [...]} envelope. Provider
+    entries keep everything but their settings."""
+    if segs[:1] == ["provider"]:
+        return _without_settings(body)
     items = body.get("data", []) if isinstance(body, dict) else body
     out = []
     for m in items if isinstance(items, list) else []:
@@ -134,4 +160,18 @@ def filter_response(segs: list[str], body: dict | list, allow_opencode_provider:
         else:
             item = {k: m[k] for k in ("id", "name", "description", "mode") if k in m}
         out.append(item)
-    return {"data": out}
+    # Keep the rest of the envelope: OpenCode 2.1 answers location-scoped lists as
+    # {"location": ..., "data": [...]} and its client reads `location`.
+    rest = {k: v for k, v in body.items() if k != "data"} if isinstance(body, dict) else {}
+    return {**rest, "data": out}
+
+
+def _without_settings(body):
+    """A provider (or list of providers) with its "settings" (baseURL, apiKey, ...) removed."""
+    if isinstance(body, list):
+        return [_without_settings(x) for x in body]
+    if not isinstance(body, dict):
+        return body
+    if "data" in body:
+        return {**body, "data": _without_settings(body["data"])}
+    return {k: v for k, v in body.items() if k != "settings"}

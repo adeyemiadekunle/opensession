@@ -91,6 +91,10 @@ class _Entry:
     ref: SandboxRef | None = None
 
 
+# Polled until it answers 200 when a sandbox starts.
+READY_PATH = "/api/info"
+
+
 class SandboxManager:
     def __init__(
         self,
@@ -275,11 +279,13 @@ class SandboxManager:
             if ep:
                 client = self._client_factory(ep.url, ep.password)
                 try:
-                    r = await client.get("/api/health", timeout=3.0)
+                    # OpenCode 2.1 has no /api/health; /api/info needs the password, so a
+                    # 200 also proves the gateway can authenticate.
+                    r = await client.get(READY_PATH, timeout=3.0)
                     if r.status_code == 200:
                         now = time.monotonic()
                         return _Entry(client, ep.url, ep.password, now, now, ref=ref)
-                    last = f"HTTP {r.status_code} from /api/health"
+                    last = f"HTTP {r.status_code} from {READY_PATH}"
                 except httpx.HTTPError as e:
                     last = str(e) or type(e).__name__
                 await client.aclose()

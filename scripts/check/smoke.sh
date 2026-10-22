@@ -79,16 +79,16 @@ check "gateway answers" 200 "$(api GET alice /providers)"
 check "health" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$G/health")"
 
 echo "== sandboxes"
-check "alice sandbox starts" 200 "$(api GET alice /p/default/api/health)"
-check "bob sandbox starts" 200 "$(api GET bob /p/default/api/health)"
+check "alice sandbox starts" 200 "$(api GET alice /p/default/api/info)"
+check "bob sandbox starts" 200 "$(api GET bob /p/default/api/info)"
 grep -q '"healthy":true' /tmp/os_body && ok "opencode healthy" || bad "opencode health body: $(cat /tmp/os_body)"
-check "unauthenticated request refused" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$G/p/default/api/health")"
+check "unauthenticated request refused" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$G/p/default/api/info")"
 check "path traversal refused" 400 "$(api GET alice '/p/default/api/fs/read/%2E%2E/%2E%2E/etc/passwd')"
 check "credential endpoint refused" 403 "$(api GET alice /p/default/api/credential/x)"
 
 echo "== isolation and egress"
 BOB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(sandbox_of bob)")
-check "alice -> bob sandbox" "http=000*" "$(probe alice --noproxy '*' "http://$BOB_IP:4096/api/health")"
+check "alice -> bob sandbox" "http=000*" "$(probe alice --noproxy '*' "http://$BOB_IP:4096/api/info")"
 check "alice -> gateway API" "http=403*" "$(probe alice --noproxy '*' http://opensession-gateway:8000/providers)"
 check "alice -> internet without proxy" "http=000*" "$(probe alice --noproxy '*' https://example.com)"
 check "alice -> example.com via proxy" "*connect=403" "$(probe alice https://example.com)"
@@ -112,7 +112,7 @@ SETUP='{"skills":[{"id":"secret-word","description":"Use for the secret word","b
  "commands":[{"name":"greet","template":"Reply with HELLO $ARGUMENTS"}],
  "permissions":[{"action":"webfetch","resource":"*","effect":"deny"}],"instructions":"Be brief."}'
 check "save setup" 200 "$(api PUT alice /agent-config "$SETUP")"
-check "sandbox restarts with setup" 200 "$(api GET alice /p/default/api/health)"
+check "sandbox restarts with setup" 200 "$(api GET alice /p/default/api/info)"
 FILES=$(docker exec "$(sandbox_of alice)" sh -c 'cd ~/.config/opencode && find . -type f | sort | tr "\n" " "')
 [[ "$FILES" == *"opensession-skills/secret-word/SKILL.md"* && "$FILES" == *"AGENTS.md"* ]] && ok "config files written" || bad "config files: $FILES"
 CFG=$(docker exec "$(sandbox_of alice)" cat /home/agent/.config/opencode/opencode.json)
@@ -131,7 +131,7 @@ BROWSER=$(docker exec "$B" sh -c 'opensession-chromium && curl -fs http://127.0.
 VIEW=$(docker exec "$(sandbox_of alice)" sh -c 'a=$(curl -s --noproxy "*" -o /dev/null -w "%{http_code}" http://opensession-browser:9223/health); b=$(curl -s --noproxy "*" -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $OPENCODE_SERVER_PASSWORD" http://opensession-browser:9223/health); echo "$a $b"')
 [[ "$VIEW" == "401 200" ]] && ok "browser view needs the sandbox password ($VIEW)" || bad "browser view: $VIEW $(docker logs --tail 20 "$B" 2>&1 | tr "\n" " ")"
 bprobe() { docker exec "$B" curl -s -m 10 -o /dev/null -w 'http=%{http_code} connect=%{http_connect}' "$@" || true; }
-check "browser -> sandbox localhost via relay" "http=401*" "$(bprobe -x http://opensession-sandbox:9224 http://localhost:4096/api/health)"
+check "browser -> sandbox localhost via relay" "http=401*" "$(bprobe -x http://opensession-sandbox:9224 http://localhost:4096/api/info)"
 check "browser -> allowed domain via relay" "*connect=200" "$(bprobe -x http://opensession-sandbox:9224 https://example.com)"
 check "browser -> other domain via relay" "*connect=403" "$(bprobe -x http://opensession-sandbox:9224 https://example.org)"
 check "browser -> internet without the relay" "http=000*" "$(bprobe https://example.com)"
@@ -148,7 +148,7 @@ check "alice's domains are stored in Postgres" 1 "$N"
 echo "== model proxy (keys stay out of sandboxes)"
 FAKE_KEY="sk-ant-smoke-not-a-real-key-0123456789abcdef"
 check "alice saves a key" 200 "$(api PUT alice '/keys/anthropic?validate=false' "{\"api_key\":\"$FAKE_KEY\"}")"
-check "sandbox picks it up" 200 "$(api GET alice /p/default/api/health)"
+check "sandbox picks it up" 200 "$(api GET alice /p/default/api/info)"
 TOKEN=$(docker exec "$(sandbox_of alice)" printenv ANTHROPIC_API_KEY || true)
 [[ "$TOKEN" == osm_* ]] && ok "sandbox holds a stand-in token" || bad "ANTHROPIC_API_KEY in sandbox: ${TOKEN:0:12}..."
 docker exec "$(sandbox_of alice)" sh -c "env; cat /home/agent/.config/opencode/opencode.json" | grep -q -- "$FAKE_KEY" \
@@ -177,15 +177,15 @@ check "put to sleep" 204 "$(api POST alice /workspace/stop)"
 check "status while asleep" 200 "$(api GET alice /workspace)"
 body_has '"state":"sleeping"' && ok "state sleeping" || bad "status: $(cat /tmp/os_body)"
 [ -z "$(sandbox_of alice)" ] && ok "container stopped" || bad "alice still running"
-check "next request wakes it" 200 "$(api GET alice /p/default/api/health)"
+check "next request wakes it" 200 "$(api GET alice /p/default/api/info)"
 check "list sessions" 200 "$(api GET alice /p/default/api/session)"
 body_has "$SID" && ok "session kept across sleep" || bad "session $SID missing: $(head -c 300 /tmp/os_body)"
 check "read file" 200 "$(api GET alice /p/default/api/fs/read/note.txt)"
 body_has kept-across-sleep && ok "files kept across sleep" || bad "note.txt: $(head -c 200 /tmp/os_body)"
 
 echo "== running projects per user (limit 2)"
-check "alice opens p2" 200 "$(api GET alice /p/p2/api/health)"
-check "alice opens p3" 200 "$(api GET alice /p/p3/api/health)"
+check "alice opens p2" 200 "$(api GET alice /p/p2/api/info)"
+check "alice opens p3" 200 "$(api GET alice /p/p3/api/info)"
 check "limits" 200 "$(api GET alice /limits)"
 body_has '"running":\["p2","p3"\]' && ok "least recently used project went to sleep" || bad "limits: $(cat /tmp/os_body)"
 check "default status" 200 "$(api GET alice /workspace)"

@@ -1596,7 +1596,8 @@ def create_app(
         if ocp.is_agent_work(method, segs):
             check_disk(request, ref)
 
-        url = ocp.upstream_path(segs) + (f"?{request.url.query}" if request.url.query else "")
+        query = ocp.rewrite_query(method, segs, request.url.query)
+        url = ocp.upstream_path(segs) + (f"?{query}" if query else "")
         headers = {k: v for k in ocp.FORWARD_REQUEST_HEADERS if (v := request.headers.get(k))}
         stack = AsyncExitStack()
         try:

@@ -39,13 +39,32 @@ def test_upstream_path_quotes_each_segment():
 
 @pytest.mark.parametrize(
     "path",
-    ["credential/abc", "integration/anthropic/connect/key", "provider", "provider/openai", "config",
+    ["credential/abc", "integration/anthropic/connect/key",
      "debug/location", "experimental/migration/v1", "experimental/persistent-pty/handoff", "plugin/update"],
 )
 def test_denied_endpoints(path):
     with pytest.raises(ocp.ProxyRefused) as e:
         ocp.check("GET", path.split("/"))
     assert e.value.status == 403
+
+
+@pytest.mark.parametrize("path", ["provider", "provider/openai", "config", "config/shell"])
+def test_config_and_providers_are_read_only(path):
+    # OpenCode's own apps read them; changes go through /keys and /agent-config.
+    ocp.check("GET", path.split("/"))
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        with pytest.raises(ocp.ProxyRefused) as e:
+            ocp.check(method, path.split("/"))
+        assert e.value.status == 403
+
+
+def test_default_location_is_the_workspace():
+    q = ocp.rewrite_query
+    assert q("GET", ["location"], "") == "location%5Bdirectory%5D=%2Fworkspace"
+    assert q("GET", ["location"], "location%5Bdirectory%5D=") == "location%5Bdirectory%5D=%2Fworkspace"
+    assert q("GET", ["location"], "location%5Bdirectory%5D=%2Fworkspace%2Fsub") == "location%5Bdirectory%5D=%2Fworkspace%2Fsub"
+    assert q("GET", ["vcs"], "location%5Bdirectory%5D=") == "location%5Bdirectory%5D="  # only the default lookup
+    assert q("POST", ["location"], "") == ""
 
 
 def test_websocket_endpoints_point_to_terminal_tickets():
@@ -91,7 +110,7 @@ def test_proxy_forwards_to_the_callers_own_sandbox():
         assert c.get("/p/default/api/health", headers={"X-User-Id": "bob"}).status_code == 200
     hosts = {h for (h, m, p, _) in seen if p == "/api/session/ses_1/message"}
     (alice_host,) = hosts
-    bob_host = {h for (h, m, p, _) in seen if p == "/api/health" and h != alice_host}
+    bob_host = {h for (h, m, p, _) in seen if p == "/api/info" and h != alice_host}
     assert bob_host and alice_host not in bob_host
     assert len(docker.containers.by_name) == 3  # alice/default, alice/api, bob/default
     (auth,) = {a for (h, m, p, a) in seen if p == "/api/session/ses_1/message"}
@@ -134,20 +153,37 @@ def test_proxy_model_and_agent_lists_carry_no_settings():
     assert agents.json() == {"data": [{"id": "build", "name": "build", "description": "default", "mode": "primary"}]}
 
 
+def test_model_and_agent_filters_keep_the_location_envelope():
+    body = {"location": {"directory": "/workspace"}, "data": [{"id": "m", "providerID": "anthropic", "settings": {"apiKey": "k"}}]}
+    out = ocp.filter_response(["model"], body, False)
+    assert out == {"location": {"directory": "/workspace"}, "data": [{"id": "m", "providerID": "anthropic", "variants": []}]}
+
+
+def test_provider_list_drops_settings():
+    c, _, _, _ = proxy_client()
+    with c:
+        r = c.get("/p/default/api/provider", headers=A)
+        one = c.get("/p/default/api/provider/anthropic", headers=A)
+    assert "SECRET" not in r.text and "SECRET" not in one.text
+    assert r.json() == {"location": {"directory": "/workspace"}, "data": [{"id": "anthropic", "name": "Anthropic"}]}
+    assert one.json() == {"data": {"id": "anthropic", "name": "Anthropic"}}
+
+
 def test_proxy_refusals_and_errors():
     c, _, docker, seen = proxy_client()
     with c:
         assert c.get("/p/default/api/health").status_code == 401
         assert c.get("/p/bad%20id/api/health", headers=A).status_code == 400
         assert c.put("/p/default/api/credential/x", json={}, headers=A).status_code == 403
-        assert c.get("/p/default/api/config", headers=A).status_code == 403
+        assert c.patch("/p/default/api/config", json={}, headers=A).status_code == 403
+        assert c.put("/p/default/api/provider/anthropic", json={}, headers=A).status_code == 403
         assert c.get("/p/default/api/pty/pty_1/connect", headers=A).status_code == 400
         assert c.get("/p/default/api/session/%2E%2E/x", headers=A).status_code == 400
         assert c.get("/p/default/api/a%5Cb", headers=A).status_code == 400
         r = c.get("/p/default/api/session/ses_missing", headers=A)
         assert r.status_code == 404 and r.json()["name"] == "NotFoundError"  # OpenCode's own error body
         assert c.get("/p/default/api/boom", headers=A).status_code == 502
-    assert not [p for (_, _, p, _) in seen if "credential" in p or "config" in p]
+    assert not [(m, p) for (_, m, p, _) in seen if "credential" in p or (m != "GET" and ("config" in p or "provider" in p))]
 
 
 def test_proxy_streams_events_and_releases_the_lease():

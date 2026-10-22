@@ -10,11 +10,18 @@ Who is calling? Three ways to authenticate, checked in this order:
    The user id is `sub`. `iss` and `aud` must match AUTH_ISSUER / AUTH_AUDIENCE when
    set (Better Auth sets both to the auth server's base URL).
 3. Dev mode (AUTH_MODE=dev only): "X-User-Id: alice". Never enable in production.
+
+1 and 2 are also accepted as HTTP Basic auth with the token as the password
+("Authorization: Basic base64(opencode:<token>)"): that is how OpenCode's own apps
+(packages/app, the desktop app, the CLI) log in to a server, so they can use
+<gateway>/p/<project> as their server URL unchanged. The user name is ignored.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import os
 import re
 from dataclasses import dataclass
@@ -88,6 +95,8 @@ class Authenticator:
     async def authenticate(self, request: Request) -> Principal:
         header = request.headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
+        if scheme.lower() == "basic" and token:
+            scheme, token = "bearer", _basic_password(token)
         if scheme.lower() == "bearer" and token:
             token = token.strip()
             if token.startswith(TOKEN_PREFIX):
@@ -112,3 +121,12 @@ class Authenticator:
         if not USER_ID_RE.match(user):
             raise HTTPException(400, "invalid user id")
         return Principal(user, via)
+
+
+def _basic_password(credentials: str) -> str:
+    """The password of HTTP Basic credentials ("" if malformed)."""
+    try:
+        decoded = base64.b64decode(credentials.strip(), validate=True).decode()
+    except (binascii.Error, UnicodeDecodeError):
+        return ""
+    return decoded.partition(":")[2]
