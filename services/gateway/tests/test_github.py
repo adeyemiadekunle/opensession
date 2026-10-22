@@ -128,12 +128,12 @@ def test_connect_and_callback_flow():
         state = url.split("state=")[1]
 
         r = c.get("/github/callback", params={"state": state, "code": "good-code", "installation_id": 42}, follow_redirects=False)
-        assert r.status_code == 302 and r.headers["location"].endswith("/settings?github=connected")
+        assert r.status_code == 302 and r.headers["location"].endswith("/settings/connectors?github=connected")
         assert c.get("/github", headers=A).json()["installations"] == [{"installation_id": 42, "account": "alice-gh"}]
 
         # someone else's installation id, a bad code or a forged state are refused
         r = c.get("/github/callback", params={"state": gh.make_state("alice"), "code": "good-code", "installation_id": 77}, follow_redirects=False)
-        assert "github=error" in r.headers["location"]
+        assert "/settings/connectors?github=error" in r.headers["location"]
         r = c.get("/github/callback", params={"state": gh.make_state("alice"), "code": "bad", "installation_id": 42}, follow_redirects=False)
         assert "github=error" in r.headers["location"]
         r = c.get("/github/callback", params={"state": "forged", "code": "good-code", "installation_id": 42}, follow_redirects=False)
