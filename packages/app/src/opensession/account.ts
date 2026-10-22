@@ -45,7 +45,7 @@ export interface Project {
 // the auth server's own message, if any.
 export class AccountError extends Error {
   constructor(
-    readonly reason: "signInFailed" | "signUpFailed" | "socialFailed" | "noToken",
+    readonly reason: "signInFailed" | "signUpFailed" | "socialFailed" | "noToken" | "updateFailed",
     readonly detail?: string,
   ) {
     super(detail ?? reason)
@@ -72,7 +72,7 @@ export function storedAccess(): Access | undefined {
   return undefined
 }
 
-function store(access: Access | undefined) {
+export function store(access: Access | undefined) {
   try {
     if (access) localStorage.setItem(STORAGE_KEY, JSON.stringify(access))
     else localStorage.removeItem(STORAGE_KEY)
@@ -150,6 +150,25 @@ export async function resumeSession(): Promise<Access | undefined> {
   const session = await auth.getSession().catch(() => undefined)
   const user = session?.data?.user
   return user ? connect(user) : undefined
+}
+
+// Profile changes go to the auth server with the browser's Better Auth session (cookie);
+// the gateway's access token is unaffected.
+
+export async function updateName(name: string) {
+  const result = await auth.updateUser({ name })
+  if (result.error) throw new AccountError("updateFailed", result.error.message)
+}
+
+export async function changeEmail(newEmail: string) {
+  const result = await auth.changeEmail({ newEmail })
+  if (result.error) throw new AccountError("updateFailed", result.error.message)
+}
+
+/** Also signs out the account's other browser sessions. */
+export async function changePassword(currentPassword: string, newPassword: string) {
+  const result = await auth.changePassword({ currentPassword, newPassword, revokeOtherSessions: true })
+  if (result.error) throw new AccountError("updateFailed", result.error.message)
 }
 
 export async function signOut(access: Access | undefined) {

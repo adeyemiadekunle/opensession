@@ -12,6 +12,12 @@ export const auth = betterAuth({
   database: new Pool({ connectionString: config.databaseURL }),
   trustedOrigins: config.trustedOrigins,
   emailAndPassword: { enabled: true },
+  user: {
+    // There is no email service yet, so no address is ever verified, and Better Auth lets an
+    // unverified address change at once. Once verification emails exist, require them here
+    // (sendChangeEmailConfirmation) instead.
+    changeEmail: { enabled: true, updateEmailWithoutVerification: true },
+  },
   socialProviders: {
     ...(config.github && { github: config.github }),
     ...(config.google && { google: config.google }),

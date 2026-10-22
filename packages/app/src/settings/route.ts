@@ -1,4 +1,5 @@
 export type SettingsRootTab =
+  | "profile" // OpenSession: the signed-in account (src/opensession/profile.tsx)
   | "general"
   | "appearance"
   | "notifications"
@@ -47,6 +48,7 @@ export type SettingsHostView = ({ type: "root"; tab: SettingsRootTab } | Setting
 export type SettingsTransientView = Pick<SettingsView, "target" | "searchActivation">
 
 const rootTabs: Record<SettingsRootTab, true> = {
+  profile: true,
   general: true,
   appearance: true,
   notifications: true,

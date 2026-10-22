@@ -24,6 +24,7 @@ import {
   signOut,
   signUp,
   socialProviders,
+  store,
   storedAccess,
 } from "./account"
 import { Button } from "./ui/button"
@@ -36,9 +37,11 @@ export function OpenSessionGate(props: { children: (servers: ServerConnection.Ht
   // Without a stored token, a Better Auth session may still exist (back from GitHub or
   // Google): check once before showing the sign-in screen.
   const [state, setState] = createStore({ access: stored, checking: !stored })
+  // Keyed on the token alone: a profile change (name, email) must not reload the projects.
   const [servers] = createResource(
-    () => state.access,
-    async (current) => {
+    () => state.access?.token,
+    async () => {
+      const current = state.access!
       try {
         return (await projects(current)).map((project) => projectServer(current, project))
       } catch (error) {
@@ -88,7 +91,19 @@ export function OpenSessionGate(props: { children: (servers: ServerConnection.Ht
       <Match when={servers()}>
         {(list) => (
           <AccountContext.Provider
-            value={{ name: state.access!.name, email: state.access!.email, signOut: () => void leave() }}
+            value={{
+              get name() {
+                return state.access!.name
+              },
+              get email() {
+                return state.access!.email
+              },
+              signOut: () => void leave(),
+              update: (patch) => {
+                setState("access", (current) => current && { ...current, ...patch })
+                store(state.access)
+              },
+            }}
           >
             {props.children(list())}
           </AccountContext.Provider>
@@ -143,6 +158,7 @@ const FAILURE_KEYS = {
   signUpFailed: "opensession.signUp.failed",
   socialFailed: "opensession.social.failed",
   noToken: "opensession.signIn.noToken",
+  updateFailed: "opensession.profile.failed",
 } as const
 
 function SignIn(props: { onSignedIn: (access: Access) => void }) {

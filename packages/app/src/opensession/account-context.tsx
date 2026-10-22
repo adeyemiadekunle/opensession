@@ -4,9 +4,12 @@
 import { createContext, useContext } from "solid-js"
 
 export interface Account {
-  name: string
-  email: string
+  // Reactive: the profile page updates them.
+  readonly name: string
+  readonly email: string
   signOut: () => void
+  /** After a profile change: what the app shows and remembers. */
+  update: (patch: { name?: string; email?: string }) => void
 }
 
 export const AccountContext = createContext<Account | undefined>()

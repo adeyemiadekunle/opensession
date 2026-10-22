@@ -2,6 +2,11 @@ import { additionalIcons, additionalIconViewBox } from "./icon/additional-icons"
 
 // Consumers center the SVG viewport, so each icon must center its artwork within its viewBox.
 const icons = {
+  // OpenSession: the Profile settings page.
+  user: {
+    viewBox: "0 0 16 16",
+    body: `<circle cx="8" cy="5.5" r="3" stroke="currentColor"/><path d="M2.5 14C2.5 11.2386 4.96243 9.5 8 9.5C11.0376 9.5 13.5 11.2386 13.5 14" stroke="currentColor" stroke-linecap="round"/>`,
+  },
   lock: {
     viewBox: "0 0 16 16",
     body: `<rect x="3.5" y="7" width="9" height="7" rx="1" stroke="currentColor"/><path d="M5 7V5a3 3 0 0 1 6 0v2M8 10v1" stroke="currentColor" stroke-linecap="round"/>`,

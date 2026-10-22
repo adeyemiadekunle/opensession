@@ -49,6 +49,8 @@ import { pageIcons } from "./pages"
 import { revealSettingsSearch } from "./search-reveal"
 import { ExtensionSettingsPages } from "@/runtime/extension/settings-page-view"
 import "@/settings/settings.css"
+import { useAccount } from "@/opensession/account-context"
+import { SettingsProfile } from "@/opensession/profile"
 
 const GuiExtensionsSettings = import.meta.env.DEV
   ? lazy(() =>
@@ -225,6 +227,8 @@ export function SettingsScreen() {
 
 function RootSettings() {
   const language = useLanguage()
+  // OpenSession: signed in to an account, Profile is the first page.
+  const account = useAccount()
   const dialog = useDialog()
   const surface = useSettingsSurface()
   const layout = useLayout()
@@ -276,6 +280,8 @@ function RootSettings() {
     if (view.tab === "experimental" && !experimentalSettingsAvailable) surface.open("general")
 
     if (view.tab === "gui-extensions" && !guiExtensions) surface.open("general")
+
+    if (view.tab === "profile" && !account) surface.open("general")
   })
 
   const addServer = () =>
@@ -284,6 +290,9 @@ function RootSettings() {
     ))
 
   const groups = createMemo<SettingsNavGroup[]>(() => [
+    ...(account
+      ? [{ items: [{ value: "profile", icon: pageIcons.profile, label: language.t("opensession.profile.title") }] }]
+      : []),
     {
       items: [
         ...rootClientTabs.map((item) => ({ ...item, label: language.t(item.label) })),
@@ -355,6 +364,11 @@ function RootSettings() {
       onChange={change}
       mobileAction={multiple() ? <AddServerMenu compact onAddServer={addServer} /> : undefined}
     >
+      <Show when={account}>
+        <Tabs.Content value="profile" class="settings-panel">
+          <SettingsProfile />
+        </Tabs.Content>
+      </Show>
       <Tabs.Content value="general" class="settings-panel">
         <SettingsGeneral />
       </Tabs.Content>
