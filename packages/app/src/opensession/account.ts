@@ -41,6 +41,17 @@ export interface Project {
   state: string
 }
 
+// What went wrong, for the sign-in screen to show in the user's language; `detail` is
+// the auth server's own message, if any.
+export class AccountError extends Error {
+  constructor(
+    readonly reason: "signInFailed" | "signUpFailed" | "noToken",
+    readonly detail?: string,
+  ) {
+    super(detail ?? reason)
+  }
+}
+
 export class GatewayError extends Error {
   constructor(
     readonly status: number,
@@ -92,7 +103,7 @@ function browserName() {
 async function connect(user: { email: string; name?: string | null }): Promise<Access> {
   const jwt = await auth.token()
   const token = jwt.data?.token
-  if (!token) throw new Error(jwt.error?.message ?? "Signed in, but the session token could not be read")
+  if (!token) throw new AccountError("noToken", jwt.error?.message)
   const created = await gateway<{ id: string; token: string }>("/tokens", {
     method: "POST",
     bearer: token,
@@ -105,13 +116,13 @@ async function connect(user: { email: string; name?: string | null }): Promise<A
 
 export async function signIn(email: string, password: string): Promise<Access> {
   const result = await auth.signIn.email({ email, password })
-  if (result.error) throw new Error(result.error.message ?? "Sign-in failed")
+  if (result.error) throw new AccountError("signInFailed", result.error.message)
   return connect(result.data?.user ?? { email })
 }
 
 export async function signUp(name: string, email: string, password: string): Promise<Access> {
   const result = await auth.signUp.email({ name, email, password })
-  if (result.error) throw new Error(result.error.message ?? "Sign-up failed")
+  if (result.error) throw new AccountError("signUpFailed", result.error.message)
   return connect(result.data?.user ?? { email, name })
 }
 

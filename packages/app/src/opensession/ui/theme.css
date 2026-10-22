@@ -1,0 +1,52 @@
+/*
+ * shadcn's color names for OpenSession's shadcn-solid components (this folder), mapped
+ * onto opencode's design tokens. The components keep shadcn's classes (bg-popover,
+ * text-muted-foreground, ...) but take opencode's colors, so they follow every opencode
+ * theme (light, dark, custom) without their own palette. Font and type scale are
+ * opencode's already: its Tailwind theme sets --font-sans and --text-sm, and its radii
+ * (--radius-sm/md/lg) back shadcn's rounded-* classes.
+ *
+ * opencode defines none of these names, so nothing of opencode's own UI changes.
+ */
+@theme inline {
+  --color-background: var(--v2-background-bg-base);
+  --color-foreground: var(--v2-text-text-base);
+  --color-card: var(--v2-background-bg-layer-01);
+  --color-card-foreground: var(--v2-text-text-base);
+  /* Same surface, shadow and highlight as opencode's own menus (@opencode/ui/menu). */
+  --color-popover: var(--v2-background-bg-layer-01);
+  --color-popover-foreground: var(--v2-text-text-base);
+  /* opencode's "contrast" button. */
+  --color-primary: var(--v2-background-bg-contrast);
+  --color-primary-foreground: var(--v2-text-text-contrast);
+  --color-secondary: var(--v2-background-bg-layer-02);
+  --color-secondary-foreground: var(--v2-text-text-base);
+  --color-muted: var(--v2-background-bg-layer-02);
+  --color-muted-foreground: var(--v2-text-text-faint);
+  --color-accent: var(--v2-overlay-simple-overlay-hover);
+  --color-accent-foreground: var(--v2-text-text-base);
+  --color-destructive: var(--v2-state-fg-danger);
+  --color-border: var(--v2-border-border-muted);
+  --color-input: var(--v2-border-border-base);
+  --color-ring: var(--v2-border-border-focus);
+  --color-sidebar: var(--v2-background-bg-deep);
+  --color-sidebar-foreground: var(--v2-text-text-base);
+  --color-sidebar-primary: var(--v2-background-bg-contrast);
+  --color-sidebar-primary-foreground: var(--v2-text-text-contrast);
+  --color-sidebar-accent: var(--v2-background-bg-layer-01);
+  --color-sidebar-accent-foreground: var(--v2-text-text-base);
+  --color-sidebar-border: var(--v2-border-border-muted);
+  --color-sidebar-ring: var(--v2-border-border-focus);
+  --shadow-popover: var(--v2-elevation-floating);
+}
+
+/*
+ * shadcn's base layer sets every element's border color to --color-border; Tailwind's own
+ * default is currentColor. Applied only to the shadcn components (their data-slot names),
+ * so opencode's elements keep their borders. Add a component's prefix when adding it.
+ */
+@layer base {
+  [data-slot^="dropdown-menu"] {
+    border-color: var(--color-border);
+  }
+}

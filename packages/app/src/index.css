@@ -2,6 +2,8 @@
 @import "@opencode/session-ui/styles";
 @import "@opencode/ui/styles/tokens";
 @import "tw-animate-css";
+/* OpenSession: shadcn color names for src/opensession/ui, backed by opencode's tokens. */
+@import "./opensession/ui/theme.css";
 
 @font-face {
   font-family: "JetBrainsMono Nerd Font Mono";

@@ -1046,6 +1046,25 @@ export const dict = {
   "workspace.delete.confirm": "Delete “{{name}}”?",
   "workspace.delete.location": "Location",
   "workspace.delete.button": "Delete worktree",
+
+  // OpenSession (src/opensession)
+  "opensession.signIn.title": "Sign in to OpenSession",
+  "opensession.signUp.title": "Create your OpenSession account",
+  "opensession.signIn.description": "Your projects run in private cloud sandboxes.",
+  "opensession.field.name": "Name",
+  "opensession.field.email": "Email",
+  "opensession.field.password": "Password",
+  "opensession.signIn.submit": "Sign in",
+  "opensession.signUp.submit": "Create account",
+  "opensession.signIn.toSignUp": "New here? Create an account",
+  "opensession.signUp.toSignIn": "Have an account? Sign in",
+  "opensession.signIn.failed": "Sign-in failed",
+  "opensession.signUp.failed": "Sign-up failed",
+  "opensession.signIn.noToken": "Signed in, but the session token could not be read",
+  "opensession.projects.loadFailed": "Couldn't load your projects",
+  "opensession.projects.retry": "Try again",
+  "opensession.account.menu": "Account",
+  "opensession.account.signOut": "Sign out",
 }
 
 export default dict
