@@ -9,6 +9,7 @@ from opensession import db as dbmod
 from opensession.__main__ import TABLES, migrate
 from opensession.keystore import KeyStore, SCHEMA as KEY_SCHEMA
 from opensession.modelproxy import UsageStore, SCHEMA as MODEL_SCHEMA
+from opensession.runs import RunStore, SCHEMA as RUN_SCHEMA
 from opensession.userstore import UserStore, SCHEMA as USER_SCHEMA
 
 MASTER = "k1:" + "A" * 43 + "="
@@ -20,6 +21,7 @@ def _clean(spec: str) -> None:
     d.script(USER_SCHEMA)
     d.script(KEY_SCHEMA)
     d.script(MODEL_SCHEMA)
+    d.script(RUN_SCHEMA)
     with d:
         for t in TABLES:
             d.execute(f"DELETE FROM {t}")
@@ -91,6 +93,25 @@ def test_model_usage_roundtrip(spec):
     assert u.get_limit("u1") == 10**10
     u.set_limit("u1", None)
     assert u.get_limit("u1") is None
+
+
+def test_runstore_roundtrip(spec):
+    s = RunStore(spec)
+    info = {"title": "Fix", "cost": 0.25, "tokens": {"input": 100, "output": 10, "cache": {"read": 50}}}
+    run = s.start("alice", "api", "ses_1", info)
+    assert run["status"] == "running" and run["input_tokens"] == 0
+    s.update_usage(run["id"], {**info, "cost": 1.0, "tokens": {"input": 400, "output": 30, "cache": {"read": 50}}})
+    s.woke(run["id"])
+    (r,) = s.running()
+    assert (r["input_tokens"], r["output_tokens"], r["cost"], r["wake_attempts"]) == (300, 20, 0.75, 1)
+    s.update_usage(run["id"], {**info, "outcome": "succeeded"}, finish=True)
+    assert s.get("alice", run["id"])["outcome"] == "succeeded" and s.running() == []
+    s.start("alice", "api", "ses_2", None)
+    assert s.interrupt("alice", "api", "sandbox put to sleep (idle)") == 1
+    assert [r["status"] for r in s.list("alice", "api")] == ["interrupted", "finished"]
+    s.delete_workspace("alice", "api")
+    assert s.list("alice") == []
+    s.close()
 
 
 def test_migrate_sqlite_to_other(spec, tmp_path):

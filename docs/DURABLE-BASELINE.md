@@ -107,12 +107,24 @@ turn state, automatic resume, at-most-once execution of completed tool calls, a 
 budget, and runs that don't depend on a connected client. One sandbox per workspace means
 one process owns each run, so leases and fencing aren't needed yet.
 
-What remains, in order of value:
+What remained after the baseline, and what was built:
 
-1. **Interrupted side effects.** Wrap `git push`, pull request creation and other
-   external actions so that a retry checks remote state first (the plan's Phase 5).
-2. **Wake sandboxes with unfinished runs.** After a host or gateway restart, start sandboxes
-   whose OpenCode still has a claimed session, instead of waiting for the user.
-3. **Run index and usage per run** in Postgres, mirroring OpenCode's state for listing,
-   notifications and cost; not a second source of truth.
-4. A real-model test of scenario 4 to see what models do with "Tool execution interrupted".
+1. **Interrupted side effects.** Pushes and pull requests are gateway actions (the sandbox
+   holds no GitHub token): the push is never forced, so repeating it is a no-op, and
+   `POST /git/pull-request` now returns the pull request already open for the same branches
+   instead of failing (`github.py create_pull_request`). For everything else the agent runs,
+   cloud sandboxes' `AGENTS.md` tells it to check whether an interrupted call already took
+   effect before running it again (`agentconfig.py INTERRUPTION_GUIDE`).
+2. **Restarting sandboxes with unfinished runs.** The gateway's run tracker (`runs.py`)
+   polls each running sandbox's `GET /api/session/active` every 15 s. A run still marked
+   running whose sandbox stopped without the gateway stopping it gets its sandbox started
+   again (up to 3 times), and OpenCode resumes the turn. Sandboxes the gateway put to sleep
+   are left alone: their runs are marked interrupted.
+3. **Run index and usage per run.** `agent_runs` in the gateway database: status, outcome,
+   and tokens and cost from OpenCode's own session counts, per run. `GET /runs` and
+   `GET /runs/{id}` read it without waking any sandbox.
+
+Still open:
+
+- A real-model test of scenario 4: what models do with "Tool execution interrupted".
+- Per-run usage is OpenCode's count; the model proxy's per-user count isn't tied to runs.

@@ -70,6 +70,7 @@ from . import db as dbmod
 from .github import BRANCH_RE, REPO_RE, GitHubApp, GitHubAppConfig, GitHubError, git_auth_env
 from .egress import EgressRules
 from .userstore import UserStore, UserStoreError
+from .runs import RunStore, RunTracker
 from .keystore import (
     PROVIDERS,
     InvalidKey,
@@ -332,6 +333,7 @@ def create_app(
     http_transport: httpx.AsyncBaseTransport | None = None,
     auth_config: AuthConfig | None = None,
     users: UserStore | None = None,
+    runs: RunStore | None = None,
     egress: EgressRules | None = None,
     github: "GitHubApp | None | object" = _FROM_ENV,
     model_proxy: "mp.ModelProxy | None | object" = _FROM_ENV,
@@ -359,7 +361,14 @@ def create_app(
             )
         mgr.limits = _cached_limits(app.state.users)
         metrics: obs.Metrics = app.state.metrics
-        mgr.on_event = lambda kind, ref, data: metrics.event(kind, ref.user, ref.workspace, **data)
+        app.state.runs = runs or RunStore(_db_path())
+        tracker = RunTracker(app.state.runs, mgr)
+
+        def sandbox_event(kind: str, ref, data: dict) -> None:
+            metrics.event(kind, ref.user, ref.workspace, **data)
+            tracker.on_sandbox_event(kind, ref.user, ref.workspace, data)
+
+        mgr.on_event = sandbox_event
         app.state.http = httpx.AsyncClient(transport=http_transport)
         if model_proxy is _FROM_ENV:
             # Keys stay out of sandboxes when sandboxes can reach the gateway privately.
@@ -382,13 +391,15 @@ def create_app(
         app.state.clone_locks = {}
         app.state.term_tickets = {}
         app.state.previews = pv.Tickets()
-        task = asyncio.create_task(mgr.run_reaper()) if reaper else None
+        # The reaper sleeps idle sandboxes; the run tracker records runs and restarts
+        # sandboxes that stopped mid-run (runs.py).
+        tasks = [asyncio.create_task(mgr.run_reaper()), asyncio.create_task(tracker.run())] if reaper else []
         try:
             if app.state.egress.enabled:
                 await app.state.egress.sync()
             yield
         finally:
-            if task:
+            for task in tasks:
                 task.cancel()
             await mgr.aclose()
             await app.state.http.aclose()
@@ -969,6 +980,26 @@ def create_app(
             raise HTTPException(400, "invalid workspace id")
         await request.app.state.sandboxes.destroy(user, ws_id, delete_data=delete_data)
         await asyncio.to_thread(request.app.state.users.delete_workspace, user, ws_id)
+        await asyncio.to_thread(request.app.state.runs.delete_workspace, user, ws_id)
+
+    @app.get("/runs")
+    async def list_runs(
+        request: Request, workspace: str | None = None, limit: int = 50, user: str = Depends(current_user)
+    ):
+        """The user's agent runs, newest first (all projects, or one): status, outcome and
+        usage. Read from the gateway's database, so no project is woken (runs.py)."""
+        if workspace is not None and not WORKSPACE_ID_RE.match(workspace):
+            raise HTTPException(400, "invalid workspace id")
+        if not 1 <= limit <= 200:
+            raise HTTPException(400, "limit must be between 1 and 200")
+        return await asyncio.to_thread(request.app.state.runs.list, user, workspace, limit)
+
+    @app.get("/runs/{run_id}")
+    async def get_run(run_id: str, request: Request, user: str = Depends(current_user)):
+        run = await asyncio.to_thread(request.app.state.runs.get, user, run_id)
+        if run is None:
+            raise HTTPException(404, "no such run")
+        return run
 
     @app.get("/git")
     async def git_info(
