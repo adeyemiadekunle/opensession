@@ -21,6 +21,8 @@ export const config = {
   databaseURL: required("DATABASE_URL"),
   // Web app and desktop origins allowed to sign in and call this server from a browser.
   trustedOrigins: list(process.env.AUTH_TRUSTED_ORIGINS),
+  // Closed sign-up: existing accounts still sign in, with any method, but no new ones are made.
+  disableSignUp: process.env.AUTH_DISABLE_SIGNUP === "1",
   github: process.env.GITHUB_CLIENT_ID
     ? { clientId: process.env.GITHUB_CLIENT_ID, clientSecret: required("GITHUB_CLIENT_SECRET") }
     : undefined,

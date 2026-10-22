@@ -17,6 +17,7 @@ For the reference version of the same steps, see
 |---|---|---|
 | Dokploy panel | `https://dokploy.<domain>` | Runs and deploys the containers (Docker) |
 | Web app | `https://opensession.<domain>` | The site users sign in to |
+| Sign-in | `https://auth.<domain>` | Accounts and sessions (self-hosted Better Auth) |
 | Gateway (API) | `https://api.<domain>` | Talks to the sandboxes and the database |
 | Sandboxes | created by the gateway | One per user project, each with its own gVisor kernel boundary |
 | Postgres | internal | Users, tokens, encrypted API keys, projects |
@@ -25,8 +26,8 @@ For the reference version of the same steps, see
 Accounts and services you need:
 - A VPS (this one: Contabo Cloud VPS 6, Ubuntu 24.04, 6 vCPU, 12 GB RAM, 200 GB disk).
 - A domain you control (DNS access at your registrar or DNS provider).
-- A Clerk application (production instance) for sign-in.
-- A GitHub account, for the Dokploy app, the OpenSession GitHub App and the sign-in OAuth app.
+- A GitHub account, for the Dokploy app, the OpenSession GitHub App and (optionally)
+  the sign-in OAuth app.
 
 ---
 
@@ -113,6 +114,7 @@ At your DNS provider, add A records pointing at the VPS IP, set to **DNS only**
 |---|---|---|
 | A | `dokploy` | `<IP>` |
 | A | `opensession` | `<IP>` |
+| A | `auth` | `<IP>` |
 | A | `api` | `<IP>` |
 
 Check from your computer:
@@ -123,23 +125,22 @@ It should return the server IP. Propagation can take a few minutes.
 
 ---
 
-## 5. Clerk (sign-in)
+## 5. Sign-in (Better Auth)
 
-In the Clerk dashboard, switch to the **production** instance (top-left switcher).
+Sign-in is the compose file's `auth` service: nothing to set up outside the server.
+It keeps its accounts in the same Postgres and creates its tables on start.
 
-- **Domains:** add `opensession.<domain>`. Add any CNAME records Clerk shows, at DNS only.
-- **API keys:** copy the **Publishable key** (`pk_live_...`) → `VITE_CLERK_PUBLISHABLE_KEY`.
-- **Frontend API URL** (shown on the API keys page). `CLERK_JWKS_URL` is that address plus
-  `/.well-known/jwks.json`.
-- **Your user id:** Users → your account → User ID (`user_...`) → `ADMIN_USER_IDS`.
-- **Sign-up restriction:** Configure → Restrictions → sign-ups **Restricted** (or an
-  allowlist), so only invited people can join.
-- **Google and GitHub sign-in:** Social connections → turn on each provider. Production
-  needs **your own** OAuth credentials; Clerk's shared test credentials do not work in production.
-  - Google: create a Web OAuth client in Google Cloud Console and add Clerk's redirect URI.
+- **Secret:** `openssl rand -base64 32` → `BETTER_AUTH_SECRET`. Changing it later signs
+  everyone out.
+- **Closing sign-up:** after you (and anyone you invite) have signed up, set
+  `AUTH_DISABLE_SIGNUP=1` and deploy. Existing accounts still sign in; nobody new can
+  create one.
+- **Google and GitHub sign-in (optional):** email and password works without them.
+  - Google: create a Web OAuth client in Google Cloud Console with the redirect URI
+    `https://auth.<domain>/api/auth/callback/google` → `GOOGLE_CLIENT_ID`/`_SECRET`.
   - GitHub: create an **OAuth App** (Settings → Developer settings → OAuth Apps, not
-    the GitHub App) with Clerk's redirect URI as the callback. Its homepage is
-    `https://opensession.<domain>`.
+    the GitHub App) with the callback `https://auth.<domain>/api/auth/callback/github`
+    → `GITHUB_CLIENT_ID`/`_SECRET`. Its homepage is `https://opensession.<domain>`.
 
 ---
 
@@ -151,7 +152,7 @@ Do not mix these up. Each has its own name, callback and keys.
 |---|---|---|---|
 | Dokploy's GitHub app | Created from Dokploy's GitHub provider page | Dokploy reads the repo and deploys on push | Dokploy's own address, `https://dokploy.<domain>/...` |
 | OpenSession GitHub App | github.com → Settings → Developer settings → GitHub Apps | Lets users' projects clone, push and open PRs | `https://api.<domain>/github/callback` |
-| OAuth App (sign-in) | GitHub → OAuth Apps | "Sign in with GitHub" in Clerk | Clerk's redirect URI |
+| OAuth App (sign-in) | GitHub → OAuth Apps | "Sign in with GitHub" | `https://auth.<domain>/api/auth/callback/github` |
 
 **Dokploy's app:** open **https://dokploy.<domain>** (not the IP address, because
 the callback is tied to the server domain). Keep GitHub URL as `https://github.com`,
@@ -196,22 +197,26 @@ Generate secrets:
 ```bash
 openssl rand -hex 24                                                              # POSTGRES_PASSWORD
 openssl rand -hex 32                                                              # GITHUB_STATE_SECRET
+openssl rand -base64 32                                                           # BETTER_AUTH_SECRET
 python3 -c "import os,base64;print('k1:'+base64.b64encode(os.urandom(32)).decode())"   # KEYSTORE_MASTER_KEYS
 ```
 
 ```ini
-AUTH_MODE=clerk
-CLERK_JWKS_URL=https://<your-clerk-frontend-api>/.well-known/jwks.json
-VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
-VITE_GATEWAY_URL=https://api.<domain>
+AUTH_MODE=betterauth
+BETTER_AUTH_URL=https://auth.<domain>
+BETTER_AUTH_SECRET=<base64 from openssl>
+AUTH_TRUSTED_ORIGINS=https://opensession.<domain>,app://opensession
+AUTH_ISSUER=https://auth.<domain>
+AUTH_AUDIENCE=https://auth.<domain>
+VITE_OPENSESSION_GATEWAY_URL=https://api.<domain>
+VITE_OPENSESSION_AUTH_URL=https://auth.<domain>
 GATEWAY_PUBLIC_URL=https://api.<domain>
 OPENSESSION_WEB_URL=https://opensession.<domain>
-CORS_ORIGINS=https://opensession.<domain>
-CLERK_AUTHORIZED_PARTIES=https://opensession.<domain>
+CORS_ORIGINS=https://opensession.<domain>,app://opensession
 POSTGRES_PASSWORD=<hex from openssl>
 KEYSTORE_MASTER_KEYS=k1:<base64 from python>
 GITHUB_STATE_SECRET=<hex from openssl>
-ADMIN_USER_IDS=<your Clerk user id>
+ADMIN_USER_IDS=<your user id, step 9>
 GITHUB_APP_ID=<App ID>
 GITHUB_APP_SLUG=<slug, e.g. opensession-kunemi (not the app page URL)>
 GITHUB_APP_CLIENT_ID=<Client ID>
@@ -224,26 +229,35 @@ SANDBOX_MEM_LIMIT=2g
 SANDBOX_CPUS=1.0
 ```
 
-Save `KEYSTORE_MASTER_KEYS` and `POSTGRES_PASSWORD` in a password manager outside the
-server. Losing the master key makes every stored API key unreadable.
+Save `KEYSTORE_MASTER_KEYS`, `BETTER_AUTH_SECRET` and `POSTGRES_PASSWORD` in a password
+manager outside the server. Losing the master key makes every stored API key unreadable.
 
 - **Domains:**
   - `web` → `opensession.<domain>`, container port 80, HTTPS on.
+  - `auth` → `auth.<domain>`, container port 3001, HTTPS on.
   - `gateway` → `api.<domain>`, container port 8000, HTTPS on.
 - **Deploy.** The first build is slow (the sandbox image is several GB).
 
 Check:
 ```bash
 curl https://api.<domain>/health        # {"status":"ok"}
+curl https://auth.<domain>/health       # ok
 ```
-Then open `https://opensession.<domain>` and sign in.
+Then open `https://opensession.<domain>` and create your account.
 
 ---
 
 ## 9. Admin access
 
-Sign up with your own account, copy your Clerk user id (`user_...`) into
-`ADMIN_USER_IDS`, and deploy again. **Admin** then appears in the account menu.
+Sign up with your own account, then find its id in the `db` service's terminal
+(Dokploy → the service → Terminal):
+
+```bash
+psql -U opensession -c 'select id, email from "user"'
+```
+
+Put the id in `ADMIN_USER_IDS` and deploy again. That opens the admin API
+(`/admin/...`); the Admin page is still being moved to the new web app.
 
 ---
 
@@ -256,9 +270,9 @@ Auto-deploy works from Dokploy's settings: a push to `main` redeploys. Otherwise
 - Restarting containers is not enough after a change to build-time values.
 - Sandboxes keep their files across deploys. Sandboxes are recreated only when the
   setup that configures them changes.
-- Desktop app and CLI release: push a `v*` tag (for example `git tag v0.2.0 && git push origin v0.2.0`).
-  The release workflow needs the repository variables `OPENSESSION_WEB_URL`,
-  `OPENSESSION_GATEWAY_URL`, and optionally `OPENCODE_VERSION`.
+- Desktop app release: push a `v*` tag (for example `git tag v0.2.0 && git push origin v0.2.0`).
+  The release workflow uses the repository variables `OPENSESSION_GATEWAY_URL`,
+  `OPENSESSION_AUTH_URL`, and optionally `OPENCODE_VERSION`.
 
 ---
 
@@ -337,9 +351,12 @@ Then press **Deploy** in Dokploy.
 
 | What you see | Cause | Fix |
 |---|---|---|
-| Google or GitHub button errors in production | Clerk's shared test credentials are used in production | Add your own OAuth client ID and secret in Clerk |
-| Can't see **Admin** | Your Clerk user id isn't in `ADMIN_USER_IDS` | Copy the `user_...` id from Clerk Users; set it; deploy |
-| Anyone can sign up | Sign-up not restricted | Clerk → Restrictions → Restricted or allowlist |
+| No Google or GitHub button | Its client ID isn't set | Set `GOOGLE_CLIENT_ID`/`_SECRET` or `GITHUB_CLIENT_ID`/`_SECRET`; deploy |
+| Google or GitHub says redirect URI mismatch | The OAuth app's callback is wrong | Use `https://auth.<domain>/api/auth/callback/<provider>` |
+| Sign-in fails with an origin error | The web address isn't trusted | Add it to `AUTH_TRUSTED_ORIGINS`; deploy |
+| Every API call is 401 after sign-in | Issuer or audience mismatch | `AUTH_ISSUER` and `AUTH_AUDIENCE` must equal `BETTER_AUTH_URL` |
+| Admin API is 403 | Your user id isn't in `ADMIN_USER_IDS` | Look it up (step 9); set it; deploy |
+| Anyone can sign up | Sign-up is open | `AUTH_DISABLE_SIGNUP=1`; deploy |
 
 ### GitHub apps
 

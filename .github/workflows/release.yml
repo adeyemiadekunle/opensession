@@ -1,22 +1,23 @@
 name: Release
 
-# Builds the desktop app (macOS dmg/zip, Windows installer, Linux AppImage/deb) and the
-# CLI (one file, opensession.mjs).
+# Builds the desktop app (packages/desktop: macOS dmg/zip, Windows installer, Linux
+# AppImage/deb/rpm) with the OpenCode CLI it runs bundled inside.
 # - Run it by hand (Actions > Release > Run workflow) to get them as build artifacts.
 # - Push a tag like v0.2.0 to publish a GitHub Release with all of them, under stable
 #   names (OpenSession-mac-arm64.dmg, OpenSession-win-x64.exe, ...), so
 #   https://github.com/<owner>/<repo>/releases/latest/download/<file> is always the
-#   newest: the web app's Download page and the CLI install scripts use those links.
-#   The tag sets the version. With the NPM_TOKEN secret, the CLI is also published to
-#   npm as opensession-cli.
-# Needs the repository variables OPENSESSION_WEB_URL and OPENSESSION_GATEWAY_URL: the
-# servers the apps talk to are compiled in (scripts/build-desktop.mjs). The optional
-# variable OPENCODE_VERSION sets the OpenCode version they install for local mode.
+#   newest. The tag sets the app version.
+# Repository variables:
+#   OPENSESSION_GATEWAY_URL, OPENSESSION_AUTH_URL: the cloud the app signs in to, compiled
+#     into the app. Without them the app is local-only (plain OpenCode).
+#   OPENCODE_VERSION: the bundled OpenCode CLI (default 2.1.2). Use the same as the
+#     server's sandbox image.
 # Code signing is used only when the secrets exist; without them the builds are
 # unsigned (macOS Gatekeeper and Windows SmartScreen warn on first launch):
 #   macOS:   MAC_CSC_LINK (base64 .p12 "Developer ID Application"), MAC_CSC_KEY_PASSWORD,
 #            APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID (notarization)
-#   Windows: WIN_CSC_LINK (base64 .pfx), WIN_CSC_KEY_PASSWORD
+#   Windows: AZURE_TRUSTED_SIGNING_* (script/sign-windows.ps1)
+# The OpenSession CLI is not built here yet: it will be an OpenCode plugin.
 
 on:
   workflow_dispatch:
@@ -25,31 +26,23 @@ on:
 
 permissions:
   contents: write # create the release and upload to it
-  id-token: write # npm provenance
 
 env:
-  OPENSESSION_WEB_URL: ${{ vars.OPENSESSION_WEB_URL }}
-  OPENSESSION_GATEWAY_URL: ${{ vars.OPENSESSION_GATEWAY_URL }}
-  # Optional: the OpenCode version the apps install for local mode (default 2.0.0).
-  # Use the same as the server's OPENCODE_VERSION (the sandbox image).
-  OPENCODE_VERSION: ${{ vars.OPENCODE_VERSION }}
+  OPENCODE_CHANNEL: prod
+  OPENCODE_CLI_VERSION: ${{ vars.OPENCODE_VERSION || '2.1.2' }}
+  VITE_OPENSESSION_GATEWAY_URL: ${{ vars.OPENSESSION_GATEWAY_URL }}
+  VITE_OPENSESSION_AUTH_URL: ${{ vars.OPENSESSION_AUTH_URL }}
 
 jobs:
   # One job creates the release, so the builds below only upload to it.
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Check settings
-        run: |
-          if [[ -z "$OPENSESSION_WEB_URL" || -z "$OPENSESSION_GATEWAY_URL" ]]; then
-            echo "::error::Set the OPENSESSION_WEB_URL and OPENSESSION_GATEWAY_URL repository variables (Settings > Secrets and variables > Actions > Variables)."
-            exit 1
-          fi
       - name: Create the GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "OpenSession $GITHUB_REF_NAME" --generate-notes
 
   desktop:
@@ -57,35 +50,79 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+        settings:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            platform_flag: --mac --arm64
+          - host: macos-13
+            target: x86_64-apple-darwin
+            platform_flag: --mac --x64
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform_flag: --win
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform_flag: --linux
+    runs-on: ${{ matrix.settings.host }}
+    timeout-minutes: 60
+    env:
+      OPENCODE_CLI_TARGET: ${{ matrix.settings.target }}
+      OPENCODE_CLI_DIST: ${{ github.workspace }}/.cli/node_modules/@opencode
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: pnpm
-      - name: Build and package
+          bun-version: 1.4.2
+
+      - name: Version
         shell: bash
+        run: |
+          version=$(node -p 'require("./packages/desktop/package.json").version')
+          [[ "$GITHUB_REF" == refs/tags/v* ]] && version="${GITHUB_REF_NAME#v}"
+          echo "OPENCODE_VERSION=$version" >> "$GITHUB_ENV"
+
+      - run: bun install
+
+      # The published OpenCode CLI for this platform, laid out the way prebuild expects
+      # (OPENCODE_CLI_DIST/<package>/bin/opencode).
+      - name: Fetch the OpenCode CLI
+        shell: bash
+        working-directory: packages/desktop
+        run: |
+          pkg=$(bun -e 'import { getCurrentCli } from "./scripts/utils"; const c = getCurrentCli(); console.log(`${c.package} --os=${c.os} --cpu=${c.cpu}`)')
+          set -- $pkg
+          mkdir -p "$GITHUB_WORKSPACE/.cli"
+          echo '{}' > "$GITHUB_WORKSPACE/.cli/package.json"
+          bun install --no-save --cwd "$GITHUB_WORKSPACE/.cli" "$1@$OPENCODE_CLI_VERSION" "$2" "$3"
+
+      # prebuild (run by bun) copies the CLI into resources/.
+      - name: Build
+        run: bun run build
+        working-directory: packages/desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Package
+        shell: bash
+        working-directory: packages/desktop
+        timeout-minutes: 45
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
         run: |
           if [[ "$RUNNER_OS" == "macOS" && -n "$MAC_CSC_LINK" ]]; then
             export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
-          elif [[ "$RUNNER_OS" == "Windows" && -n "$WIN_CSC_LINK" ]]; then
-            export CSC_LINK="$WIN_CSC_LINK" CSC_KEY_PASSWORD="$WIN_CSC_KEY_PASSWORD"
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
-          args=()
-          [[ "$GITHUB_REF" == refs/tags/v* ]] && args+=(--version "${GITHUB_REF_NAME#v}")
-          node scripts/build-desktop.mjs "${args[@]}"
+          npx electron-builder ${{ matrix.settings.platform_flag }} --publish never \
+            --config electron-builder.config.ts -c.extraMetadata.version="$OPENCODE_VERSION"
 
       - name: Upload to the release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -94,66 +131,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           shopt -s nullglob
-          files=(apps/desktop/release/OpenSession-*.{dmg,zip,exe,AppImage,deb})
+          files=(packages/desktop/dist/OpenSession-*.{dmg,zip,exe,AppImage,deb,rpm})
           [[ ${#files[@]} -gt 0 ]] || { echo "::error::no installers were built"; exit 1; }
           gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
 
       - uses: actions/upload-artifact@v4
         with:
-          name: opensession-desktop-${{ runner.os }}
+          name: opensession-desktop-${{ matrix.settings.target }}
           path: |
-            apps/desktop/release/*.dmg
-            apps/desktop/release/*.zip
-            apps/desktop/release/*.exe
-            apps/desktop/release/*.AppImage
-            apps/desktop/release/*.deb
+            packages/desktop/dist/OpenSession-*
           if-no-files-found: error
-          retention-days: 14
-
-  cli:
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
-      - name: Build
-        run: |
-          version=$(node -p 'require("./apps/cli/package.json").version')
-          [[ "$GITHUB_REF" == refs/tags/v* ]] && version="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-          pnpm install --frozen-lockfile
-          pnpm turbo run build --filter=@opensession/cli^...
-          OPENSESSION_VERSION="$version" pnpm --filter @opensession/cli build
-          mkdir -p out
-          cp apps/cli/dist/index.js out/opensession.mjs
-          cp apps/web/public/install.sh apps/web/public/install.ps1 out/
-          node out/opensession.mjs --version
-
-      - name: Upload to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" out/opensession.mjs out/install.sh out/install.ps1 --clobber
-
-      - name: Publish to npm (opensession-cli)
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [[ -z "$NODE_AUTH_TOKEN" ]]; then
-            echo "::notice::No NPM_TOKEN secret: the CLI is not published to npm (the install scripts still work)."
-            exit 0
-          fi
-          node scripts/pack-cli.mjs "$VERSION" out/npm
-          cd out/npm && npm publish --access public --provenance
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: opensession-cli
-          path: out/
           retention-days: 14

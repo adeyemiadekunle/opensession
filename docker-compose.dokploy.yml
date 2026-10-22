@@ -2,14 +2,15 @@
 #
 # In Dokploy: Create Service > Compose > this repository, compose path
 # docker-compose.dokploy.yml. Put the settings from .env.example in the Environment
-# tab, attach domains in the Domains tab (web -> port 80, gateway -> port 8000), and
+# tab, attach domains in the Domains tab (web -> port 80, gateway -> port 8000,
+# auth -> port 3001), and
 # run scripts/vps/setup-host.sh on the server once first (gVisor, network pools).
 #
 # No container_name anywhere: Dokploy rewrites names, so the gateway finds itself
 # ("self") and the egress proxy ("compose:egress") through Docker Compose's labels.
 #
-# Every service rotates its logs and has a memory cap; gateway, web and egress have
-# healthchecks (the gateway's: GET /health, which also checks the database). Run ONE
+# Every service rotates its logs and has a memory cap; gateway, auth, web and egress
+# have healthchecks (the gateway's: GET /health, which also checks the database). Run ONE
 # gateway: terminal, browser and preview tickets are kept in its memory.
 
 x-logging: &logging
@@ -22,11 +23,10 @@ services:
   web:
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
+      dockerfile: packages/app/Dockerfile
       args:
-        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
-        VITE_GATEWAY_URL: ${VITE_GATEWAY_URL}
-        VITE_RELEASES_REPO: ${VITE_RELEASES_REPO:-}
+        VITE_OPENSESSION_GATEWAY_URL: ${VITE_OPENSESSION_GATEWAY_URL}
+        VITE_OPENSESSION_AUTH_URL: ${VITE_OPENSESSION_AUTH_URL}
     restart: unless-stopped
     expose:
       - "80"
@@ -42,6 +42,30 @@ services:
       start_period: 30s
       start_interval: 2s
 
+  # Sign-in (self-hosted Better Auth). Its tables live in the same database as the
+  # gateway's; it creates or updates them on start. The gateway checks its JWTs with
+  # the public keys at AUTH_JWKS_URL (the internal address set below).
+  auth:
+    build: services/auth
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://opensession:${POSTGRES_PASSWORD}@db:5432/opensession
+    expose:
+      - "3001"
+    logging: *logging
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    depends_on:
+      db:
+        condition: service_healthy
+
   gateway:
     build: services/gateway
     restart: unless-stopped
@@ -53,6 +77,7 @@ services:
       EGRESS_GLOBAL_ALLOWLIST: /etc/opensession/egress-allowlist.txt
       DATABASE_URL: postgresql://opensession:${POSTGRES_PASSWORD}@db:5432/opensession
       OPENSESSION_DB: /data/opensession.db
+      AUTH_JWKS_URL: http://auth:3001/api/auth/jwks
     expose:
       - "8000"
     logging: *logging
@@ -80,6 +105,8 @@ services:
         condition: service_started
       db:
         condition: service_healthy
+      auth:
+        condition: service_started
 
   # Builds the sandbox image (opencode-sandbox:latest) on each deploy. The gateway
   # starts one container from it per user and project.
