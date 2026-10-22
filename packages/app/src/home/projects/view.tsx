@@ -43,6 +43,8 @@ const projectContextMenuID = (server: ServerConnection.Any, directory: string) =
 
 export type HomeProjectsViewProps = {
   dropdown?: boolean
+  // OpenSession: the list in the app sidebar (compact, no settings/help: the profile menu has them).
+  sidebar?: boolean
   language: ReturnType<typeof useLanguage>
   servers: ServerConnection.Any[]
   projects: LocalProject[]
@@ -170,7 +172,9 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
   return (
     <aside
       class={
-        props.dropdown
+        props.sidebar
+          ? "flex min-h-0 min-w-0 flex-col gap-1 overflow-hidden"
+          : props.dropdown
           ? "flex max-h-[min(60dvh,calc(var(--kb-popper-content-available-height)-12px))] min-h-0 min-w-0 flex-col overflow-hidden"
           : `
         mt-6 flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden
@@ -184,8 +188,13 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
       }}
     >
       <Show when={!props.dropdown}>
-        <div class="flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-3">
-          <div class="text-v2-text-text-muted [font-weight:530]">{props.language.t("home.projects")}</div>
+        <div
+          class="flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5"
+          classList={{ "pr-3": !props.sidebar, "text-[12px] text-v2-text-text-faint": props.sidebar }}
+        >
+          <div classList={{ "text-v2-text-text-muted [font-weight:530]": !props.sidebar }}>
+            {props.language.t("home.projects")}
+          </div>
           <Show when={props.servers.length === 1 && !(props.projects.length === 0 && props.recentlyClosed.length > 0)}>
             <Tooltip placement="bottom" value={props.language.t("home.project.add")}>
               <IconButton
@@ -226,7 +235,7 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
           fallback={
             <Show when={props.servers[0]}>
               {(server) => (
-                <div class={props.dropdown ? "" : "pr-3"}>
+                <div class={props.dropdown || props.sidebar ? "" : "pr-3"}>
                   <Show
                     when={props.projects.length > 0}
                     fallback={<HomeProjectEmpty {...props} server={server()} items={props.recentlyClosed} />}
@@ -300,12 +309,14 @@ function HomeProjectsPanel(props: HomeProjectsViewProps) {
           </div>
         </Show>
       </ScrollView>
-      <HomeUtilityNav
-        class="mb-8 mt-4 hidden shrink-0 lg:flex"
-        onOpenSettings={props.onOpenSettings}
-        onOpenHelp={props.onOpenHelp}
-        language={props.language}
-      />
+      <Show when={!props.sidebar}>
+        <HomeUtilityNav
+          class="mb-8 mt-4 hidden shrink-0 lg:flex"
+          onOpenSettings={props.onOpenSettings}
+          onOpenHelp={props.onOpenHelp}
+          language={props.language}
+        />
+      </Show>
     </aside>
   )
 }

@@ -9,9 +9,13 @@ import { createHomeScrollController } from "./scroll"
 import { createHomeSessionSearchController } from "./sessions/search"
 import { createHomeSessionsController } from "./sessions/controller"
 import { HomeSessions } from "./sessions/region"
+import { useSettings } from "@/settings/model"
 
 export function Home() {
   const mobile = createMediaQuery("(max-width: 767px)")
+  const preferences = useSettings()
+  // OpenSession: with the sidebar (vertical tabs) showing, projects, settings and help are there.
+  const sidebar = () => !mobile() && preferences.appearance.tabLayout() === "vertical"
   const home = createHomeController()
   const projects = createHomeProjectsController(home)
   const sessions = createHomeSessionsController(home)
@@ -40,18 +44,22 @@ export function Home() {
         onWheel={scroll.viewport.containOuterWheel}
       >
         <div
-          class={`
+          class={
+            sidebar()
+              ? "mx-auto grid min-h-full w-full max-w-[768px] grid-rows-[minmax(0,1fr)] px-3 lg:px-6"
+              : `
             mx-auto grid min-h-full w-full max-w-[1080px] grid-rows-[auto_minmax(0,1fr)] gap-4 px-3
             max-md:grid-rows-[minmax(0,1fr)] lg:grid-cols-[280px_minmax(0,720px)] lg:grid-rows-1 lg:gap-8 lg:px-6
-          `}
+          `
+          }
         >
-          <Show when={!mobile()}>
+          <Show when={!mobile() && !sidebar()}>
             <HomeProjects projects={projects} scroll={scroll} />
           </Show>
           <HomeSessions sessions={sessions} search={search} scroll={scroll} />
         </div>
       </ScrollView>
-      <div class="hidden shrink-0 px-3 py-2 md:block lg:hidden">
+      <div class="hidden shrink-0 px-3 py-2 md:block lg:hidden" classList={{ "!hidden": sidebar() }}>
         <HomeUtilityNav
           class="flex"
           onOpenSettings={projects.utility.settings}

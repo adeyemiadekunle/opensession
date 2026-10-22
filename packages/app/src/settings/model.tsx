@@ -284,7 +284,8 @@ export const defaultSettings: Settings = {
     terminalPlacement: "side",
     followUpBehavior: "steer",
   },
-  appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "horizontal" },
+  // OpenSession: the sidebar layout (projects, tabs and the profile menu in one column) by default.
+  appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "vertical" },
   keybinds: {},
   permissions: { autoApprove: false, autoApproveProjects: {} },
   workspaces: { defaultDestination: "last-used", lastUsed: {} },

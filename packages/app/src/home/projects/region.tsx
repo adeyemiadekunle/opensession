@@ -4,12 +4,17 @@ import type { HomeScrollController } from "../scroll"
 
 export function HomeProjects(props: {
   projects: HomeProjectsController
-  scroll: HomeScrollController
+  // The home page's scroll container; the sidebar list (OpenSession) scrolls on its own.
+  scroll?: HomeScrollController
   dropdown?: boolean
+  sidebar?: boolean
+  // Called after a project or server is picked (the sidebar then shows the home page).
+  onPicked?: () => void
 }) {
   return (
     <HomeProjectsView
       dropdown={props.dropdown}
+      sidebar={props.sidebar}
       language={props.projects.copy.language}
       servers={props.projects.server.list()}
       projects={props.projects.project.list()}
@@ -21,9 +26,12 @@ export function HomeProjects(props: {
       collapsed={props.projects.server.collapsed}
       canRevealProject={props.projects.project.canReveal}
       hasUnread={props.projects.project.hasUnread}
-      onWheel={props.scroll.viewport.containWheel}
+      onWheel={(event) => props.scroll?.viewport.containWheel(event)}
       onChooseProject={props.projects.project.choose}
-      onFocusServer={props.projects.server.focus}
+      onFocusServer={(server) => {
+        props.projects.server.focus(server)
+        props.onPicked?.()
+      }}
       onAuthenticateServer={props.projects.server.authenticate}
       onToggleCollapsed={props.projects.server.toggleCollapsed}
       onEditServer={props.projects.server.edit}
@@ -32,7 +40,10 @@ export function HomeProjects(props: {
       canHideServer={props.projects.server.canHide}
       onHideServer={props.projects.server.hide}
       onMoveProject={props.projects.project.move}
-      onSelectProject={props.projects.project.select}
+      onSelectProject={(server, directory) => {
+        props.projects.project.select(server, directory)
+        props.onPicked?.()
+      }}
       onAddProjects={props.projects.project.add}
       onOpenProjectNewSession={props.projects.project.openNewSession}
       canImportSession={props.projects.project.canImportSession}

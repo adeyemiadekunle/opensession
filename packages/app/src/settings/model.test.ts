@@ -103,7 +103,7 @@ describe("settings schema", () => {
         mono: "",
         sans: "",
         terminal: "",
-        tabLayout: "horizontal",
+        tabLayout: "vertical", // OpenSession default: the sidebar layout
       },
       keybinds: {},
       permissions: { autoApprove: false, autoApproveProjects: {} },

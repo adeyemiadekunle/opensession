@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createResource, Match, Show, Switch, untrack } from "solid-js"
 import { createStore, unwrap } from "solid-js/store"
 import { Dynamic, Portal } from "solid-js/web"
+import { ProfileMenu, SidebarProjects } from "@/opensession/sidebar"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Icon } from "@opencode/ui/icon"
@@ -732,6 +733,13 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                               keybind={command.keybind("tab.new")}
                             />
                             <div class="h-4 w-full shrink-0" aria-hidden="true" />
+                            {/* OpenSession: projects and the profile menu live in the sidebar. */}
+                            <SidebarProjects
+                              onPicked={() => {
+                                if (layout.route().type !== "home") toggleHome()
+                              }}
+                            />
+                            <div class="h-4 w-full shrink-0" aria-hidden="true" />
                             <div class="flex min-h-0 flex-1 flex-col gap-1">
                               <TitlebarTabStrip
                                 orientation="vertical"
@@ -754,6 +762,9 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                                 <TitlebarItems items={titlebarItems} vertical />
                               </div>
                             </Show>
+                            <div data-slot="sidebar-profile" class="mt-2 w-full shrink-0">
+                              <ProfileMenu />
+                            </div>
                           </Portal>
                         )}
                       </Show>

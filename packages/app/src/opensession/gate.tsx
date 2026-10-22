@@ -5,6 +5,7 @@ import { Button } from "@opencode/ui/button"
 import { TextInput } from "@opencode/ui/text-input"
 import { createResource, createSignal, type JSX, Match, Show, Switch } from "solid-js"
 import type { ServerConnection } from "@/runtime/server/registry"
+import { AccountContext } from "./account-context"
 import { type Access, GatewayError, projects, projectServer, signIn, signOut, signUp, storedAccess } from "./account"
 
 export function OpenSessionGate(props: {
@@ -45,7 +46,13 @@ export function OpenSessionGate(props: {
         </Centered>
       </Match>
       <Match when={servers()}>
-        {(list) => props.children(list())}
+        {(list) => (
+          <AccountContext.Provider
+            value={{ name: access()!.name, email: access()!.email, signOut: () => void leave() }}
+          >
+            {props.children(list())}
+          </AccountContext.Provider>
+        )}
       </Match>
     </Switch>
   )

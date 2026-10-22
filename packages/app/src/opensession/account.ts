@@ -31,6 +31,7 @@ export interface Access {
   tokenId: string
   token: string
   email: string
+  name: string
 }
 
 export interface Project {
@@ -55,7 +56,7 @@ export function storedAccess(): Access | undefined {
     if (!raw) return undefined
     const value = JSON.parse(raw) as Partial<Access>
     if (typeof value.token === "string" && typeof value.tokenId === "string" && typeof value.email === "string")
-      return { tokenId: value.tokenId, token: value.token, email: value.email }
+      return { tokenId: value.tokenId, token: value.token, email: value.email, name: value.name || value.email }
   } catch {}
   return undefined
 }
@@ -88,7 +89,7 @@ function browserName() {
 }
 
 /** After Better Auth sign-in: trade the session for an access token and keep it. */
-async function connect(email: string): Promise<Access> {
+async function connect(user: { email: string; name?: string | null }): Promise<Access> {
   const jwt = await auth.token()
   const token = jwt.data?.token
   if (!token) throw new Error(jwt.error?.message ?? "Signed in, but the session token could not be read")
@@ -97,7 +98,7 @@ async function connect(email: string): Promise<Access> {
     bearer: token,
     body: JSON.stringify({ name: browserName() }),
   })
-  const access = { tokenId: created.id, token: created.token, email }
+  const access = { tokenId: created.id, token: created.token, email: user.email, name: user.name || user.email }
   store(access)
   return access
 }
@@ -105,13 +106,13 @@ async function connect(email: string): Promise<Access> {
 export async function signIn(email: string, password: string): Promise<Access> {
   const result = await auth.signIn.email({ email, password })
   if (result.error) throw new Error(result.error.message ?? "Sign-in failed")
-  return connect(email)
+  return connect(result.data?.user ?? { email })
 }
 
 export async function signUp(name: string, email: string, password: string): Promise<Access> {
   const result = await auth.signUp.email({ name, email, password })
   if (result.error) throw new Error(result.error.message ?? "Sign-up failed")
-  return connect(email)
+  return connect(result.data?.user ?? { email, name })
 }
 
 export async function signOut(access: Access | undefined) {
