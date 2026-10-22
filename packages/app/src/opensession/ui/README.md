@@ -17,4 +17,5 @@ components (`@opencode/ui`), so upstream updates still merge cleanly.
 - Visible text comes from the app's i18n dictionary (`runtime/i18n/en.ts`, `opensession.*`
   keys), per `packages/app/AGENTS.md`.
 
-Components so far: `dropdown-menu` (the sidebar profile menu, `../sidebar.tsx`).
+Components so far: `dropdown-menu` (the sidebar profile menu, `../sidebar.tsx`), `button`,
+`card` and `text-field` (the sign-in screen, `../gate.tsx`, a port of shadcn's login-03 block).

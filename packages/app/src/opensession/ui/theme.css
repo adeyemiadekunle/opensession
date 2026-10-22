@@ -46,7 +46,10 @@
  * so opencode's elements keep their borders. Add a component's prefix when adding it.
  */
 @layer base {
-  [data-slot^="dropdown-menu"] {
+  [data-slot^="dropdown-menu"],
+  [data-slot^="card"],
+  [data-slot^="text-field"],
+  [data-slot="button"] {
     border-color: var(--color-border);
   }
 }

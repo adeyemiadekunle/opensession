@@ -45,7 +45,7 @@ export interface Project {
 // the auth server's own message, if any.
 export class AccountError extends Error {
   constructor(
-    readonly reason: "signInFailed" | "signUpFailed" | "noToken",
+    readonly reason: "signInFailed" | "signUpFailed" | "socialFailed" | "noToken",
     readonly detail?: string,
   ) {
     super(detail ?? reason)
@@ -124,6 +124,32 @@ export async function signUp(name: string, email: string, password: string): Pro
   const result = await auth.signUp.email({ name, email, password })
   if (result.error) throw new AccountError("signUpFailed", result.error.message)
   return connect(result.data?.user ?? { email, name })
+}
+
+export type SocialProvider = "github" | "google"
+
+/** The social sign-ins the auth server has credentials for. */
+export async function socialProviders(): Promise<SocialProvider[]> {
+  try {
+    const response = await fetch(`${authUrl}/api/providers`, { credentials: "include" })
+    const enabled = (await response.json()) as Partial<Record<SocialProvider, boolean>>
+    return (["github", "google"] as const).filter((provider) => enabled[provider])
+  } catch {
+    return []
+  }
+}
+
+/** Leaves for the provider's sign-in page; the browser comes back here with a session. */
+export async function signInSocial(provider: SocialProvider) {
+  const result = await auth.signIn.social({ provider, callbackURL: location.href })
+  if (result.error) throw new AccountError("socialFailed", result.error.message)
+}
+
+/** A Better Auth session without a stored access token (back from a social sign-in): connect it. */
+export async function resumeSession(): Promise<Access | undefined> {
+  const session = await auth.getSession().catch(() => undefined)
+  const user = session?.data?.user
+  return user ? connect(user) : undefined
 }
 
 export async function signOut(access: Access | undefined) {

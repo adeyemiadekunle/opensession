@@ -18,6 +18,9 @@ Environment (see the root `.env.example`):
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | optional; callback `<BETTER_AUTH_URL>/api/auth/callback/github` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | optional; callback `<BETTER_AUTH_URL>/api/auth/callback/google` |
 
+`GET /api/providers` says which social sign-ins are configured (`{"github": bool,
+"google": bool}`); the web app's sign-in screen shows only those.
+
     bun run --cwd services/auth migrate   # create/update tables
     bun run --cwd services/auth dev       # http://localhost:3001
 

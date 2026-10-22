@@ -6,7 +6,7 @@ import { config } from "./config"
 const app = new Hono()
 
 app.use(
-  "/api/auth/*",
+  "/api/*",
   cors({
     origin: config.trustedOrigins,
     allowHeaders: ["Content-Type", "Authorization"],
@@ -15,6 +15,8 @@ app.use(
     credentials: true,
   }),
 )
+// Which social sign-ins are configured, so the sign-in screen only offers those.
+app.get("/api/providers", (c) => c.json({ github: !!config.github, google: !!config.google }))
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
 app.get("/health", (c) => c.text("ok"))
 
