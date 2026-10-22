@@ -13,9 +13,9 @@ import { CLI_BINARIES, nodePtyPackage } from "./scripts/utils"
 const { FileMatcher } = createRequire(import.meta.resolve("electron-builder"))("app-builder-lib/out/fileMatcher")
 
 const channels = [
-  { channel: "dev", appId: "ai.opencode.desktop.dev" },
-  { channel: "beta", appId: "ai.opencode.desktop.beta" },
-  { channel: "prod", appId: "ai.opencode.desktop" },
+  { channel: "dev", appId: "dev.opensession.desktop.dev" },
+  { channel: "beta", appId: "dev.opensession.desktop.beta" },
+  { channel: "prod", appId: "dev.opensession.desktop" },
 ] as const
 
 function load(channel: string, target?: string): Configuration {
@@ -56,23 +56,14 @@ test.each(channels)("channel identity for $channel", ({ channel, appId }) => {
 
   for (const fpm of [config.deb?.fpm, config.rpm?.fpm]) {
     expect(fpm).toContainEqual(expect.stringContaining(`/usr/share/metainfo/${appId}.metainfo.xml`))
-    expect(
-      fpm?.some((entry) => entry.endsWith("opencode-desktop.desktop=/usr/share/applications/opencode-desktop.desktop")),
-    ).toBe(channel === "prod")
+    // OpenSession never shipped opencode's old "opencode-desktop" launcher, so no legacy entry.
+    expect(fpm?.some((entry) => entry.includes("/usr/share/applications/"))).toBe(false)
   }
 
   // Shared Electron binaries must not ship /usr/lib/.build-id links that collide with other Electron RPMs.
   // fpm rejects flags after the first src=dest mapping, so the flag must come first.
   expect(config.rpm?.fpm?.[0]).toBe("--rpm-rpmbuild-define=_build_id_links none")
   expect(config.deb?.fpm).not.toContain("--rpm-rpmbuild-define=_build_id_links none")
-})
-
-test("legacy Linux launcher stays hidden", async () => {
-  const desktop = await Bun.file(path.join(import.meta.dirname, "resources/linux/opencode-desktop.desktop")).text()
-  expect(desktop).toContain("Exec=/opt/OpenCode/ai.opencode.desktop %U")
-  expect(desktop).toContain("Icon=ai.opencode.desktop")
-  expect(desktop).toContain("StartupWMClass=ai.opencode.desktop")
-  expect(desktop).toContain("NoDisplay=true")
 })
 
 test("shared packaging defaults", async () => {

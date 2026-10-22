@@ -1,7 +1,7 @@
 # Sandbox image: OpenCode V2 server + common toolchains, running as a non-root user.
 #
 # Build (from the repo root):
-#   docker build -t opencode-sandbox:latest --build-arg OPENCODE_VERSION=2.0.0 services/sandbox/
+#   docker build -t opencode-sandbox:latest --build-arg OPENCODE_VERSION=2.1.2 services/sandbox/
 #
 # OpenCode V2 is installed with its official installer (https://opencode.ai/v2/install),
 # as the agent user. Re-run scripts/check after changing OPENCODE_VERSION: the V2
@@ -55,16 +55,17 @@ RUN mkdir -p /home/agent/.state/data /home/agent/.state/config \
  && ln -s /home/agent/.state/data /home/agent/.local/share/opencode \
  && ln -s /home/agent/.state/config /home/agent/.config/opencode
 
-# Build the CLI and desktop app with the same OPENCODE_VERSION (the Release workflow's
-# repository variable), so local mode runs the version the sandbox does.
-ARG OPENCODE_VERSION=2.0.0
+# Same version as the OpenCode packages in this repository (UPSTREAM.md), so the web,
+# desktop and CLI apps talk to the server they were built from. No fallback to the
+# latest release: a version that can't be installed fails the build.
+ARG OPENCODE_VERSION=2.1.2
 RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/oc-install.sh \
- && (bash /tmp/oc-install.sh --version "${OPENCODE_VERSION}" || bash /tmp/oc-install.sh) \
+ && bash /tmp/oc-install.sh --version "${OPENCODE_VERSION}" \
  && mkdir -p /home/agent/.local/bin \
  && OC="$(command -v opencode || find /home/agent -type f -name opencode -perm -u+x | head -n1)" \
  && test -n "$OC" \
  && ln -sf "$OC" /home/agent/.local/bin/opencode \
- && /home/agent/.local/bin/opencode --version \
+ && /home/agent/.local/bin/opencode --version | grep -qF "${OPENCODE_VERSION}" \
  && rm /tmp/oc-install.sh
 ENV PATH=/home/agent/.local/bin:/home/agent/.opencode/bin:$PATH
 

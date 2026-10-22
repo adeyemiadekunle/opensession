@@ -17,13 +17,6 @@ const rootDir = path.resolve(packageDir, "../..")
 
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
 
-// The Electron 42 packaging update briefly installed Linux launchers/icons under
-// "opencode-desktop". Keep that hidden desktop entry around so existing GNOME/KDE
-// pins still resolve after the canonical app id changes back to ai.opencode.desktop.
-const legacyDesktopEntry = path.join(packageDir, "resources", "linux", "opencode-desktop.desktop")
-
-const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/opencode-desktop.desktop`
-
 // rpmbuild adds /usr/lib/.build-id links for every ELF file. The bundled Electron
 // binaries are byte-identical across apps on the same Electron version, so those
 // links collide with other Electron RPMs (Slack, Unity Hub, ...) and rpm/zypper
@@ -71,23 +64,23 @@ function resolveChannel() {
 }
 
 const APP_IDS = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
+  dev: "dev.opensession.desktop.dev",
+  beta: "dev.opensession.desktop.beta",
+  prod: "dev.opensession.desktop",
 } as const
 
 const getBase = (appId: string): Configuration => {
   const target = getCurrentCli()
 
   return {
-    artifactName: "opencode-desktop-${os}-${arch}.${ext}",
+    artifactName: "OpenSession-${os}-${arch}.${ext}",
     directories: {
       output: "dist",
       buildResources: "resources",
     },
     // Linux launchers are .desktop files, so this is the desktop file name,
-    // not just the app id. For prod, app id "ai.opencode.desktop" becomes
-    // "ai.opencode.desktop.desktop".
+    // not just the app id. For prod, app id "dev.opensession.desktop" becomes
+    // "dev.opensession.desktop.desktop".
     // https://developer.gnome.org/documentation/guidelines/maintainer/integrating.html
     // https://www.electron.build/docs/linux/
     extraMetadata: {
@@ -184,8 +177,8 @@ const getBase = (appId: string): Configuration => {
       target: ["dmg", "zip"],
     },
     protocols: {
-      name: "OpenCode",
-      schemes: ["opencode"],
+      name: "OpenSession",
+      schemes: ["opensession"],
     },
     win: {
       icon: `resources/icons/icon.ico`,
@@ -228,9 +221,9 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Dev",
+        productName: "OpenSession Dev",
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-dev", fpm: [rpmNoBuildIdLinksFpm, metainfoFpm(appId)] },
+        rpm: { packageName: "opensession-dev", fpm: [rpmNoBuildIdLinksFpm, metainfoFpm(appId)] },
       }
     }
 
@@ -238,15 +231,17 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Beta",
-        protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
+        productName: "OpenSession Beta",
+        protocols: { name: "OpenSession Beta", schemes: ["opensession"] },
+        // Updates come from this repository's GitHub releases, never from opencode.ai.
         publish: {
-          provider: "generic",
-          url: "https://opencode.ai/update/api/beta/desktop/opencode/",
-          channel: "latest",
+          provider: "github",
+          owner: "adeyemiadekunle",
+          repo: "opensession",
+          releaseType: "prerelease",
         },
         deb: { fpm: [metainfoFpm(appId)] },
-        rpm: { packageName: "opencode-beta", fpm: [rpmNoBuildIdLinksFpm, metainfoFpm(appId)] },
+        rpm: { packageName: "opensession-beta", fpm: [rpmNoBuildIdLinksFpm, metainfoFpm(appId)] },
       }
     }
 
@@ -254,15 +249,16 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode",
-        protocols: { name: "OpenCode", schemes: ["opencode"] },
+        productName: "OpenSession",
+        protocols: { name: "OpenSession", schemes: ["opensession"] },
         publish: {
-          provider: "generic",
-          url: "https://opencode.ai/update/api/latest/desktop/opencode/",
-          channel: "latest",
+          provider: "github",
+          owner: "adeyemiadekunle",
+          repo: "opensession",
+          releaseType: "release",
         },
-        deb: { fpm: [metainfoFpm(appId), legacyDesktopEntryFpm] },
-        rpm: { packageName: "opencode", fpm: [rpmNoBuildIdLinksFpm, metainfoFpm(appId), legacyDesktopEntryFpm] },
+        deb: { fpm: [metainfoFpm(appId)] },
+        rpm: { packageName: "opensession", fpm: [rpmNoBuildIdLinksFpm, metainfoFpm(appId)] },
       }
     }
   }

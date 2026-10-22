@@ -90,7 +90,7 @@ services:
     build:
       context: services/sandbox
       args:
-        OPENCODE_VERSION: ${OPENCODE_VERSION:-2.0.0}
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-2.1.2}
     image: ${SANDBOX_IMAGE:-opencode-sandbox:latest}
     entrypoint: ["sleep", "infinity"]
     restart: unless-stopped
