@@ -53,6 +53,29 @@ def app_slug(value: str) -> str:
     return value.rsplit("/apps/", 1)[-1].split("/", 1)[0] if "/apps/" in value else value
 
 
+def pem_key(value: str) -> str:
+    """The App's private key as PEM, also when pasting it into a one-line environment variable
+    mangled it: surrounding quotes, literal \\n, line breaks turned into spaces, or the whole
+    .pem base64-encoded. Otherwise signing fails with PyJWT's "Could not parse the provided
+    public key".
+    """
+    key = value.strip().strip('"').strip("'").strip()
+    key = key.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
+    if key and "-----BEGIN" not in key:
+        try:
+            decoded = base64.b64decode(key, validate=False).decode()
+        except (ValueError, UnicodeDecodeError):
+            decoded = ""
+        if "-----BEGIN" in decoded:
+            key = decoded.strip()
+    m = re.match(r"(-----BEGIN [A-Z ]+-----)(.*?)(-----END [A-Z ]+-----)", key, re.S)
+    if m:
+        body = re.sub(r"\s+", "", m.group(2))
+        lines = [body[i : i + 64] for i in range(0, len(body), 64)]
+        key = "\n".join([m.group(1), *lines, m.group(3)]) + "\n"
+    return key
+
+
 @dataclass
 class GitHubAppConfig:
     app_id: str
@@ -67,7 +90,7 @@ class GitHubAppConfig:
     @classmethod
     def from_env(cls) -> "GitHubAppConfig | None":
         e = os.environ.get
-        key = e("GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n")
+        key = e("GITHUB_APP_PRIVATE_KEY", "")
         if not key and e("GITHUB_APP_PRIVATE_KEY_FILE"):
             with open(e("GITHUB_APP_PRIVATE_KEY_FILE", "")) as f:
                 key = f.read()
@@ -78,7 +101,7 @@ class GitHubAppConfig:
         return cls(
             app_id=e("GITHUB_APP_ID", ""),
             slug=app_slug(e("GITHUB_APP_SLUG", "")),
-            private_key=key,
+            private_key=pem_key(key),
             client_id=e("GITHUB_APP_CLIENT_ID", ""),
             client_secret=e("GITHUB_APP_CLIENT_SECRET", ""),
             state_secret=secret.encode() if secret else secrets.token_bytes(32),
@@ -97,7 +120,15 @@ class GitHubApp:
 
     def app_jwt(self) -> str:
         now = int(time.time())
-        return jwt.encode({"iat": now - 60, "exp": now + 540, "iss": self.cfg.app_id}, self.cfg.private_key, algorithm="RS256")
+        try:
+            return jwt.encode({"iat": now - 60, "exp": now + 540, "iss": self.cfg.app_id}, self.cfg.private_key, algorithm="RS256")
+        except (jwt.InvalidKeyError, ValueError, TypeError) as e:
+            # A key the server can't read: say so where the person connects, not as a 500.
+            raise GitHubError(
+                "the server can't read its GitHub App private key (GITHUB_APP_PRIVATE_KEY): "
+                "paste the full .pem, BEGIN and END lines included",
+                500,
+            ) from e
 
     def make_state(self, user: str, ttl: int = 600) -> str:
         payload = f"{user}|{int(time.time()) + ttl}|{secrets.token_hex(8)}"
