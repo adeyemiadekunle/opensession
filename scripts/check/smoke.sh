@@ -180,10 +180,13 @@ body_has '"state":"sleeping"' && ok "state sleeping" || bad "status: $(cat /tmp/
 check "next request wakes it" 200 "$(api GET alice /p/default/api/info)"
 check "list sessions" 200 "$(api GET alice /p/default/api/session)"
 body_has "$SID" && ok "session kept across sleep" || bad "session $SID missing: $(head -c 300 /tmp/os_body)"
-check "read file" 200 "$(api GET alice /p/default/api/fs/read/note.txt)"
+# Without a location OpenCode reads from its own working directory; the apps always pass one.
+check "read file" 200 "$(api GET alice '/p/default/api/fs/read/note.txt?location%5Bdirectory%5D=%2Fworkspace')"
 body_has kept-across-sleep && ok "files kept across sleep" || bad "note.txt: $(head -c 200 /tmp/os_body)"
 
 echo "== running projects per user (limit 2)"
+# Only projects that exist get a sandbox.
+for w in p2 p3; do check "alice creates $w" 201 "$(api POST alice /workspaces "{\"name\":\"$w\"}")"; done
 check "alice opens p2" 200 "$(api GET alice /p/p2/api/info)"
 check "alice opens p3" 200 "$(api GET alice /p/p3/api/info)"
 check "limits" 200 "$(api GET alice /limits)"
