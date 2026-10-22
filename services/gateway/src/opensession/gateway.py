@@ -1177,7 +1177,10 @@ def create_app(
 
     @app.post("/git/pull-request", status_code=201)
     async def git_pull_request(body: PullRequest, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
-        """Push the current branch and open a pull request into the project's branch."""
+        """Push the current branch and open a pull request into the project's branch.
+        Safe to retry: the push is never forced (pushing the same commit again is a no-op)
+        and an open pull request for the same branches is returned (200, existing: true)
+        instead of a second one."""
         ws, head = await push_current(request, ref, body.branch)
         base = body.base or ws.get("branch") or "main"
         if head == base:
@@ -1188,7 +1191,8 @@ def create_app(
             )
         except GitHubError as e:
             raise gh_error(e) from None
-        return {**pr, "head": head, "base": base}
+        out = {**pr, "head": head, "base": base}
+        return JSONResponse(out, status_code=200) if pr["existing"] else out
 
     # ---- agent setup: skills, agents, commands, MCP, permissions, ... ------------
 

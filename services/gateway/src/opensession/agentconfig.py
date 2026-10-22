@@ -225,6 +225,18 @@ The person reads your last message in a chat panel, often without opening the fi
 Answer a question directly, and include the actual content the person asked to see (file contents, output, values) rather than describing it. Use plain language, and skip filler like "Perfect!", "Done!" or "as requested". For a turn that changed nothing, just give the answer.
 """
 
+# OpenCode resumes a turn after its sandbox restarts, but a tool call that was running
+# comes back only as "Tool execution interrupted": the command may have finished, run
+# partly or not at all (docs/DURABLE-BASELINE.md). Models tend to just run it again.
+INTERRUPTION_GUIDE = """\
+# After an interruption (OpenSession)
+
+When a tool call comes back as interrupted (for example "Tool execution interrupted"), or you are told the server restarted, that call may have finished, run partly, or not run at all. Before running it again, check whether its effect already happened: look at the files, `git status` and `git log`, and the state of anything outside this workspace it changed. Reading, building and running tests can simply be repeated. Anything that changes something outside the workspace (deploying, publishing, sending messages, database migrations, calls to external APIs) needs that check first; if you can't tell whether it already happened, say so in your wrap-up instead of running it again.
+"""
+
+# Global AGENTS.md in a cloud sandbox, before the person's own instructions.
+CLOUD_GUIDE = REPLY_GUIDE + "\n" + INTERRUPTION_GUIDE
+
 CLOUD_CONFIG_DIR = "/home/agent/.config/opencode"
 
 
@@ -235,7 +247,7 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True, model_proxy: dict[str,
     - agents and commands are defined inline in opencode.json ("agents", "commands"),
     - skills are SKILL.md files in our own folder, listed in opencode.json "skills",
     - permissions, MCP servers, plugins and default_agent are opencode.json keys,
-    - instructions are the global AGENTS.md (in the cloud, after REPLY_GUIDE),
+    - instructions are the global AGENTS.md (in the cloud, after CLOUD_GUIDE),
     - model_proxy ({provider: base URL}) points those providers at the gateway's model
       proxy: "providers": {id: {"settings": {"baseURL": ...}}} (modelproxy.py).
     """
@@ -247,7 +259,7 @@ def render_files(cfg: AgentConfig, *, cloud: bool = True, model_proxy: dict[str,
         files[f"{SKILLS_DIR}/{s.id}/SKILL.md"] = _fm(fm) + "\n" + s.body.strip() + "\n"
     own = cfg.instructions.strip()
     if cloud:
-        files["AGENTS.md"] = REPLY_GUIDE + ("\n" + own + "\n" if own else "")
+        files["AGENTS.md"] = CLOUD_GUIDE + ("\n" + own + "\n" if own else "")
     elif own:
         # Local mode writes into the person's own ~/.config/opencode: only what they set.
         files["AGENTS.md"] = own + "\n"

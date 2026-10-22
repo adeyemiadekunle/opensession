@@ -52,14 +52,14 @@ def test_local_mode_writes_only_the_persons_own_instructions():
     assert "AGENTS.md" not in agentconfig.render_files(AgentConfig.model_validate({}), cloud=False)
     files = agentconfig.render_files(AgentConfig.model_validate({"instructions": "Use pnpm."}), cloud=False)
     assert files["AGENTS.md"] == "Use pnpm.\n"
-    assert agentconfig.render_files(AgentConfig.model_validate({}))["AGENTS.md"] == agentconfig.REPLY_GUIDE
+    assert agentconfig.render_files(AgentConfig.model_validate({}))["AGENTS.md"] == agentconfig.CLOUD_GUIDE
 
 
 def test_render_files_matches_opencode_v2_layout():
     files = agentconfig.render_files(AgentConfig.model_validate(FULL))
     assert set(files) == {"opensession-skills/git-release/SKILL.md", "AGENTS.md", "opencode.json"}
     # The cloud's reply guide comes first, then the person's own instructions, unchanged.
-    assert files["AGENTS.md"] == agentconfig.REPLY_GUIDE + "\nUse pnpm. Write tests.\n"
+    assert files["AGENTS.md"] == agentconfig.CLOUD_GUIDE + "\nUse pnpm. Write tests.\n"
     skill = files["opensession-skills/git-release/SKILL.md"]
     assert skill.startswith('---\nname: "git-release"\ndescription: "Prepare releases"\n---\n')
     assert skill.endswith("Steps:\n1. bump\n")
@@ -167,12 +167,19 @@ def test_entrypoint_applies_bundle_and_removes_old_files(tmp_path):
     fakebin.mkdir()
     (fakebin / "opencode").write_text("#!/bin/sh\necho started \"$@\"\n")
     (fakebin / "opencode").chmod(0o755)
-    env = {**os.environ, "HOME": str(home), "PATH": f"{fakebin}:{os.environ['PATH']}"}
+    password = 'p"w d'  # needs JSON escaping
+    env = {**os.environ, "HOME": str(home), "PATH": f"{fakebin}:{os.environ['PATH']}", "OPENCODE_SERVER_PASSWORD": password}
 
     def apply(cfg):
         _extract(agentconfig.bundle_tar(agentconfig.render_files(AgentConfig.model_validate(cfg))), home / ".state")
         out = subprocess.run(["sh", str(ENTRYPOINT)], env=env, capture_output=True, text=True, check=True)
-        assert "started serve --hostname 0.0.0.0 --port 4096" in out.stdout
+        # Service mode (resumes interrupted turns) reads its address and password from service.json.
+        assert "started serve --service" in out.stdout
+        service = json.loads((cfgdir / "service.json").read_text())
+        assert service == {"hostname": "0.0.0.0", "port": 4096, "password": password}
+
+    no_password = {k: v for k, v in env.items() if k != "OPENCODE_SERVER_PASSWORD"}
+    assert subprocess.run(["sh", str(ENTRYPOINT)], env=no_password, capture_output=True).returncode != 0
 
     apply(FULL)
     assert (cfgdir / "opensession-skills/git-release/SKILL.md").exists()
@@ -181,7 +188,7 @@ def test_entrypoint_applies_bundle_and_removes_old_files(tmp_path):
     assert not (home / ".state/incoming/opensession-config").exists()
     apply({"skills": [{"id": "other", "description": "d", "body": "b"}]})
     assert not (cfgdir / "opensession-skills/git-release").exists()
-    assert (cfgdir / "AGENTS.md").read_text() == agentconfig.REPLY_GUIDE  # their instructions are gone
+    assert (cfgdir / "AGENTS.md").read_text() == agentconfig.CLOUD_GUIDE  # their instructions are gone
     agents = json.loads((cfgdir / "opencode.json").read_text())["agents"]
     assert "reviewer" not in agents  # removed; only the built-ins' git approval rules remain
     assert set(agents) == {b["id"] for b in agentconfig.BUILTIN_AGENTS}
