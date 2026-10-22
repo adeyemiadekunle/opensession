@@ -52,6 +52,7 @@ import "@/settings/settings.css"
 import { useAccount } from "@/opensession/account-context"
 import { SettingsProfile } from "@/opensession/profile"
 import { SettingsCloudProjects } from "@/opensession/projects"
+import { SettingsAccessTokens } from "@/opensession/tokens"
 
 const GuiExtensionsSettings = import.meta.env.DEV
   ? lazy(() =>
@@ -282,7 +283,7 @@ function RootSettings() {
 
     if (view.tab === "gui-extensions" && !guiExtensions) surface.open("general")
 
-    if ((view.tab === "profile" || view.tab === "cloud-projects") && !account) surface.open("general")
+    if (["profile", "cloud-projects", "access-tokens"].includes(view.tab) && !account) surface.open("general")
   })
 
   const addServer = () =>
@@ -300,6 +301,11 @@ function RootSettings() {
                 value: "cloud-projects",
                 icon: pageIcons["cloud-projects"],
                 label: language.t("opensession.projects.title"),
+              },
+              {
+                value: "access-tokens",
+                icon: pageIcons["access-tokens"],
+                label: language.t("opensession.tokens.title"),
               },
             ],
           },
@@ -382,6 +388,9 @@ function RootSettings() {
         </Tabs.Content>
         <Tabs.Content value="cloud-projects" class="settings-panel">
           <SettingsCloudProjects />
+        </Tabs.Content>
+        <Tabs.Content value="access-tokens" class="settings-panel">
+          <SettingsAccessTokens />
         </Tabs.Content>
       </Show>
       <Tabs.Content value="general" class="settings-panel">

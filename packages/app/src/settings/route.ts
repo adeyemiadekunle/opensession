@@ -1,6 +1,7 @@
 export type SettingsRootTab =
   | "profile" // OpenSession: the signed-in account (src/opensession/profile.tsx)
   | "cloud-projects" // OpenSession: the account's cloud projects (src/opensession/projects.tsx)
+  | "access-tokens" // OpenSession: CLI and desktop tokens (src/opensession/tokens.tsx)
   | "general"
   | "appearance"
   | "notifications"
@@ -51,6 +52,7 @@ export type SettingsTransientView = Pick<SettingsView, "target" | "searchActivat
 const rootTabs: Record<SettingsRootTab, true> = {
   profile: true,
   "cloud-projects": true,
+  "access-tokens": true,
   general: true,
   appearance: true,
   notifications: true,

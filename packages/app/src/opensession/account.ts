@@ -235,6 +235,27 @@ export function deleteProject(id: string) {
   return gatewayRequest(`/workspaces/${encodeURIComponent(id)}?delete_data=true`, { method: "DELETE" })
 }
 
+export interface AccessToken {
+  id: string
+  name: string
+  created_at: number
+  last_used_at: number | null
+}
+
+/** A new access token for the CLI or desktop app. The gateway lets only a signed-in session
+ *  create tokens (a token can't mint more), so this uses a fresh session JWT, not the stored
+ *  token. The plain token is in the answer once. */
+export async function createAccessToken(name: string) {
+  const jwt = await auth().token()
+  const token = jwt.data?.token
+  if (!token) throw new AccountError("noToken", jwt.error?.message)
+  return gateway<AccessToken & { token: string }>("/tokens", {
+    method: "POST",
+    bearer: token,
+    body: JSON.stringify({ name }),
+  })
+}
+
 /** The user's projects. A rejected token (revoked, expired) clears the stored access. */
 export async function projects(access: Access): Promise<Project[]> {
   try {
