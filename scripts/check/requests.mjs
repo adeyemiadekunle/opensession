@@ -89,17 +89,23 @@ async function waitFor(check) {
     await delay(100);
   }
 }
+// OpenCode 2.1.2 has no /session/:id/wait. A prompt's run is over once the session's idle time
+// passes its start; a run blocked on a permission is active, and is over once it no longer is
+// (a rejected tool ends the run without a new idle time).
+const settled = (path, since) => waitFor(async () => ((await api(path)).time?.idle ?? 0) > since);
+const released = (id) => waitFor(async () => !(id in (await api("/session/active"))));
 
 try {
   await waitFor(async () => {
-    try { await api("/health"); return true; } catch { return false; }
+    try { await api("/info"); return true; } catch { return false; }
   });
   await waitFor(async () => (await api("/mcp")).some((s) => s.name === "opensession" && s.status.status === "connected"));
   // A connected MCP transport can precede its lazy tool catalog.
   await waitFor(async () => {
     const warmup = await api("/session", { model: { providerID: "openai", id: "gpt-4o" }, location: { directory: home } });
+    const since = Date.now();
     await api(`/session/${warmup.id}/prompt`, { text: "Warm the tool catalog." });
-    await api(`/session/${warmup.id}/wait`, {});
+    await settled(`/session/${warmup.id}`, since);
     return catalogReady;
   });
   for (scenario of [
@@ -117,8 +123,8 @@ try {
     assert.equal(part?.name, scenario.action);
     assert.deepEqual(part.state.input, scenario.input);
     assert.equal(part.state.status, "running");
-    await api(`${path}/permission/${request.id}/reply`, { reply: scenario.reply });
-    await api(`${path}/wait`, {});
+    await api(`${path}/permission/${request.id}/reply`, { decision: scenario.reply });
+    await released(session.id);
     const completed = (await api(`${path}/message`)).flatMap((m) => m.content ?? []).find((p) => p.id === part.id);
     assert.equal(completed.state.status, scenario.reply === "reject" ? "error" : "completed");
     if (scenario.result) assert.match(JSON.stringify(completed), scenario.result);
