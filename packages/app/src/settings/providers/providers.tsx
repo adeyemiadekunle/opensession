@@ -13,6 +13,8 @@ import { createEffect, createMemo, type Component, For, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
+import { useData } from "@/runtime/server/current"
+import { isCloudServer, removeProviderKey } from "@/opensession/account"
 import { formatServerError } from "@/runtime/server/errors"
 import { CONSOLE_INTEGRATION, CONSOLE_PROVIDERS } from "@/providers/connect/controller"
 import { DialogConnectProvider, useProviderConnectController } from "@/providers/connect/dialog"
@@ -45,6 +47,7 @@ export const SettingsProviders: Component<{
   const dialog = useDialog()
   const language = useLanguage()
   const serverSdk = useServerSDK()
+  const data = useData()
   const providers = useProviders(() => props.directory)
   const integrations = useIntegrations(() => props.directory)
   const providerConnect = useProviderConnectController()
@@ -194,8 +197,15 @@ export const SettingsProviders: Component<{
     return
   }
 
+  // OpenSession: in a cloud project, an environment connection is the account's key stored at
+  // the gateway (it reaches the sandbox as a stand-in variable), so it reads and disconnects as
+  // an API key.
+  const cloudKey = (item: ProviderItem) => isCloudServer(serverSdk.url) && source(item) === "env"
+
   const type = (item: ProviderItem) => {
     const current = source(item)
+
+    if (cloudKey(item)) return language.t("provider.connect.method.apiKey")
 
     if (current === "env") return language.t("settings.providers.tag.environment")
 
@@ -211,6 +221,7 @@ export const SettingsProviders: Component<{
   }
 
   const canDisconnect = (item: ProviderItem) => {
+    if (cloudKey(item)) return true
     const current = integration(item)
 
     if (current) return current.connections.some((connection) => connection.type === "credential")
@@ -229,6 +240,40 @@ export const SettingsProviders: Component<{
     const ids = group?.root.id === item.id ? group.providers.map((provider) => provider.id) : [item.id]
     updateDisconnecting(ids, "removing")
     const location = props.directory ? { directory: props.directory } : undefined
+
+    // OpenSession: a cloud project's key lives at the gateway, not in its sandbox. The sandbox
+    // restarts without it on its next request, which the refresh below makes.
+    if (isCloudServer(serverSdk.url)) {
+      await removeProviderKey(item.integrationID ?? item.id)
+        .then(async () => {
+          updateDisconnecting(ids, "removed")
+          showToast({
+            variant: "success",
+            icon: "circle-check",
+            title: language.t("provider.disconnect.toast.disconnected.title", { provider: name }),
+            description: language.t("provider.disconnect.toast.disconnected.description", { provider: name }),
+          })
+          data.location.provider.invalidate(location)
+          data.location.model.invalidate(location)
+          await Promise.all([data.location.provider.sync(location), data.location.model.sync(location)]).catch(
+            () => undefined,
+          )
+        })
+        .catch((err: unknown) => {
+          updateDisconnecting(ids, undefined)
+          showToast({
+            title: language.t("common.requestFailed"),
+            description: language.tDynamic(
+              "provider.disconnect.toast.failed.description",
+              err instanceof Error ? err.message : String(err),
+              { provider: name },
+            ),
+          })
+        })
+
+      return
+    }
+
     await serverSdk.api.integration
       .get({ integrationID: item.integrationID ?? item.id, location })
       .then(async (integration) => {

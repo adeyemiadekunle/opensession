@@ -19,11 +19,17 @@ const authUrl = trim(import.meta.env.VITE_OPENSESSION_AUTH_URL)
 
 export const enabled = gatewayUrl !== undefined && authUrl !== undefined
 
-const auth = createAuthClient({
-  baseURL: authUrl ?? location.origin,
-  plugins: [jwtClient()],
-  fetchOptions: { credentials: "include" },
-})
+// Created on first use, so importing this module (the server registry does, for
+// isCloudServer) has no side effects.
+function createAuth() {
+  return createAuthClient({
+    baseURL: authUrl,
+    plugins: [jwtClient()],
+    fetchOptions: { credentials: "include" },
+  })
+}
+let client: ReturnType<typeof createAuth> | undefined
+const auth = () => (client ??= createAuth())
 
 const STORAGE_KEY = "opensession.access"
 
@@ -101,7 +107,7 @@ function browserName() {
 
 /** After Better Auth sign-in: trade the session for an access token and keep it. */
 async function connect(user: { email: string; name?: string | null }): Promise<Access> {
-  const jwt = await auth.token()
+  const jwt = await auth().token()
   const token = jwt.data?.token
   if (!token) throw new AccountError("noToken", jwt.error?.message)
   const created = await gateway<{ id: string; token: string }>("/tokens", {
@@ -115,13 +121,13 @@ async function connect(user: { email: string; name?: string | null }): Promise<A
 }
 
 export async function signIn(email: string, password: string): Promise<Access> {
-  const result = await auth.signIn.email({ email, password })
+  const result = await auth().signIn.email({ email, password })
   if (result.error) throw new AccountError("signInFailed", result.error.message)
   return connect(result.data?.user ?? { email })
 }
 
 export async function signUp(name: string, email: string, password: string): Promise<Access> {
-  const result = await auth.signUp.email({ name, email, password })
+  const result = await auth().signUp.email({ name, email, password })
   if (result.error) throw new AccountError("signUpFailed", result.error.message)
   return connect(result.data?.user ?? { email, name })
 }
@@ -141,13 +147,13 @@ export async function socialProviders(): Promise<SocialProvider[]> {
 
 /** Leaves for the provider's sign-in page; the browser comes back here with a session. */
 export async function signInSocial(provider: SocialProvider) {
-  const result = await auth.signIn.social({ provider, callbackURL: location.href })
+  const result = await auth().signIn.social({ provider, callbackURL: location.href })
   if (result.error) throw new AccountError("socialFailed", result.error.message)
 }
 
 /** A Better Auth session without a stored access token (back from a social sign-in): connect it. */
 export async function resumeSession(): Promise<Access | undefined> {
-  const session = await auth.getSession().catch(() => undefined)
+  const session = await auth().getSession().catch(() => undefined)
   const user = session?.data?.user
   return user ? connect(user) : undefined
 }
@@ -156,24 +162,24 @@ export async function resumeSession(): Promise<Access | undefined> {
 // the gateway's access token is unaffected.
 
 export async function updateName(name: string) {
-  const result = await auth.updateUser({ name })
+  const result = await auth().updateUser({ name })
   if (result.error) throw new AccountError("updateFailed", result.error.message)
 }
 
 export async function changeEmail(newEmail: string) {
-  const result = await auth.changeEmail({ newEmail })
+  const result = await auth().changeEmail({ newEmail })
   if (result.error) throw new AccountError("updateFailed", result.error.message)
 }
 
 /** Also signs out the account's other browser sessions. */
 export async function changePassword(currentPassword: string, newPassword: string) {
-  const result = await auth.changePassword({ currentPassword, newPassword, revokeOtherSessions: true })
+  const result = await auth().changePassword({ currentPassword, newPassword, revokeOtherSessions: true })
   if (result.error) throw new AccountError("updateFailed", result.error.message)
 }
 
 export async function signOut(access: Access | undefined) {
   if (access) await gateway(`/tokens/${encodeURIComponent(access.tokenId)}`, { method: "DELETE", bearer: access.token }).catch(() => {})
-  await auth.signOut().catch(() => {})
+  await auth().signOut().catch(() => {})
   store(undefined)
 }
 
@@ -182,6 +188,28 @@ export function gatewayRequest<T>(path: string, init: RequestInit = {}): Promise
   const access = storedAccess()
   if (!access) return Promise.reject(new GatewayError(401, "not signed in"))
   return gateway<T>(path, { ...init, bearer: access.token })
+}
+
+// Provider API keys in the cloud. OpenCode's Providers page stores a key inside the server it
+// talks to; a cloud project's sandbox must never hold one (the gateway adds the key to each
+// model call), so for those servers the page stores and removes keys here instead.
+
+/** A server that is a cloud project behind the gateway (<gateway>/p/<project>). */
+export function isCloudServer(url: string | undefined) {
+  return enabled && !!url && url.startsWith(`${gatewayUrl}/p/`)
+}
+
+/** Stores the account's key for a provider; the gateway checks it with the provider first.
+ *  The account's projects restart with it on their next request (files kept). */
+export function storeProviderKey(provider: string, key: string) {
+  return gatewayRequest(`/keys/${encodeURIComponent(provider)}`, {
+    method: "PUT",
+    body: JSON.stringify({ api_key: key.trim() }),
+  })
+}
+
+export function removeProviderKey(provider: string) {
+  return gatewayRequest(`/keys/${encodeURIComponent(provider)}`, { method: "DELETE" })
 }
 
 /** The user's projects. A rejected token (revoked, expired) clears the stored access. */

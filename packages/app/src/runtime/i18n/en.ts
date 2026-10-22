@@ -1092,21 +1092,6 @@ export const dict = {
   "opensession.profile.save": "Save",
   "opensession.profile.saved": "Saved",
   "opensession.profile.failed": "Couldn't save the change",
-  "opensession.keys.title": "Model keys",
-  "opensession.keys.description": "Your own API keys for model providers. They stay encrypted on OpenSession and never enter your sandboxes.",
-  "opensession.keys.stored": "Key ending in {{last4}}",
-  "opensession.keys.none": "No key",
-  "opensession.keys.add": "Add key",
-  "opensession.keys.replace": "Replace",
-  "opensession.keys.remove": "Remove",
-  "opensession.keys.cancel": "Cancel",
-  "opensession.keys.save": "Save",
-  "opensession.keys.checking": "Checking…",
-  "opensession.keys.placeholder": "API key",
-  "opensession.keys.saved": "Saved. Your projects use it from their next request.",
-  "opensession.keys.removed": "Removed",
-  "opensession.keys.failed": "Couldn't save the key",
-  "opensession.keys.loadFailed": "Couldn't load your keys",
 }
 
 export default dict

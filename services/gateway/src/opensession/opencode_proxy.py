@@ -12,8 +12,8 @@ product rules that still apply (see docs/DESIGN-unified-runtime.md, D1):
 - rewrite: new sessions always live in /workspace and need a model, and the default
   location (GET /api/location without a directory) is /workspace, not OpenCode's
   home directory (where `opencode serve --service` runs);
-- filter: model and agent lists return display fields only, provider lists without
-  their settings (which can carry API keys);
+- filter: model, agent and provider lists lose every field that can carry
+  credentials (settings, apiKey, headers), at any depth; the rest passes through;
 - agent work (prompt, command, generate) is refused over the disk limit.
 
 Everything is a pure function of (method, path segments, body) so it can be tested
@@ -142,36 +142,27 @@ def filters_response(method: str, segs: list[str]) -> bool:
 
 
 def filter_response(segs: list[str], body: dict | list, allow_opencode_provider: bool):
-    """Model and agent entries carry provider settings (which can include API keys):
-    return display fields only, in OpenCode's own {"data": [...]} envelope. Provider
-    entries keep everything but their settings."""
-    if segs[:1] == ["provider"]:
-        return _without_settings(body)
-    items = body.get("data", []) if isinstance(body, dict) else body
-    out = []
-    for m in items if isinstance(items, list) else []:
-        if not isinstance(m, dict):
-            continue
-        if segs == ["model"]:
-            if m.get("providerID") == "opencode" and not allow_opencode_provider:
-                continue
-            item = {k: m[k] for k in ("id", "providerID", "name", "family", "capabilities") if k in m}
-            item["variants"] = [{"id": v["id"]} for v in m.get("variants") or [] if isinstance(v, dict) and "id" in v]
-        else:
-            item = {k: m[k] for k in ("id", "name", "description", "mode") if k in m}
-        out.append(item)
-    # Keep the rest of the envelope: OpenCode 2.1 answers location-scoped lists as
-    # {"location": ..., "data": [...]} and its client reads `location`.
-    rest = {k: v for k, v in body.items() if k != "data"} if isinstance(body, dict) else {}
-    return {**rest, "data": out}
+    """Model, agent and provider entries can carry provider settings, which can hold API
+    keys. Everything else passes through as OpenCode sent it (its apps need the full
+    records: costs, limits, variants, ...): only secret-bearing fields are removed, at any
+    depth. OpenCode's own hosted provider is hidden unless the deployment allows it."""
+    body = _scrubbed(body)
+    if segs == ["model"] and not allow_opencode_provider:
+        items = body.get("data") if isinstance(body, dict) else body
+        if isinstance(items, list):
+            kept = [m for m in items if not (isinstance(m, dict) and m.get("providerID") == "opencode")]
+            body = {**body, "data": kept} if isinstance(body, dict) else kept
+    return body
 
 
-def _without_settings(body):
-    """A provider (or list of providers) with its "settings" (baseURL, apiKey, ...) removed."""
-    if isinstance(body, list):
-        return [_without_settings(x) for x in body]
-    if not isinstance(body, dict):
-        return body
-    if "data" in body:
-        return {**body, "data": _without_settings(body["data"])}
-    return {k: v for k, v in body.items() if k != "settings"}
+# Fields that hold or may hold credentials: provider settings (baseURL, apiKey, headers)
+# and keys by name.
+SECRET_FIELDS = {"settings", "apiKey", "api_key", "headers"}
+
+
+def _scrubbed(value):
+    if isinstance(value, list):
+        return [_scrubbed(x) for x in value]
+    if isinstance(value, dict):
+        return {k: _scrubbed(v) for k, v in value.items() if k not in SECRET_FIELDS}
+    return value

@@ -150,13 +150,25 @@ def test_proxy_model_and_agent_lists_carry_no_settings():
         agents = c.get("/p/default/api/agent", headers=A)
     assert "SECRET" not in models.text and "SECRET" not in agents.text
     assert models.json() == {"data": [{"id": "claude-x", "providerID": "anthropic", "name": "Claude X", "variants": [{"id": "high"}]}]}
-    assert agents.json() == {"data": [{"id": "build", "name": "build", "description": "default", "mode": "primary"}]}
+    assert agents.json() == {"data": [{"id": "build", "name": "build", "description": "default", "mode": "primary",
+                                       "permissions": [], "model": {}}]}
 
 
-def test_model_and_agent_filters_keep_the_location_envelope():
-    body = {"location": {"directory": "/workspace"}, "data": [{"id": "m", "providerID": "anthropic", "settings": {"apiKey": "k"}}]}
+def test_filters_keep_full_records_and_remove_secrets_at_any_depth():
+    # OpenCode's apps need whole model records (cost, limits, status, ...) and the
+    # {location, data} envelope; only fields that can hold credentials go.
+    model = {"id": "m", "providerID": "anthropic", "modelID": "claude-x", "status": "active",
+             "cost": [{"input": 3, "output": 15, "cache": {"read": 0.3, "write": 3.75}}],
+             "settings": {"apiKey": "k"}, "variants": [{"id": "high", "settings": {"apiKey": "k2"}}],
+             "options": {"headers": {"authorization": "Bearer x"}, "api_key": "y", "timeout": 5}}
+    hosted = {"id": "free", "providerID": "opencode"}
+    body = {"location": {"directory": "/workspace"}, "data": [model, hosted]}
     out = ocp.filter_response(["model"], body, False)
-    assert out == {"location": {"directory": "/workspace"}, "data": [{"id": "m", "providerID": "anthropic", "variants": []}]}
+    assert out == {"location": {"directory": "/workspace"}, "data": [{
+        "id": "m", "providerID": "anthropic", "modelID": "claude-x", "status": "active",
+        "cost": [{"input": 3, "output": 15, "cache": {"read": 0.3, "write": 3.75}}],
+        "variants": [{"id": "high"}], "options": {"timeout": 5}}]}
+    assert [m["id"] for m in ocp.filter_response(["model"], body, True)["data"]] == ["m", "free"]
 
 
 def test_provider_list_drops_settings():

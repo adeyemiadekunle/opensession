@@ -4,7 +4,6 @@ import type { SettingsRootTab } from "./surface"
 
 export const pageIcons = {
   profile: "user",
-  keys: "lock",
   general: "sliders",
   appearance: "appearance",
   notifications: "notifications",
@@ -22,7 +21,6 @@ export const pageIcons = {
 
 export const pageLabels = {
   profile: "opensession.profile.title",
-  keys: "opensession.keys.title",
   general: "settings.tab.preferences",
   appearance: "settings.general.section.appearance",
   notifications: "settings.tab.notifications",

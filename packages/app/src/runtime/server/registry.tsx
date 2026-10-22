@@ -6,6 +6,7 @@ import { pathKey } from "@/workspaces/path-key"
 import { ServerScope } from "@/runtime/server/scope"
 import type { ServerEntry } from "@opencode/gui-extensions/sdk"
 import { ServerHttp, ServerHttpBase, ServerKey, serverState } from "./persistence"
+import { isCloudServer } from "@/opensession/account"
 
 type ServerState = ReturnType<typeof serverState>["current"]["Type"]
 
@@ -127,7 +128,9 @@ export function resolveServerList(input: {
       deduped.set(key, {
         ...existing,
         ...conn,
-        http: { ...existing.http, ...conn.http },
+        // OpenSession: a cloud project's credentials are the signed-in account's. A saved edit
+        // (e.g. from before signing in as someone else) keeps its display name but never its password.
+        http: isCloudServer(existing.http.url) ? { ...conn.http, ...existing.http } : { ...existing.http, ...conn.http },
       })
     else deduped.set(key, conn)
   }

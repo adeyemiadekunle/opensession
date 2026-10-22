@@ -11,6 +11,7 @@ import { formatServerError } from "@/runtime/server/errors"
 import { useData } from "@/runtime/server/current"
 import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore, produce } from "solid-js/store"
+import { isCloudServer, storeProviderKey } from "@/opensession/account"
 
 export type ProviderConnectMethod = Extract<IntegrationMethod, { type: "key" | "oauth" | "external" }>
 
@@ -80,6 +81,9 @@ export function createProviderConnectionController(options: {
   }
 
   const isConsole = () => options.provider() === CONSOLE_INTEGRATION
+  // OpenSession: a cloud project keeps no credentials in its sandbox. Keys go to the gateway
+  // (connectKey), and sign-in methods that would store tokens in the sandbox aren't offered.
+  const cloud = () => isCloudServer(serverSDK.url)
 
   // Not createResource: the dialog is owned by whichever page opened it, so reading a pending
   // resource here would suspend that page's <Suspense> and blank the screen behind the dialog.
@@ -107,6 +111,8 @@ export function createProviderConnectionController(options: {
   )
 
   const methods = createMemo<ProviderConnectMethod[]>(() => {
+    if (cloud()) return [{ type: "key", label: language.t("provider.connect.method.apiKey") }]
+
     const values = integration.latest?.methods.filter(
       (method): method is ProviderConnectMethod =>
         method.type === "key" || method.type === "oauth" || method.type === "external",
@@ -476,6 +482,20 @@ export function createProviderConnectionController(options: {
   }
 
   const connectKey = async (key: string) => {
+    if (cloud()) {
+      const stored = await storeProviderKey(options.keyProvider?.() ?? options.provider(), key)
+        .then(() => true)
+        .catch((error: unknown) => {
+          // The gateway's message, e.g. "anthropic rejected the key (HTTP 401)".
+          dispatch({ type: "auth.error", error: error instanceof Error ? error.message : String(error) })
+          return false
+        })
+
+      if (stored) await finish()
+
+      return
+    }
+
     await serverSDK.api.integration.connect.key({
       integrationID: options.keyProvider?.() ?? options.provider(),
       location: location(),
