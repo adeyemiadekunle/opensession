@@ -2,6 +2,8 @@
 
 import base64
 import json
+import os
+import tempfile
 import time
 
 import httpx
@@ -11,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from opensession.gateway import create_app
+from opensession.userstore import UserStore
 from opensession.github import GitHubApp, GitHubAppConfig, GitHubError, app_slug, git_auth_env, pem_key
 
 from .fakes import make_manager
@@ -41,6 +44,9 @@ class FakeGitHub:
         ]
         self.statuses = [{"context": "deploy/preview", "state": "success", "target_url": "https://preview"}]
         self.pulls_queries = []
+        # Open pull requests: head is "owner:branch".
+        self.pulls = [{"number": 7, "html_url": "https://github.com/alice-gh/app/pull/7", "head": "alice-gh:main", "base": "develop"}]
+        self.hide_pulls_once = False  # one lookup misses them, as when a concurrent attempt just created one
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.calls.append((req.method, req.url.path, req.headers.get("authorization", ""), req.content))
@@ -74,10 +80,22 @@ class FakeGitHub:
         if "/commits/" in p and p.endswith("/status"):
             return httpx.Response(200, json={"sha": "abc123", "state": "pending", "statuses": self.statuses})
         if p.endswith("/pulls") and req.method == "GET":
-            self.pulls_queries.append(dict(req.url.params))
-            return httpx.Response(200, json=[{"number": 7, "html_url": "https://github.com/alice-gh/app/pull/7"}])
+            q = dict(req.url.params)
+            self.pulls_queries.append(q)
+            if self.hide_pulls_once:
+                self.hide_pulls_once = False
+                return httpx.Response(200, json=[])
+            match = [x for x in self.pulls if x["head"] == q.get("head") and q.get("base", x["base"]) == x["base"]]
+            return httpx.Response(200, json=match)
         if p.endswith("/pulls"):
-            return httpx.Response(201, json={"number": 7, "html_url": "https://github.com/alice-gh/app/pull/7"})
+            body = json.loads(req.content)
+            head = f"{p.split('/')[2]}:{body['head']}"
+            if any(x["head"] == head and x["base"] == body["base"] for x in self.pulls):
+                return httpx.Response(422, json={"message": "Validation Failed"})
+            n = max(x["number"] for x in self.pulls) + 1
+            pr = {"number": n, "html_url": f"https://github.com/alice-gh/app/pull/{n}", "head": head, "base": body["base"]}
+            self.pulls.append(pr)
+            return httpx.Response(201, json=pr)
         return httpx.Response(404, json={"message": f"unexpected {p}"})
 
 
@@ -86,7 +104,9 @@ def client(github=True):
     fake = FakeGitHub()
     http = httpx.AsyncClient(transport=httpx.MockTransport(fake))
     gh = GitHubApp(gh_config(), http) if github else None
-    app = create_app(manager=mgr, reaper=False, keystore=None, github=gh)
+    # Its own database: these tests list the user's projects, which other tests also create.
+    users = UserStore(os.path.join(tempfile.mkdtemp(prefix="ostest-gh-"), "users.db"))
+    app = create_app(manager=mgr, reaper=False, keystore=None, github=gh, users=users)
     return TestClient(app), docker, seen, fake, gh
 
 
@@ -148,12 +168,12 @@ def test_connect_and_callback_flow():
         state = url.split("state=")[1]
 
         r = c.get("/github/callback", params={"state": state, "code": "good-code", "installation_id": 42}, follow_redirects=False)
-        assert r.status_code == 302 and r.headers["location"].endswith("/settings/connectors?github=connected")
+        assert r.status_code == 302 and r.headers["location"].endswith("/settings?tab=github&github=connected")
         assert c.get("/github", headers=A).json()["installations"] == [{"installation_id": 42, "account": "alice-gh"}]
 
         # someone else's installation id, a bad code or a forged state are refused
         r = c.get("/github/callback", params={"state": gh.make_state("alice"), "code": "good-code", "installation_id": 77}, follow_redirects=False)
-        assert "/settings/connectors?github=error" in r.headers["location"]
+        assert "/settings?tab=github&github=error" in r.headers["location"]
         r = c.get("/github/callback", params={"state": gh.make_state("alice"), "code": "bad", "installation_id": 42}, follow_redirects=False)
         assert "github=error" in r.headers["location"]
         r = c.get("/github/callback", params={"state": "forged", "code": "good-code", "installation_id": 42}, follow_redirects=False)
@@ -177,7 +197,7 @@ def test_link_records_installations_that_already_exist():
         assert url.startswith("https://github.com/login/oauth/authorize?client_id=") and "&state=" in url
         state = url.split("state=")[1]
         r = c.get("/github/callback", params={"state": state, "code": "good-code"}, follow_redirects=False)
-        assert r.status_code == 302 and r.headers["location"].endswith("/settings/connectors?github=connected")
+        assert r.status_code == 302 and r.headers["location"].endswith("/settings?tab=github&github=connected")
         assert [i["installation_id"] for i in c.get("/github", headers=A).json()["installations"]] == [42, 43]
 
         fake.user_installations = []  # signed in, but the app isn't installed anywhere for them
@@ -250,10 +270,22 @@ def test_git_info_checkout_push_and_pull_request():
 
         r = c.post("/git/pull-request", json={"title": "Fix login", "body": "Done by the agent"}, headers=h)
         assert r.status_code == 201
-        assert r.json() == {"number": 7, "url": "https://github.com/alice-gh/app/pull/7", "head": "fix/login", "base": "main"}
-        (pr_call,) = [x for x in fake.calls if x[1].endswith("/pulls")]
+        created = {"number": 8, "url": "https://github.com/alice-gh/app/pull/8", "head": "fix/login", "base": "main"}
+        assert r.json() == {**created, "existing": False}
+        (pr_call,) = [x for x in fake.calls if x[0] == "POST" and x[1].endswith("/pulls")]
         assert json.loads(pr_call[3]) == {"title": "Fix login", "head": "fix/login", "base": "main", "body": "Done by the agent"}
         assert pr_call[2] == "Bearer ghs_app"  # token scoped to this repository
+        assert fake.pulls_queries[-1] == {"head": "alice-gh:fix/login", "base": "main", "state": "open"}
+
+        # A retry (the first answer was lost: timeout, gateway restart) returns the same pull request.
+        r = c.post("/git/pull-request", json={"title": "Fix login"}, headers=h)
+        assert r.status_code == 200 and r.json() == {**created, "existing": True}
+        # A concurrent attempt created it between the lookup and the create: GitHub's 422 is not an error.
+        fake.hide_pulls_once = True
+        r = c.post("/git/pull-request", json={"title": "Fix login"}, headers=h)
+        assert r.status_code == 200 and r.json() == {**created, "existing": True}
+        assert len([x for x in fake.calls if x[0] == "POST" and x[1].endswith("/pulls")]) == 2  # 1 created, 1 refused
+        assert [x["number"] for x in fake.pulls] == [7, 8]
 
         docker.containers.exec_handler = lambda cmd: (0, b"main\n")
         assert c.post("/git/pull-request", json={"title": "x"}, headers=h).status_code == 409  # head == base

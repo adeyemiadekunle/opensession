@@ -1,8 +1,15 @@
-# JS / TS
+# JS / TS (OpenCode packages)
 node_modules/
 dist/
+dist-node
+ts-dist
 .turbo/
 *.tsbuildinfo
+*.bun-build
+.typecheck-profiles
+.cache
+packages/desktop/out/
+packages/desktop/release/
 
 # Python
 __pycache__/
@@ -16,6 +23,7 @@ build/
 # Local config and data
 .env
 .env.local
+.env.*.local
 *.db
 .trash/
 
@@ -25,5 +33,4 @@ scripts/check/openapi.json
 scripts/check/e2e-output.txt
 scripts/check/provider-output.txt
 scripts/check/config-output.txt
-apps/desktop/release/
-!apps/desktop/build/
+scripts/check/durable/run-*.log

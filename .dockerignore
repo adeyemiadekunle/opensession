@@ -1,4 +1,4 @@
-# Build context for apps/web/Dockerfile (the repository root).
+# Build context for packages/app/Dockerfile (the repository root).
 **/node_modules
 **/dist
 **/.turbo

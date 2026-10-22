@@ -3,6 +3,7 @@
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
+from .fakes import create_projects
 from .test_terminal import A, setup
 
 
@@ -16,6 +17,7 @@ def refused(c, url):
 def test_browser_relay_reaches_the_view_server_with_the_sandbox_password(monkeypatch):
     c, mgr, seen, opened = setup(monkeypatch)
     with c:
+        create_projects(c, A, "api")
         t = c.post("/browser/ticket", headers=A).json()["ticket"]
         with c.websocket_connect(f"/browser/connect?ticket={t}") as ws:
             assert ws.receive_bytes()[0] == 0  # the fake upstream's first frame
@@ -31,6 +33,7 @@ def test_browser_relay_reaches_the_view_server_with_the_sandbox_password(monkeyp
 def test_browser_ticket_is_single_use_and_not_a_terminal_ticket(monkeypatch):
     c, _, _, opened = setup(monkeypatch)
     with c:
+        create_projects(c, A, "api")
         assert c.post("/browser/ticket").status_code == 401
         t = c.post("/browser/ticket", headers=A).json()["ticket"]
         assert refused(c, f"/terminals/pty_abc/connect?ticket={t}")  # a browser ticket opens no terminal

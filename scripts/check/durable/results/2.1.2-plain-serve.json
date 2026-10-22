@@ -1,0 +1,276 @@
+[
+  {
+    "scenario": "no-failure",
+    "about": "Control run, no client attached",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 5,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:31:19 step=0 agent answered tool=write",
+      "12:31:19 step=0 side answered",
+      "12:31:19 step=1 agent answered tool=shell",
+      "12:31:45 step=2 agent answered tool=shell",
+      "12:31:45 step=3 agent answered tool=shell",
+      "12:31:45 step=4 agent answered"
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": {
+      "error": "TypeError: fetch failed"
+    }
+  },
+  {
+    "scenario": "kill-during-model-call",
+    "about": "SIGKILL while the first model request is in flight",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": false,
+    "outcome": null,
+    "modelRequests": 1,
+    "requestsPerStep": {
+      "0": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:33:12 step=0 agent held",
+      "12:33:12 step=0 side answered"
+    ],
+    "files": {
+      "notes": null,
+      "slowStepRuns": 0,
+      "commits": 0,
+      "afterCommitRuns": 0
+    },
+    "messages": [
+      "user: {\"id\":\"msg_16399cefe001KtS5k8EERNazqu\",\"time\":{\"created\":1792672392343},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "kill-after-file-write",
+    "about": "SIGKILL after the write tool ran, before the model saw its result",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": false,
+    "outcome": null,
+    "modelRequests": 2,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:35:57 step=0 agent answered tool=write",
+      "12:35:57 step=0 side answered",
+      "12:35:58 step=1 agent held"
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 0,
+      "commits": 0,
+      "afterCommitRuns": 0
+    },
+    "messages": [
+      "assistant: {\"id\":\"msg_1639c6b170012fyhFRALbf4f4t\",\"time\":{\"created\":1792672557883,\"streamed\":1792672558038,\"completed\":1792672558148},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_1639c5e53001XRo9BGPVpCOQ0U\",\"time\":{\"created\":1792672557805},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "kill-during-shell",
+    "about": "SIGKILL while a 25 s shell command is running",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": false,
+    "outcome": null,
+    "modelRequests": 2,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:38:39 step=0 agent answered tool=write",
+      "12:38:39 step=0 side answered",
+      "12:38:40 step=1 agent answered tool=shell"
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 0,
+      "afterCommitRuns": 0
+    },
+    "messages": [
+      "assistant: {\"id\":\"msg_1639ee59d001ikoa1q2cR6I2Rk\",\"time\":{\"created\":1792672720399,\"streamed\":1792672720492},\"type\":\"assistant\",\"agent\":\"build\",\"model\":{\"id\":\"claude-haiku-",
+      "assistant: {\"id\":\"msg_1639ee341001zeWRz9PLjiOJas\",\"time\":{\"created\":1792672719739,\"streamed\":1792672720024,\"completed\":1792672720225},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_1639ed9b9001asoJWCfTA6nCNa\",\"time\":{\"created\":1792672719622},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "kill-after-git-commit",
+    "about": "SIGKILL after git commit ran, before the model saw its result",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": false,
+    "outcome": null,
+    "modelRequests": 4,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:41:23 step=0 agent answered tool=write",
+      "12:41:23 step=0 side answered",
+      "12:41:23 step=1 agent answered tool=shell",
+      "12:41:49 step=2 agent answered tool=shell",
+      "12:41:49 step=3 agent held"
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 0
+    },
+    "messages": [
+      "assistant: {\"id\":\"msg_163a1c7cb00156gDzlryLlfZ62\",\"time\":{\"created\":1792672909317,\"streamed\":1792672909411,\"completed\":1792672909500},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a16400001JEwgQHn2linDqL\",\"time\":{\"created\":1792672883803,\"streamed\":1792672883943,\"completed\":1792672909218},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a162b8001F5qpc9MINKONpK\",\"time\":{\"created\":1792672883417,\"streamed\":1792672883556,\"completed\":1792672883650},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163a1594400158X1JdepXv4dRZ\",\"time\":{\"created\":1792672883350},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "graceful-stop-during-shell",
+    "about": "docker stop (SIGTERM, what idle sleep does) during the shell command, then start",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": false,
+    "outcome": null,
+    "modelRequests": 2,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:44:30 step=0 agent answered tool=write",
+      "12:44:30 step=0 side answered",
+      "12:44:30 step=1 agent answered tool=shell"
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 0,
+      "afterCommitRuns": 0
+    },
+    "messages": [
+      "assistant: {\"id\":\"msg_163a43db2001yVxur8GmOL667I\",\"time\":{\"created\":1792673070539,\"streamed\":1792673070622,\"completed\":1792673071812},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a43c0d001Wmie7IaGQrhoVz\",\"time\":{\"created\":1792673070135,\"streamed\":1792673070416,\"completed\":1792673070489},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163a431fb001ApI1sIWs0txxtw\",\"time\":{\"created\":1792673070050},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "provider-500",
+    "about": "Model provider answers 500 once (step 2)",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 6,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 2,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:47:10 step=0 agent answered tool=write",
+      "12:47:10 step=0 side answered",
+      "12:47:10 step=1 agent answered tool=shell",
+      "12:47:35 step=2 agent failed (500)",
+      "12:47:37 step=2 agent answered tool=shell",
+      "12:47:37 step=3 agent answered tool=shell",
+      "12:47:37 step=4 agent answered"
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163a719b1001NvbyjyQGNvJznS\",\"time\":{\"created\":1792673257905},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163a71984001XzlgiSltOQyAYt\",\"time\":{\"created\":1792673257872,\"streamed\":1792673257893,\"completed\":1792673257901},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a71923001dPv2JYz9bVnLXF\",\"time\":{\"created\":1792673257776,\"streamed\":1792673257804,\"completed\":1792673257847},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a710cb001yyvPblawQY2Z5J\",\"time\":{\"created\":1792673257688,\"streamed\":1792673257718,\"completed\":1792673257749},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a6ae36001DnC2RP70AJD0Pc\",\"time\":{\"created\":1792673230411,\"streamed\":1792673230449,\"completed\":1792673255611},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a6acfb001ANTXAvzgWOszAk\",\"time\":{\"created\":1792673230106,\"streamed\":1792673230288,\"completed\":1792673230365},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163a6a418001vvnz7zE1wR7B57\",\"time\":{\"created\":1792673230035},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "provider-stream-dropped",
+    "about": "Model stream cut off midway once (step 2), as when the gateway restarts",
+    "image": "opencode-sandbox:2.1.2",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 6,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 2,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "12:47:48 step=0 agent answered tool=write",
+      "12:47:48 step=0 side answered",
+      "12:47:49 step=1 agent answered tool=shell",
+      "12:48:14 step=2 agent failed (drop) tool=shell",
+      "12:48:16 step=2 agent answered tool=shell",
+      "12:48:16 step=3 agent answered tool=shell",
+      "12:48:16 step=4 agent answered"
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163a7b0990010mbvPJEfUyNQyS\",\"time\":{\"created\":1792673296537},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163a7b05d001Xtq5mZp7MOW1Zy\",\"time\":{\"created\":1792673296494,\"streamed\":1792673296523,\"completed\":1792673296533},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a7afc5001Rj11aVxXIkJ0Nl\",\"time\":{\"created\":1792673296339,\"streamed\":1792673296365,\"completed\":1792673296462},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a7a8030014Nzfhj1isYqmNi\",\"time\":{\"created\":1792673296253,\"streamed\":1792673296277,\"completed\":1792673296312},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a74578001Q2NfTqtmigyWPH\",\"time\":{\"created\":1792673269135,\"streamed\":1792673269180,\"completed\":1792673294322},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163a743cc001UnFpthyrwxH6Mz\",\"time\":{\"created\":1792673268715,\"streamed\":1792673268983,\"completed\":1792673269085},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163a73ca8001xPx1e37v9wEtxE\",\"time\":{\"created\":1792673268654},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  }
+]

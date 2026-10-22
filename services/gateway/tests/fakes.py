@@ -9,6 +9,10 @@ from opensession.orchestrator import NotFound, SandboxConfig, SandboxManager
 
 BODIES: list[tuple[str, bytes]] = []  # request bodies seen by the fake sandboxes
 BUSY_HOSTS: set[str] = set()  # sandbox IPs whose OpenCode reports a session still working
+# Finer control for run tracking: sandbox IP -> {session id: status} working there, and
+# session id -> OpenCode's session record (GET /api/session/<id>).
+ACTIVE: dict[str, dict] = {}
+SESSIONS: dict[str, dict] = {}
 QUERIES: list[tuple[str, str]] = []  # (raw path, query string) seen by the fake sandboxes
 
 
@@ -229,10 +233,14 @@ def sandbox_transport(seen):
         if request.url.path == "/api/pty" and request.method == "POST":
             return httpx.Response(200, json={"data": {"id": "pty_abc", "title": "Terminal", "command": "bash", "args": [],
                                                       "cwd": "/workspace", "status": "running", "pid": 7}})
+        if request.url.path == "/api/session/active" and request.url.host in ACTIVE:
+            return httpx.Response(200, json={"data": ACTIVE[request.url.host]})
+        if request.url.path.removeprefix("/api/session/") in SESSIONS and request.method == "GET":
+            return httpx.Response(200, json={"data": SESSIONS[request.url.path.removeprefix("/api/session/")]})
         if request.url.path == "/api/session/active":
             busy = request.url.host in BUSY_HOSTS
             return httpx.Response(200, json={"data": {"ses_1": {"status": "busy"}} if busy else {}})
-        if request.url.path == "/api/health":
+        if request.url.path in ("/api/health", "/api/info"):
             return httpx.Response(200, json={"healthy": True, "host": request.url.host})
         if request.url.path == "/api/session" and request.method == "POST":
             return httpx.Response(200, json={"data": {"id": "ses" + request.url.host.replace(".", "x")}})
@@ -245,6 +253,11 @@ def sandbox_transport(seen):
                 {"id": "claude-x", "providerID": "anthropic", "name": "Claude X",
                  "settings": {"apiKey": "sk-ant-SECRET"}, "variants": [{"id": "high", "settings": {}}]},
                 {"id": "free", "providerID": "opencode", "name": "Free", "settings": {"apiKey": "public"}}]})
+        if request.url.path == "/api/provider":
+            return httpx.Response(200, json={"location": {"directory": "/workspace"}, "data": [
+                {"id": "anthropic", "name": "Anthropic", "settings": {"apiKey": "sk-ant-SECRET", "baseURL": "http://gw"}}]})
+        if request.url.path == "/api/provider/anthropic":
+            return httpx.Response(200, json={"data": {"id": "anthropic", "name": "Anthropic", "settings": {"apiKey": "SECRET"}}})
         if request.url.path == "/api/agent":
             return httpx.Response(200, json={"data": [
                 {"id": "build", "name": "build", "description": "default", "mode": "primary",
@@ -281,3 +294,10 @@ def make_manager(**cfg_kw):
 def master_key(kid="k1"):
     """A fresh KEYSTORE_MASTER_KEYS entry."""
     return f"{kid}:{base64.b64encode(os.urandom(32)).decode()}"
+
+
+def create_projects(client, headers, *names):
+    """Projects must exist before they get a sandbox (only "default" always does)."""
+    for name in names:
+        r = client.post("/workspaces", json={"name": name}, headers={k: v for k, v in headers.items() if k != "X-Workspace"})
+        assert r.status_code in (201, 409), r.text

@@ -1,4 +1,4 @@
-"""Clerk session tokens, personal access tokens, per-user egress allowlists."""
+"""Better Auth session JWTs, personal access tokens, per-user egress allowlists."""
 
 import asyncio
 import time
@@ -6,7 +6,7 @@ import time
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from fastapi.testclient import TestClient
 
 from opensession.auth import AuthConfig
@@ -16,23 +16,25 @@ from opensession.userstore import UserStore, UserStoreError, collapse_domains, n
 
 from .fakes import make_manager
 
-KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+# Better Auth's JWT plugin signs with Ed25519 by default; iss and aud are its base URL.
+AUTH_URL = "http://localhost:3001"
+KEY = ed25519.Ed25519PrivateKey.generate()
 PEM = KEY.public_key().public_bytes(
     serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
 ).decode()
-OTHER = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+OTHER = ed25519.Ed25519PrivateKey.generate()
 
 
-def clerk_token(sub="user_2abcDEF123", key=KEY, azp="http://localhost:5173", exp=300, **extra):
+def session_token(sub="aBcD1234eFgH5678iJkL9012mNoP3456", key=KEY, iss=AUTH_URL, aud=AUTH_URL, exp=300, alg="EdDSA"):
     now = int(time.time())
-    claims = {"sub": sub, "sid": "sess_1", "iat": now, "nbf": now - 1, "exp": now + exp, "azp": azp, **extra}
-    return jwt.encode(claims, key, algorithm="RS256")
+    claims = {"sub": sub, "iat": now, "exp": now + exp, "iss": iss, "aud": aud, "email": "a@example.com"}
+    return jwt.encode(claims, key, algorithm=alg)
 
 
-def app_client(tmp_path, mode="clerk", egress_dir=None, manager=None):
+def app_client(tmp_path, mode="betterauth", egress_dir=None, manager=None):
     mgr, docker, seen = manager or make_manager(egress_proxy="egress" if egress_dir else None)
     users = UserStore(str(tmp_path / "u.db"))
-    cfg = AuthConfig(mode=mode, clerk_jwt_key=PEM, authorized_parties=["http://localhost:5173"])
+    cfg = AuthConfig(mode=mode, jwt_key=PEM, issuer=AUTH_URL, audience=AUTH_URL)
     eg = EgressRules(users, mgr, str(egress_dir) if egress_dir else None, "egress" if egress_dir else None)
     app = create_app(manager=mgr, reaper=False, keystore=None, auth_config=cfg, users=users, egress=eg)
     return TestClient(app), docker, users
@@ -42,30 +44,66 @@ def bearer(t):
     return {"Authorization": f"Bearer {t}"}
 
 
-# ---- Clerk session tokens -------------------------------------------------------
+# ---- Better Auth session JWTs -----------------------------------------------------
 
 
-def test_clerk_token_accepted_and_bad_ones_rejected(tmp_path):
+def test_session_token_accepted_and_bad_ones_rejected(tmp_path):
     c, _, _ = app_client(tmp_path)
     with c:
-        r = c.get("/me", headers=bearer(clerk_token()))
-        assert r.status_code == 200 and r.json() == {"user_id": "user_2abcDEF123", "via": "clerk", "admin": False}
+        r = c.get("/me", headers=bearer(session_token()))
+        assert r.status_code == 200
+        assert r.json() == {"user_id": "aBcD1234eFgH5678iJkL9012mNoP3456", "via": "session", "admin": False}
         assert c.get("/me").status_code == 401
-        assert c.get("/me", headers={"X-User-Id": "alice"}).status_code == 401  # no dev header in clerk mode
-        assert c.get("/me", headers=bearer(clerk_token(key=OTHER))).status_code == 401  # wrong signer
-        assert c.get("/me", headers=bearer(clerk_token(exp=-60))).status_code == 401  # expired
-        assert c.get("/me", headers=bearer(clerk_token(azp="https://evil.example"))).status_code == 401
-        assert c.get("/me", headers=bearer(clerk_token(sts="pending"))).status_code == 401
+        assert c.get("/me", headers={"X-User-Id": "alice"}).status_code == 401  # no dev header outside dev mode
+        assert c.get("/me", headers=bearer(session_token(key=OTHER))).status_code == 401  # wrong signer
+        assert c.get("/me", headers=bearer(session_token(exp=-60))).status_code == 401  # expired
+        assert c.get("/me", headers=bearer(session_token(iss="https://evil.example"))).status_code == 401
+        assert c.get("/me", headers=bearer(session_token(aud="https://evil.example"))).status_code == 401
         hs = jwt.encode({"sub": "x", "exp": int(time.time()) + 60}, "secret", algorithm="HS256")
         assert c.get("/me", headers=bearer(hs)).status_code == 401  # algorithm confusion
-        assert c.get("/me", headers=bearer(clerk_token(sub="bad id!"))).status_code == 400
+        assert c.get("/me", headers=bearer(session_token(sub="bad id!"))).status_code == 400
 
 
-def test_clerk_mode_requires_a_key():
+def test_rsa_signed_session_token(tmp_path):
+    # Better Auth can be configured for RS256 instead of Ed25519.
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = rsa_key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+    mgr, _, _ = make_manager()
+    cfg = AuthConfig(jwt_key=pem, issuer=AUTH_URL, audience=AUTH_URL)
+    app = create_app(manager=mgr, reaper=False, keystore=None, auth_config=cfg, users=UserStore(str(tmp_path / "u.db")))
+    with TestClient(app) as c:
+        assert c.get("/me", headers=bearer(session_token(key=rsa_key, alg="RS256"))).status_code == 200
+
+
+def test_betterauth_mode_requires_a_key():
     from opensession.auth import Authenticator
 
     with pytest.raises(ValueError):
-        Authenticator(AuthConfig(mode="clerk"), None)
+        Authenticator(AuthConfig(mode="betterauth"), None)
+    with pytest.raises(ValueError):
+        Authenticator(AuthConfig(mode="clerk", jwt_key=PEM), None)
+
+
+def test_basic_auth_carries_the_token_as_password(tmp_path):
+    # OpenCode's own apps log in to a server with Basic auth (user "opencode").
+    import base64
+
+    def basic(password, user="opencode"):
+        return {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
+
+    c, _, _ = app_client(tmp_path)
+    with c:
+        tok = c.post("/tokens", json={"name": "web app"}, headers=bearer(session_token())).json()["token"]
+        assert c.get("/me", headers=basic(tok)).json()["via"] == "token"
+        assert c.get("/me", headers=basic(session_token())).json()["via"] == "session"
+        assert c.get("/me", headers=basic(session_token(key=OTHER))).status_code == 401
+        assert c.get("/me", headers=basic("osk_madeup")).status_code == 401
+        assert c.get("/me", headers=basic("")).status_code == 401
+        assert c.get("/me", headers={"Authorization": "Basic %%%"}).status_code == 401  # not base64
+        # still a token: it can't mint more tokens
+        assert c.post("/tokens", json={"name": "x"}, headers=basic(tok)).status_code == 403
 
 
 def test_dev_mode_header(tmp_path):
@@ -79,20 +117,20 @@ def test_dev_mode_header(tmp_path):
 
 def test_access_token_lifecycle(tmp_path):
     c, _, users = app_client(tmp_path)
-    s = bearer(clerk_token())
+    s = bearer(session_token())
     with c:
         r = c.post("/tokens", json={"name": "laptop cli"}, headers=s)
         assert r.status_code == 201
         tok = r.json()["token"]
         assert tok.startswith("osk_")
-        assert c.get("/me", headers=bearer(tok)).json() == {"user_id": "user_2abcDEF123", "via": "token", "admin": False}
+        assert c.get("/me", headers=bearer(tok)).json() == {"user_id": "aBcD1234eFgH5678iJkL9012mNoP3456", "via": "token", "admin": False}
         listed = c.get("/tokens", headers=s).json()
         assert listed[0]["name"] == "laptop cli" and "token" not in listed[0]
         assert listed[0]["last_used_at"] is not None
         # a token cannot mint more tokens
         assert c.post("/tokens", json={"name": "x"}, headers=bearer(tok)).status_code == 403
         # another user cannot delete it
-        other = bearer(clerk_token(sub="user_other"))
+        other = bearer(session_token(sub="user_other"))
         assert c.delete(f"/tokens/{listed[0]['id']}", headers=other).status_code == 404
         assert c.delete(f"/tokens/{listed[0]['id']}", headers=s).status_code == 204
         assert c.get("/me", headers=bearer(tok)).status_code == 401

@@ -51,19 +51,17 @@ jobs:
           exit $status
 
   typescript:
-    name: Web, desktop, CLI, packages (TypeScript)
+    name: OpenCode packages (TypeScript)
     runs-on: ubuntu-latest
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo run typecheck test build
+          bun-version: 1.4.2
+      - run: bun install
+      - run: bun turbo typecheck --concurrency=3
 
   stack:
     name: Cloud stack smoke test (Docker)

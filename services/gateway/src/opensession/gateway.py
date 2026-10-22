@@ -4,7 +4,7 @@ FastAPI gateway: routes each user's requests to that user's own OpenCode sandbox
     pip install -e .
     SANDBOX_IMAGE=opencode-sandbox:latest uvicorn opensession.gateway:app
 
-Every request must be signed in (auth.py: Clerk session token from the web app,
+Every request must be signed in (auth.py: Better Auth session JWT from the web app,
 or a personal access token "osk_..." from the CLI/desktop app; AUTH_MODE=dev also
 accepts an X-User-Id header for local testing). A request may name a workspace with
 the X-Workspace header (default "default"). The user's sandbox is created or
@@ -70,6 +70,7 @@ from . import db as dbmod
 from .github import BRANCH_RE, REPO_RE, GitHubApp, GitHubAppConfig, GitHubError, git_auth_env
 from .egress import EgressRules
 from .userstore import UserStore, UserStoreError
+from .runs import RunStore, RunTracker
 from .keystore import (
     PROVIDERS,
     InvalidKey,
@@ -124,7 +125,7 @@ def production_problems(app) -> list[str]:
     st = app.state
     out = []
     if st.auth.cfg.mode == "dev":
-        out.append("AUTH_MODE=dev lets anyone act as any user; use AUTH_MODE=clerk")
+        out.append("AUTH_MODE=dev lets anyone act as any user; use AUTH_MODE=betterauth")
     if st.keystore is None:
         out.append("KEYSTORE_MASTER_KEYS is not set, so users can't store model API keys")
     if st.github is not None and not os.environ.get("GITHUB_STATE_SECRET"):
@@ -273,6 +274,9 @@ class ApiKeyBody(BaseModel):
     api_key: SecretStr = Field(min_length=8, max_length=512)
 
 
+# The project every user has without creating it.
+DEFAULT_WORKSPACE = "default"
+
 _FROM_ENV = object()
 
 
@@ -332,6 +336,7 @@ def create_app(
     http_transport: httpx.AsyncBaseTransport | None = None,
     auth_config: AuthConfig | None = None,
     users: UserStore | None = None,
+    runs: RunStore | None = None,
     egress: EgressRules | None = None,
     github: "GitHubApp | None | object" = _FROM_ENV,
     model_proxy: "mp.ModelProxy | None | object" = _FROM_ENV,
@@ -359,7 +364,14 @@ def create_app(
             )
         mgr.limits = _cached_limits(app.state.users)
         metrics: obs.Metrics = app.state.metrics
-        mgr.on_event = lambda kind, ref, data: metrics.event(kind, ref.user, ref.workspace, **data)
+        app.state.runs = runs or RunStore(_db_path())
+        tracker = RunTracker(app.state.runs, mgr)
+
+        def sandbox_event(kind: str, ref, data: dict) -> None:
+            metrics.event(kind, ref.user, ref.workspace, **data)
+            tracker.on_sandbox_event(kind, ref.user, ref.workspace, data)
+
+        mgr.on_event = sandbox_event
         app.state.http = httpx.AsyncClient(transport=http_transport)
         if model_proxy is _FROM_ENV:
             # Keys stay out of sandboxes when sandboxes can reach the gateway privately.
@@ -382,13 +394,15 @@ def create_app(
         app.state.clone_locks = {}
         app.state.term_tickets = {}
         app.state.previews = pv.Tickets()
-        task = asyncio.create_task(mgr.run_reaper()) if reaper else None
+        # The reaper sleeps idle sandboxes; the run tracker records runs and restarts
+        # sandboxes that stopped mid-run (runs.py).
+        tasks = [asyncio.create_task(mgr.run_reaper()), asyncio.create_task(tracker.run())] if reaper else []
         try:
             if app.state.egress.enabled:
                 await app.state.egress.sync()
             yield
         finally:
-            if task:
+            for task in tasks:
                 task.cancel()
             await mgr.aclose()
             await app.state.http.aclose()
@@ -533,6 +547,10 @@ def create_app(
 
     async def get_client(request: Request, ref: tuple[str, str]) -> httpx.AsyncClient:
         mgr: SandboxManager = request.app.state.sandboxes
+        # Only "default" and the user's own projects get a sandbox. Otherwise any name in a URL
+        # would start one, e.g. a tab still talking to a project that was just deleted.
+        if ref[1] != DEFAULT_WORKSPACE and not await workspace_record(request, ref):
+            raise HTTPException(404, f"no project {ref[1]!r}: create it first (POST /workspaces)")
         env, cfg = await user_profile(request, ref[0])
         try:
             client = await mgr.client(*ref, env, cfg)
@@ -809,7 +827,9 @@ def create_app(
 
     # ---- GitHub, projects (workspaces) and git ----------------------------------
 
-    WEB_URL = os.environ.get("OPENSESSION_WEB_URL", "http://localhost:5173")
+    WEB_URL = os.environ.get("OPENSESSION_WEB_URL", "http://localhost:3000")
+    # The web app's GitHub settings page, where the GitHub callback sends the browser back.
+    GITHUB_SETTINGS = f"{WEB_URL}/settings?tab=github"
 
     def require_github(request: Request) -> GitHubApp:
         gh = request.app.state.github
@@ -907,8 +927,8 @@ def create_app(
         except GitHubError as e:
             from urllib.parse import quote
 
-            return RedirectResponse(f"{WEB_URL}/settings/connectors?github=error&reason={quote(str(e))}", 302)
-        return RedirectResponse(f"{WEB_URL}/settings/connectors?github=connected", 302)
+            return RedirectResponse(f"{GITHUB_SETTINGS}&github=error&reason={quote(str(e))}", 302)
+        return RedirectResponse(f"{GITHUB_SETTINGS}&github=connected", 302)
 
     @app.delete("/github/installations/{installation_id}", status_code=204)
     async def github_forget(installation_id: int, request: Request, user: str = Depends(current_user)):
@@ -967,8 +987,29 @@ def create_app(
     async def delete_workspace(ws_id: str, request: Request, delete_data: bool = False, user: str = Depends(current_user)):
         if not WORKSPACE_ID_RE.match(ws_id):
             raise HTTPException(400, "invalid workspace id")
-        await request.app.state.sandboxes.destroy(user, ws_id, delete_data=delete_data)
+        # The record first: from then on no request can start the project's sandbox (get_client).
         await asyncio.to_thread(request.app.state.users.delete_workspace, user, ws_id)
+        await request.app.state.sandboxes.destroy(user, ws_id, delete_data=delete_data)
+        await asyncio.to_thread(request.app.state.runs.delete_workspace, user, ws_id)
+
+    @app.get("/runs")
+    async def list_runs(
+        request: Request, workspace: str | None = None, limit: int = 50, user: str = Depends(current_user)
+    ):
+        """The user's agent runs, newest first (all projects, or one): status, outcome and
+        usage. Read from the gateway's database, so no project is woken (runs.py)."""
+        if workspace is not None and not WORKSPACE_ID_RE.match(workspace):
+            raise HTTPException(400, "invalid workspace id")
+        if not 1 <= limit <= 200:
+            raise HTTPException(400, "limit must be between 1 and 200")
+        return await asyncio.to_thread(request.app.state.runs.list, user, workspace, limit)
+
+    @app.get("/runs/{run_id}")
+    async def get_run(run_id: str, request: Request, user: str = Depends(current_user)):
+        run = await asyncio.to_thread(request.app.state.runs.get, user, run_id)
+        if run is None:
+            raise HTTPException(404, "no such run")
+        return run
 
     @app.get("/git")
     async def git_info(
@@ -1177,7 +1218,10 @@ def create_app(
 
     @app.post("/git/pull-request", status_code=201)
     async def git_pull_request(body: PullRequest, request: Request, ref: tuple[str, str] = Depends(sandbox_ref)):
-        """Push the current branch and open a pull request into the project's branch."""
+        """Push the current branch and open a pull request into the project's branch.
+        Safe to retry: the push is never forced (pushing the same commit again is a no-op)
+        and an open pull request for the same branches is returned (200, existing: true)
+        instead of a second one."""
         ws, head = await push_current(request, ref, body.branch)
         base = body.base or ws.get("branch") or "main"
         if head == base:
@@ -1188,7 +1232,8 @@ def create_app(
             )
         except GitHubError as e:
             raise gh_error(e) from None
-        return {**pr, "head": head, "base": base}
+        out = {**pr, "head": head, "base": base}
+        return JSONResponse(out, status_code=200) if pr["existing"] else out
 
     # ---- agent setup: skills, agents, commands, MCP, permissions, ... ------------
 
@@ -1561,7 +1606,8 @@ def create_app(
         if ocp.is_agent_work(method, segs):
             check_disk(request, ref)
 
-        url = ocp.upstream_path(segs) + (f"?{request.url.query}" if request.url.query else "")
+        query = ocp.rewrite_query(method, segs, request.url.query)
+        url = ocp.upstream_path(segs) + (f"?{query}" if query else "")
         headers = {k: v for k in ocp.FORWARD_REQUEST_HEADERS if (v := request.headers.get(k))}
         stack = AsyncExitStack()
         try:

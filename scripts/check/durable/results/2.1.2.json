@@ -1,0 +1,362 @@
+[
+  {
+    "scenario": "no-failure",
+    "about": "Control run, no client attached",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {
+      "activeDuringShell": {
+        "ses_e9c4b9910ffepV7fJhofQThbZQ": {
+          "type": "running"
+        }
+      }
+    },
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 5,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "13:02:12 step=0 agent answered tool=write",
+      "13:02:12 step=0 side answered",
+      "13:02:13 step=1 agent answered tool=shell | last tool result: \"Created file successfully: notes.txt\"",
+      "13:02:38 step=2 agent answered tool=shell | last tool result: \"(no output)\"",
+      "13:02:38 step=3 agent answered tool=shell | last tool result: \"11a242e\\n\"",
+      "13:02:38 step=4 agent answered | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b4d8ee001gWJe2S8uoEmv33\",\"time\":{\"created\":1792674158830},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b4d875001v7drjNUR7nUCUX\",\"time\":{\"created\":1792674158744,\"streamed\":1792674158800,\"completed\":1792674158821},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b4d7c8001fUo73fyU6zfKNw\",\"time\":{\"created\":1792674158561,\"streamed\":1792674158610,\"completed\":1792674158681},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b4d72e001ts17780rAIMoRS\",\"time\":{\"created\":1792674158407,\"streamed\":1792674158448,\"completed\":1792674158511},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b4743d001jzf7JOITEfk25D\",\"time\":{\"created\":1792674133080,\"streamed\":1792674133130,\"completed\":1792674158354},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b472a6001yGhou3gjRih8Zh\",\"time\":{\"created\":1792674132692,\"streamed\":1792674132882,\"completed\":1792674133014},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163b4679d0017FJSMhUvPDM4A1\",\"time\":{\"created\":1792674132600},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "kill-during-model-call",
+    "about": "SIGKILL while the first model request is in flight",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {},
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 6,
+    "requestsPerStep": {
+      "0": 2,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": true,
+    "log": [
+      "13:02:50 step=0 agent held",
+      "13:02:50 step=0 side answered",
+      "13:02:54 step=0 agent answered tool=write [restart notice]",
+      "13:02:55 step=1 agent answered tool=shell [restart notice] | last tool result: \"Created file successfully: notes.txt\"",
+      "13:03:20 step=2 agent answered tool=shell [restart notice] | last tool result: \"(no output)\"",
+      "13:03:20 step=3 agent answered tool=shell [restart notice] | last tool result: \"7cbec17\\n\"",
+      "13:03:20 step=4 agent answered [restart notice] | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b57c5e001wr0O0DGEk7gFav\",\"time\":{\"created\":1792674200670},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b57c03001RvXCqfnZWw47eI\",\"time\":{\"created\":1792674200601,\"streamed\":1792674200635,\"completed\":1792674200663},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b57b86001XF7ErTaJ2iIZII\",\"time\":{\"created\":1792674200477,\"streamed\":1792674200506,\"completed\":1792674200559},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b57b1d001h0QXiqGv05wUN8\",\"time\":{\"created\":1792674200366,\"streamed\":1792674200396,\"completed\":1792674200437},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b51857001prpIKFbRN2ov3n\",\"time\":{\"created\":1792674175088,\"streamed\":1792674175129,\"completed\":1792674200332},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b51783001AiFiM66hBCe0ug\",\"time\":{\"created\":1792674174878,\"streamed\":1792674174964,\"completed\":1792674175037},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "synthetic: {\"id\":\"msg_163b5123d0017JMSrmv0Sa07Me\",\"metadata\":{\"notice\":\"restart\"},\"time\":{\"created\":1792674173501},\"text\":\"The server restarted while you were working. Con",
+      "user: {\"id\":\"msg_163b4ff4d0018luoO5aLlSZ7Ki\",\"time\":{\"created\":1792674170686},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "kill-after-file-write",
+    "about": "SIGKILL after the write tool ran, before the model saw its result",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {},
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 6,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 2,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": true,
+    "log": [
+      "13:03:31 step=0 agent answered tool=write",
+      "13:03:31 step=0 side answered",
+      "13:03:31 step=1 agent held | last tool result: \"Created file successfully: notes.txt\"",
+      "13:03:34 step=1 agent answered tool=shell [restart notice] | last tool result: \"Created file successfully: notes.txt\"",
+      "13:03:59 step=2 agent answered tool=shell [restart notice] | last tool result: \"(no output)\"",
+      "13:03:59 step=3 agent answered tool=shell [restart notice] | last tool result: \"aa319fc\\n\"",
+      "13:03:59 step=4 agent answered [restart notice] | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b614a6001YeY00Peuf70TVp\",\"time\":{\"created\":1792674239654},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b6146f001mx2gCrhfiXaW82\",\"time\":{\"created\":1792674239612,\"streamed\":1792674239641,\"completed\":1792674239650},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b613e8001wXucnGaDHWfIU4\",\"time\":{\"created\":1792674239494,\"streamed\":1792674239535,\"completed\":1792674239586},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b61388001iOnfwl4k0Xss5O\",\"time\":{\"created\":1792674239383,\"streamed\":1792674239414,\"completed\":1792674239450},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b5b0c2001WJrKCXRM20yVvH\",\"time\":{\"created\":1792674214107,\"streamed\":1792674214176,\"completed\":1792674239348},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "synthetic: {\"id\":\"msg_163b5ac65001ElFtITaDjrtrQ0\",\"metadata\":{\"notice\":\"restart\"},\"time\":{\"created\":1792674212965},\"text\":\"The server restarted while you were working. Con",
+      "assistant: {\"id\":\"msg_163b5a4ce001FbuBr9K4Ozs2NB\",\"time\":{\"created\":1792674211045,\"streamed\":1792674211165,\"completed\":1792674211221},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163b59ea10013ilDCf131JUcuB\",\"time\":{\"created\":1792674210998},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "kill-during-shell",
+    "about": "SIGKILL while a 25 s shell command is running",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {},
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 5,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": true,
+    "log": [
+      "13:04:13 step=0 agent answered tool=write",
+      "13:04:13 step=0 side answered",
+      "13:04:13 step=1 agent answered tool=shell | last tool result: \"Created file successfully: notes.txt\"",
+      "13:04:19 step=2 agent answered tool=shell [restart notice] | last tool result: \"{\\\"error\\\":{\\\"type\\\":\\\"aborted\\\",\\\"message\\\":\\\"Tool execution interrupted: shell\\\"},\\\"content\\\":[]}\"",
+      "13:04:19 step=3 agent answered tool=shell [restart notice] | last tool result: \"668be25\\n\"",
+      "13:04:19 step=4 agent answered [restart notice] | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b664a0001K1arlrlk6VlEUQ\",\"time\":{\"created\":1792674260128},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b663ff0011zpOmgKTCLG3rJ\",\"time\":{\"created\":1792674259995,\"streamed\":1792674260102,\"completed\":1792674260119},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b66330001fYl363GZwsy85M\",\"time\":{\"created\":1792674259783,\"streamed\":1792674259854,\"completed\":1792674259934},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b661a8001w84EdO3aCz9VOM\",\"time\":{\"created\":1792674259412,\"streamed\":1792674259527,\"completed\":1792674259732},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "synthetic: {\"id\":\"msg_163b6598d001ANxGO9PqM0xauE\",\"metadata\":{\"notice\":\"restart\"},\"time\":{\"created\":1792674257294},\"text\":\"The server restarted while you were working. Con",
+      "assistant: {\"id\":\"msg_163b64c14001N10nKFjvY6opsA\",\"time\":{\"created\":1792674253885,\"streamed\":1792674253942,\"completed\":1792674259500},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b64994001x8Cf4M75l4umGA\",\"time\":{\"created\":1792674253351,\"streamed\":1792674253709,\"completed\":1792674253808},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163b6407e001Le7Mwb5PGuHg3d\",\"time\":{\"created\":1792674253129},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "kill-after-git-commit",
+    "about": "SIGKILL after git commit ran, before the model saw its result",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {},
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 6,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 2,
+      "4": 1
+    },
+    "restartNoticeSeen": true,
+    "log": [
+      "13:04:32 step=0 agent answered tool=write",
+      "13:04:32 step=0 side answered",
+      "13:04:32 step=1 agent answered tool=shell | last tool result: \"Created file successfully: notes.txt\"",
+      "13:04:57 step=2 agent answered tool=shell | last tool result: \"(no output)\"",
+      "13:04:57 step=3 agent held | last tool result: \"051714c\\n\"",
+      "13:05:00 step=3 agent answered tool=shell [restart notice] | last tool result: \"051714c\\n\"",
+      "13:05:01 step=4 agent answered [restart notice] | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b70847001RYkg6dqUex68dq\",\"time\":{\"created\":1792674302023},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b70789001oVl9twIU0VaL1l\",\"time\":{\"created\":1792674301871,\"streamed\":1792674301950,\"completed\":1792674301992},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b703bf001yj7C1rkccgVq70\",\"time\":{\"created\":1792674300909,\"streamed\":1792674301066,\"completed\":1792674301730},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "synthetic: {\"id\":\"msg_163b6ff0b001GYPGBxUqSwXbH0\",\"metadata\":{\"notice\":\"restart\"},\"time\":{\"created\":1792674299660},\"text\":\"The server restarted while you were working. Con",
+      "assistant: {\"id\":\"msg_163b6f6690014yBU5O7KImzhrz\",\"time\":{\"created\":1792674297470,\"streamed\":1792674297522,\"completed\":1792674297562},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b693f7001xNenQZozYK45bb\",\"time\":{\"created\":1792674272268,\"streamed\":1792674272303,\"completed\":1792674297428},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b6931c00138ozYtgindY4Sb\",\"time\":{\"created\":1792674272052,\"streamed\":1792674272160,\"completed\":1792674272221},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163b68c5f0019hMQ6j5MUKdHE8\",\"time\":{\"created\":1792674272000},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "graceful-stop-during-shell",
+    "about": "docker stop (SIGTERM, what idle sleep does) during the shell command, then start",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {},
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 5,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": true,
+    "log": [
+      "13:05:15 step=0 agent answered tool=write",
+      "13:05:15 step=0 side answered",
+      "13:05:16 step=1 agent answered tool=shell | last tool result: \"Created file successfully: notes.txt\"",
+      "13:05:19 step=2 agent answered tool=shell [restart notice] | last tool result: \"{\\\"error\\\":{\\\"type\\\":\\\"aborted\\\",\\\"message\\\":\\\"Tool execution interrupted\\\"},\\\"content\\\":[]}\"",
+      "13:05:19 step=3 agent answered tool=shell [restart notice] | last tool result: \"7229214\\n\"",
+      "13:05:20 step=4 agent answered [restart notice] | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b74ef0001PGcMsaRB5u76o1\",\"time\":{\"created\":1792674320112},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b74eac001BCQOR6T2ASwfza\",\"time\":{\"created\":1792674320065,\"streamed\":1792674320095,\"completed\":1792674320108},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b74e18001RQY02aTS8qMQJe\",\"time\":{\"created\":1792674319915,\"streamed\":1792674319951,\"completed\":1792674320019},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b74d0e001SiQeYhhqG9yzXN\",\"time\":{\"created\":1792674319654,\"streamed\":1792674319724,\"completed\":1792674319874},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "synthetic: {\"id\":\"msg_163b748b4001WBnQ6b1VqmQTp4\",\"metadata\":{\"notice\":\"restart\"},\"time\":{\"created\":1792674318516},\"text\":\"The server restarted while you were working. Con",
+      "assistant: {\"id\":\"msg_163b73f6f001hEWN8c07nJJmtp\",\"time\":{\"created\":1792674316164,\"streamed\":1792674316202,\"completed\":1792674317127},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b73e3f001rc4BfQQu7zarIg\",\"time\":{\"created\":1792674315870,\"streamed\":1792674316016,\"completed\":1792674316116},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163b737450013m6c0TR39U1TJQ\",\"time\":{\"created\":1792674315807},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "provider-500",
+    "about": "Model provider answers 500 once (step 2)",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {},
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 6,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 2,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "13:05:32 step=0 agent answered tool=write",
+      "13:05:32 step=0 side answered",
+      "13:05:33 step=1 agent answered tool=shell | last tool result: \"Created file successfully: notes.txt\"",
+      "13:05:58 step=2 agent failed (500) | last tool result: \"(no output)\"",
+      "13:06:00 step=2 agent answered tool=shell | last tool result: \"(no output)\"",
+      "13:06:00 step=3 agent answered tool=shell | last tool result: \"32e726a\\n\"",
+      "13:06:00 step=4 agent answered | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b7ee39001MM1VEsHBX7z1Fe\",\"time\":{\"created\":1792674360889},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b7ede8001RHAm72o0S1jNK2\",\"time\":{\"created\":1792674360833,\"streamed\":1792674360868,\"completed\":1792674360884},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b7ed590010zfoIygogRM3oZ\",\"time\":{\"created\":1792674360688,\"streamed\":1792674360722,\"completed\":1792674360786},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b7e4ad001h8pVC1Hq4bcfqD\",\"time\":{\"created\":1792674360562,\"streamed\":1792674360595,\"completed\":1792674360643},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b781d8001l7GUtHngPYAkM8\",\"time\":{\"created\":1792674333175,\"streamed\":1792674333249,\"completed\":1792674358422},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b7807b001MiYgg0HgHbJqvN\",\"time\":{\"created\":1792674332828,\"streamed\":1792674333023,\"completed\":1792674333109},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163b778200011uip2bqJi9aujx\",\"time\":{\"created\":1792674332759},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  },
+  {
+    "scenario": "provider-stream-dropped",
+    "about": "Model stream cut off midway once (step 2), as when the gateway restarts",
+    "image": "opencode-sandbox:2.1.2",
+    "serveMode": "image entrypoint",
+    "opencode": "opencode v2.1.2",
+    "error": null,
+    "probe": {},
+    "settled": true,
+    "outcome": "succeeded",
+    "modelRequests": 6,
+    "requestsPerStep": {
+      "0": 1,
+      "1": 1,
+      "2": 2,
+      "3": 1,
+      "4": 1
+    },
+    "restartNoticeSeen": false,
+    "log": [
+      "13:06:11 step=0 agent answered tool=write",
+      "13:06:11 step=0 side answered",
+      "13:06:12 step=1 agent answered tool=shell | last tool result: \"Created file successfully: notes.txt\"",
+      "13:06:37 step=2 agent failed (drop) tool=shell | last tool result: \"(no output)\"",
+      "13:06:39 step=2 agent answered tool=shell | last tool result: \"(no output)\"",
+      "13:06:39 step=3 agent answered tool=shell | last tool result: \"629f534\\n\"",
+      "13:06:39 step=4 agent answered | last tool result: \"(no output)\""
+    ],
+    "files": {
+      "notes": "v1",
+      "slowStepRuns": 1,
+      "commits": 1,
+      "afterCommitRuns": 1
+    },
+    "messages": [
+      "idle: {\"id\":\"msg_163b884e8001gg781WVubokJW5\",\"time\":{\"created\":1792674399464},\"type\":\"idle\",\"outcome\":\"succeeded\"}",
+      "assistant: {\"id\":\"msg_163b884a3001exsX7FGZMlo6Cz\",\"time\":{\"created\":1792674399422,\"streamed\":1792674399449,\"completed\":1792674399460},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b8842a001VABBQNQ4N9x1YO\",\"time\":{\"created\":1792674399293,\"streamed\":1792674399326,\"completed\":1792674399377},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b87c9b001rfyfPYHf2EmzCm\",\"time\":{\"created\":1792674399201,\"streamed\":1792674399227,\"completed\":1792674399260},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b819c8001QOevWLhDhRun35\",\"time\":{\"created\":1792674372082,\"streamed\":1792674372132,\"completed\":1792674397321},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "assistant: {\"id\":\"msg_163b818ae001v8VeZ9YCTPdKDr\",\"time\":{\"created\":1792674371795,\"streamed\":1792674371936,\"completed\":1792674372009},\"type\":\"assistant\",\"agent\":\"build\",\"m",
+      "user: {\"id\":\"msg_163b8117a0018Fp0e8LyoUiuaI\",\"time\":{\"created\":1792674371721},\"text\":\"Run the baseline task.\",\"type\":\"user\"}"
+    ]
+  }
+]

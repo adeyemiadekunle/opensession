@@ -10,20 +10,23 @@ An AI coding agent where users bring their own model API key, built on
 | Apps | **desktop app**, **CLI** | **web app** (and the CLI) |
 | Where the agent runs | the user's computer, in their project folder | a private sandbox container per user |
 | API keys | saved by OpenCode on the user's machine | encrypted in the user's OpenSession account; never inside the sandbox (the gateway adds them to model calls) |
-| Sign-in | none needed | Clerk (web), access token (CLI) |
+| Sign-in | none needed | self-hosted Better Auth (web), access token (CLI, desktop) |
 
 Local mode is only the desktop app and the CLI; the web app always works in the cloud.
 
 ## Repository layout
 
-    apps/
-      web/              Vite + React + Clerk: cloud workspace and settings
-      desktop/          Electron: local workspace (runs OpenCode on this computer)
-      cli/              `opensession` command: login, keys, egress, run, local
+The web app, desktop app and CLI are OpenCode's own packages, imported fresh from
+[anomalyco/opencode](https://github.com/anomalyco/opencode) (`dev` branch, see `UPSTREAM.md`)
+and adapted from there.
+
     packages/
-      api-client/       TypeScript client: CloudClient (gateway) and LocalClient (OpenCode)
-      ui/               React workspace UI shared by web and desktop
-      local-runner/     starts/stops `opencode serve` locally (desktop, CLI)
+      app/              web UI (SolidJS + Vite), also the desktop app's renderer
+      desktop/          Electron shell around packages/app
+      cli/              `opencode` command and TUI
+      core, server, client, sdk-side packages, ui, session-ui, ...  OpenCode internals they need
+    patches/            dependency patches (bun patchedDependencies)
+    script/             OpenCode's repo tooling (lint rules, release helpers)
     services/
       gateway/          Python FastAPI backend: auth, sandboxes, keys, egress rules
       sandbox/          sandbox image (OpenCode V2 + toolchains, non-root)
@@ -32,146 +35,86 @@ Local mode is only the desktop app and the CLI; the web app always works in the 
     scripts/check/      checks against real Docker + OpenCode (Windows .bat files)
     docker-compose.yml  gateway + egress proxy for running the cloud side
 
-TypeScript uses pnpm workspaces and Turborepo; the backend is a normal Python package.
+TypeScript uses Bun workspaces and Turborepo (`bun install`, `bun dev:web`,
+`bun dev:desktop`, `bun dev` for the CLI); the backend is a normal Python package.
 
 ## Quick start
 
-Requirements: Node 22+, pnpm 10 (`npm i -g pnpm`), Python 3.10+, Docker.
+Requirements: Bun 1.4.2, Node 22+, Python 3.10+, Docker.
 
-    pnpm install
-    pnpm test            # all TypeScript packages
-    pnpm typecheck
-    pnpm build
+    bun install
+    bun typecheck
+    bun dev:web          # web app (packages/app)
+    bun dev:desktop      # desktop app (packages/desktop)
+    bun dev              # CLI (packages/cli)
 
     cd services/gateway
     python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # Windows: .venv\Scripts\pip
     .venv/bin/pytest
 
-### Cloud: gateway + web app
+The web app talks to a local `opencode serve` by default. To use OpenSession accounts and
+cloud projects instead, start the cloud stack (below) and put this in
+`packages/app/.env.development.local`:
 
-1. Build the sandbox image and configure the gateway:
+    VITE_OPENSESSION_GATEWAY_URL=http://localhost:8787
+    VITE_OPENSESSION_AUTH_URL=http://localhost:3001
+
+The app then asks you to sign in (Better Auth), and each of your projects appears as a
+server (`<gateway>/p/<project>`). In `.env`, CORS_ORIGINS and AUTH_TRUSTED_ORIGINS must
+include `http://localhost:3000`.
+
+### Cloud: gateway, sign-in and web app
+
+1. Build the sandbox image and configure the stack:
 
         docker build -t opencode-sandbox:latest services/sandbox
         copy .env.example .env        # cp on macOS/Linux; then fill it in
 
-   In `.env` set `KEYSTORE_MASTER_KEYS` (`python -m opensession.keystore genkey`)
-   and Clerk: `AUTH_MODE=clerk`, `CLERK_JWT_KEY` (Clerk Dashboard > API keys > JWKS
-   public key) or `CLERK_JWKS_URL`, `CLERK_AUTHORIZED_PARTIES` and `CORS_ORIGINS`
-   (your web app origin, `http://localhost:5173` in development).
+   In `.env` set `KEYSTORE_MASTER_KEYS` (`python -m opensession.keystore genkey`),
+   `BETTER_AUTH_SECRET` (`openssl rand -base64 32`) and `POSTGRES_PASSWORD`. The rest
+   of the template is set up for localhost.
 
-2. Set `POSTGRES_PASSWORD` in `.env`, then start the gateway, its Postgres database
-   and the egress proxy: `docker compose up --build` (gateway on
-   http://localhost:8787).
-
-   Already have data in the old SQLite file? Copy it into Postgres once:
-
-        docker compose exec gateway python -m opensession migrate-db /data/opensession.db "$DATABASE_URL"
+2. Start the gateway, the sign-in server (`services/auth`, self-hosted Better Auth),
+   Postgres and the egress proxy: `docker compose up --build` (gateway on
+   http://localhost:8787, sign-in on http://localhost:3001).
 
    Without `DATABASE_URL` the gateway uses SQLite (`OPENSESSION_DB`), which is fine
    for a single process and for tests.
 
-3. Web app: copy `apps/web/.env.example` to `apps/web/.env`, set
-   `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_GATEWAY_URL`, then `pnpm dev:web`.
-
-### Local: desktop app and CLI
-
-Local mode runs OpenCode V2, which OpenSession downloads by itself the first time
-(only the build for this computer, about 100 MB, from OpenCode's npm release, checked
-against its sha512) into `~/.local/share/opensession/opencode/<version>/`
-(`%LOCALAPPDATA%\opensession\opencode\` on Windows). The desktop app and the CLI share
-it. The version comes from `OPENCODE_VERSION`: at run time, else the value the app was
-built with (the Release workflow's repository variable `OPENCODE_VERSION`), else
-2.0.0. Use the same version as the server's sandbox image (Dokploy's
-`OPENCODE_VERSION`). Set `OPENCODE_BIN` to use another OpenCode altogether.
-
-    pnpm dev:desktop                 # Electron app: pick a folder and start coding,
-                                     # or switch to Cloud (sign in with the browser)
-    pnpm cli local key anthropic     # save a key on this computer
-    pnpm cli run --local "add a README" -C ./my-project   # same as `local run`
-    pnpm cli attach --local -C ./my-project              # chat from the terminal
-    pnpm cli local serve -C ./my-project
+3. Web app: put the two `VITE_OPENSESSION_*` lines above in
+   `packages/app/.env.development.local`, then `bun dev:web` (http://localhost:3000).
 
 ### Production: one VPS with Dokploy
 
 [docs/DEPLOY-dokploy.md](docs/DEPLOY-dokploy.md) deploys everything (web app,
-gateway, Postgres, egress proxy, sandboxes) on one Ubuntu VPS behind Dokploy's
-HTTPS: `docker-compose.dokploy.yml`, plus `scripts/vps/setup-host.sh` once for
-gVisor and Docker's network pools.
+sign-in, gateway, Postgres, egress proxy, sandboxes) on one Ubuntu VPS behind
+Dokploy's HTTPS: `docker-compose.dokploy.yml`, plus `scripts/vps/setup-host.sh` once
+for gVisor and Docker's network pools. The web app's image is `packages/app/Dockerfile`.
 
-### Releases: desktop installers and the CLI
+### Releases: desktop installers
 
-Push a version tag to publish everything as one GitHub Release:
+Push a version tag to publish a GitHub Release:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-The **Release** workflow (`.github/workflows/release.yml`) builds the desktop app on
-macOS, Windows and Linux and the CLI, and attaches them under stable names
-(`OpenSession-mac-arm64.dmg`, `OpenSession-win-x64.exe`,
-`OpenSession-linux-x86_64.AppImage`, `opensession.mjs`, the install scripts, ...), so
+The **Release** workflow (`.github/workflows/release.yml`) builds the desktop app
+(`packages/desktop`) on macOS, Windows and Linux with the OpenCode CLI bundled
+(`OPENCODE_VERSION`, default 2.1.2; match the server's sandbox image), and attaches
+the installers under stable names (`OpenSession-mac-arm64.dmg`,
+`OpenSession-win-x64.exe`, ...), so
 `https://github.com/<owner>/<repo>/releases/latest/download/<file>` is always the
-newest. The web app's **Download** page (`/download`, public, also in the account
-menu) links to them. With an `NPM_TOKEN` secret the CLI is also published to npm as
-`opensession-cli`. It needs the repository variables `OPENSESSION_WEB_URL` and
-`OPENSESSION_GATEWAY_URL` (compiled into both apps), and optionally `OPENCODE_VERSION`
-(the OpenCode they install for local mode; match the server's). Builds are signed and notarized
-when the signing secrets are set (see the workflow file); otherwise macOS and Windows
-warn on first launch. Build locally with `pnpm desktop:build` (see
-`scripts/build-desktop.mjs`). Both download OpenCode for local mode by themselves.
+newest. The repository variables `OPENSESSION_GATEWAY_URL` and `OPENSESSION_AUTH_URL`
+are compiled in. Builds are signed and notarized when the signing secrets are set
+(see the workflow file); otherwise macOS and Windows warn on first launch.
 
-### Install the CLI
+### Still being moved to the new apps
 
-From your deployment (the build has its addresses; needs Node.js 20+):
-
-    curl -fsSL https://app.yourdomain.com/install.sh | sh        # macOS, Linux
-    irm https://app.yourdomain.com/install.ps1 | iex             # Windows PowerShell
-
-Or from npm, then point it at your servers:
-
-    npm install -g opensession-cli
-    opensession config --gateway https://api.yourdomain.com --web https://app.yourdomain.com
-
-Both install OpenCode too (the npm package in its postinstall), so nothing else is
-needed. Then, in a terminal in any project folder:
-
-    opensession local key anthropic   # once: a model API key, kept on this computer
-    opensession                       # chat with the agent in this folder
-
-From a checkout, `pnpm cli ...` runs it from source.
-
-### CLI against the cloud
-
-    pnpm cli login                   # opens the web app to authorize the CLI
-    pnpm cli keys set anthropic
-    pnpm cli egress add api.example.com
-    pnpm cli run "fix the failing tests" -m anthropic/claude-sonnet-4-5
-    pnpm cli github connect          # install the GitHub App on some repos
-    pnpm cli projects create api --repo you/api
-    pnpm cli -p <project-id> run "add pagination to /users"
-    pnpm cli -p <project-id> git checkout -b feature/pagination
-    pnpm cli -p <project-id> git push
-    pnpm cli -p <project-id> git pr "Add pagination"
-    pnpm cli -p <project-id> status  # awake or asleep, disk use, which projects are awake
-    pnpm cli projects sleep <project-id>
-    pnpm cli -p <project-id> attach  # chat with the cloud agent from the terminal
-
-### Moving work between this computer and the cloud
-
-A project is the same GitHub repository in both places, so work moves as a branch.
-Your own git credentials push from this computer; the GitHub App pushes from the
-cloud. Both directions fast-forward only and refuse to touch uncommitted work.
-
-    # in a clone of you/api, on feature/pagination:
-    pnpm cli handoff cloud --commit "wip"   # push, then continue in the cloud project
-                                            # for you/api (created if there is none)
-    pnpm cli attach                         # ...work with the agent in the cloud...
-    pnpm cli handoff local --commit "agent: pagination"
-                                            # commit + push in the cloud, check it out here
-
-Sessions (chat history) stay where they ran; the code moves.
-
-Build a standalone CLI with `pnpm --filter @opensession/cli build` (`apps/cli/dist/index.js`).
+The previous OpenSession apps had a CLI (`opensession login`, `run`, `attach`,
+`handoff`, ...), cloud sign-in in the desktop app, an Admin page and an Agent setup
+page. The gateway still serves all of them; the clients are being rebuilt on
+OpenCode's packages (the CLI as an OpenCode plugin).
 
 ## Agent setup: skills, agents, commands, MCP, tools
 
@@ -300,7 +243,7 @@ output it missed.
 
 ## Gateway API (services/gateway)
 
-Every request needs `Authorization: Bearer <token>`: a Clerk session token (web) or
+Every request needs `Authorization: Bearer <token>`: a Better Auth JWT (web) or
 an access token `osk_...` (CLI, desktop). `AUTH_MODE=dev` also accepts `X-User-Id`
 for local testing only.
 
@@ -357,7 +300,7 @@ all behaved as expected.
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request:
 
 - **Gateway:** `pytest` in `services/gateway`, against SQLite and a Postgres service
-- **TypeScript:** `pnpm turbo run typecheck test build` (web, desktop, CLI, packages)
+- **TypeScript:** `bun turbo typecheck` (web, desktop, CLI, packages)
 - **Cloud stack:** `scripts/check/smoke.sh` builds the images and starts the
   gateway, Postgres and egress proxy on Docker, then checks sandboxes, isolation,
   egress, per-user domains, the agent setup, sleep and resume (sessions kept), the

@@ -9,7 +9,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from opensession.gateway import create_app
 
-from .fakes import BODIES, make_manager
+from .fakes import BODIES, make_manager, create_projects
 
 A = {"X-User-Id": "alice", "X-Workspace": "api"}
 
@@ -62,6 +62,7 @@ def setup(monkeypatch):
 def test_terminal_create_resize_and_relay(monkeypatch):
     c, mgr, seen, opened = setup(monkeypatch)
     with c:
+        create_projects(c, A, "api")
         # create: POST /api/pty in /workspace, then size
         r = c.post("/terminals", json={"cols": 100, "rows": 30}, headers=A)
         assert r.status_code == 201 and r.json()["id"] == "pty_abc"
@@ -91,6 +92,7 @@ def test_terminal_create_resize_and_relay(monkeypatch):
 def test_ticket_is_single_use_and_bound_to_the_terminal(monkeypatch):
     c, mgr, seen, opened = setup(monkeypatch)
     with c:
+        create_projects(c, A, "api")
         t = c.post("/terminals/pty_abc/ticket", headers=A).json()["ticket"]
         for url in (f"/terminals/pty_other/connect?ticket={t}", f"/terminals/pty_abc/connect?ticket={t}",
                     "/terminals/pty_abc/connect", "/terminals/pty_abc/connect?ticket=forged"):
@@ -105,6 +107,7 @@ def test_ticket_is_single_use_and_bound_to_the_terminal(monkeypatch):
 def test_terminal_keeps_sandbox_awake_while_connected(monkeypatch):
     c, mgr, seen, opened = setup(monkeypatch)
     with c:
+        create_projects(c, A, "api")
         t = c.post("/terminals/pty_abc/ticket", headers=A).json()["ticket"]
         with c.websocket_connect(f"/terminals/pty_abc/connect?ticket={t}") as ws:
             ws.receive_bytes()
@@ -122,6 +125,7 @@ def test_bad_origin_refused(monkeypatch):
     monkeypatch.setenv("ALLOW_UNSAFE_START", "1")  # a public origin with dev auth (test only)
     c, mgr, seen, opened = setup(monkeypatch)
     with c:
+        create_projects(c, A, "api")
         t = c.post("/terminals/pty_abc/ticket", headers=A).json()["ticket"]
         with pytest.raises(WebSocketDisconnect) as e:
             with c.websocket_connect(f"/terminals/pty_abc/connect?ticket={t}", headers={"origin": "https://evil.example"}) as ws:

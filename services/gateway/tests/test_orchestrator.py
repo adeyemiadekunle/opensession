@@ -49,7 +49,7 @@ def test_password_is_random_per_container_and_used_for_basic_auth():
     pws = {c.kwargs["environment"]["OPENCODE_SERVER_PASSWORD"] for c in docker.containers.by_name.values()}
     assert len(pws) == 2 and "attacker" not in pws
     # Basic auth with that password was used for the readiness probe.
-    auths = {a for (_, _, p, a) in seen if p == "/api/health"}
+    auths = {a for (_, _, p, a) in seen if p == "/api/info"}
     creds = {tuple(base64.b64decode(a.split()[1]).decode().split(":", 1)) for a in auths}
     assert creds == {("opencode", pw) for pw in pws}
 

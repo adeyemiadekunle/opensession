@@ -275,10 +275,28 @@ class GitHubApp:
         return {"repo": repo, "ref": ref, "sha": sha, "state": state, "checks": checks, "pull_request": pr}
 
     async def create_pull_request(self, installation_id: int, repo: str, head: str, base: str, title: str, body: str) -> dict:
+        """Open a pull request head -> base, or return the one already open for that pair.
+
+        Safe to retry: when a request times out or the gateway restarts, the first attempt
+        may have created the pull request already. GitHub refuses a second one for the same
+        head and base (422), so look first, and look again if a concurrent attempt won."""
         token = await self.installation_token(installation_id, repo)
-        r = await self._req("POST", f"/repos/{repo}/pulls", token, json={"title": title, "head": head, "base": base, "body": body})
+        if existing := await self._open_pull_request(token, repo, head, base):
+            return {**existing, "existing": True}
+        try:
+            r = await self._req("POST", f"/repos/{repo}/pulls", token, json={"title": title, "head": head, "base": base, "body": body})
+        except GitHubError as e:
+            if "GitHub 422" in str(e) and (existing := await self._open_pull_request(token, repo, head, base)):
+                return {**existing, "existing": True}
+            raise
         d = r.json()
-        return {"number": d.get("number"), "url": d.get("html_url")}
+        return {"number": d.get("number"), "url": d.get("html_url"), "existing": False}
+
+    async def _open_pull_request(self, token: str, repo: str, head: str, base: str) -> dict | None:
+        owner = repo.split("/", 1)[0]
+        params = {"head": f"{owner}:{head}", "base": base, "state": "open"}
+        pulls = (await self._req("GET", f"/repos/{repo}/pulls", token, params=params)).json()
+        return {"number": pulls[0]["number"], "url": pulls[0]["html_url"]} if pulls else None
 
 
 def git_auth_env(token: str) -> dict[str, str]:

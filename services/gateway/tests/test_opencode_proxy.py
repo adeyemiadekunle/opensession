@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from opensession import opencode_proxy as ocp
 from opensession.gateway import create_app
 
-from .fakes import BODIES, QUERIES, make_manager
+from .fakes import BODIES, QUERIES, make_manager, create_projects
 
 A = {"X-User-Id": "alice"}
 
@@ -39,13 +39,32 @@ def test_upstream_path_quotes_each_segment():
 
 @pytest.mark.parametrize(
     "path",
-    ["credential/abc", "integration/anthropic/connect/key", "provider", "provider/openai", "config",
+    ["credential/abc", "integration/anthropic/connect/key",
      "debug/location", "experimental/migration/v1", "experimental/persistent-pty/handoff", "plugin/update"],
 )
 def test_denied_endpoints(path):
     with pytest.raises(ocp.ProxyRefused) as e:
         ocp.check("GET", path.split("/"))
     assert e.value.status == 403
+
+
+@pytest.mark.parametrize("path", ["provider", "provider/openai", "config", "config/shell"])
+def test_config_and_providers_are_read_only(path):
+    # OpenCode's own apps read them; changes go through /keys and /agent-config.
+    ocp.check("GET", path.split("/"))
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        with pytest.raises(ocp.ProxyRefused) as e:
+            ocp.check(method, path.split("/"))
+        assert e.value.status == 403
+
+
+def test_default_location_is_the_workspace():
+    q = ocp.rewrite_query
+    assert q("GET", ["location"], "") == "location%5Bdirectory%5D=%2Fworkspace"
+    assert q("GET", ["location"], "location%5Bdirectory%5D=") == "location%5Bdirectory%5D=%2Fworkspace"
+    assert q("GET", ["location"], "location%5Bdirectory%5D=%2Fworkspace%2Fsub") == "location%5Bdirectory%5D=%2Fworkspace%2Fsub"
+    assert q("GET", ["vcs"], "location%5Bdirectory%5D=") == "location%5Bdirectory%5D="  # only the default lookup
+    assert q("POST", ["location"], "") == ""
 
 
 def test_websocket_endpoints_point_to_terminal_tickets():
@@ -83,6 +102,7 @@ def test_proxy_forwards_to_the_callers_own_sandbox():
     c, mgr, docker, seen = proxy_client()
     BODIES.clear()
     with c:
+        create_projects(c, A, "api")
         r = c.get("/p/default/api/session/ses_1/message?order=desc&limit=5", headers=A)
         assert r.status_code == 200 and r.json() == {"path": "/api/session/ses_1/message"}
         # Endpoints the old hand-written routes never exposed now just work.
@@ -91,13 +111,28 @@ def test_proxy_forwards_to_the_callers_own_sandbox():
         assert c.get("/p/default/api/health", headers={"X-User-Id": "bob"}).status_code == 200
     hosts = {h for (h, m, p, _) in seen if p == "/api/session/ses_1/message"}
     (alice_host,) = hosts
-    bob_host = {h for (h, m, p, _) in seen if p == "/api/health" and h != alice_host}
+    bob_host = {h for (h, m, p, _) in seen if p == "/api/info" and h != alice_host}
     assert bob_host and alice_host not in bob_host
     assert len(docker.containers.by_name) == 3  # alice/default, alice/api, bob/default
     (auth,) = {a for (h, m, p, a) in seen if p == "/api/session/ses_1/message"}
     assert auth.startswith("Basic ")  # the sandbox password, added by the gateway
     assert base64.b64decode(auth.split()[1]).decode().startswith("opencode:")
     assert ("/api/session/ses_1/fork", b'{"messageID":"msg_1"}') in BODIES
+
+
+def test_only_existing_projects_get_a_sandbox():
+    # A name in a URL is not enough: e.g. a tab still talking to a project that was just deleted
+    # must not bring its sandbox back.
+    c, mgr, docker, _ = proxy_client()
+    with c:
+        assert c.get("/p/nope/api/info", headers=A).status_code == 404
+        assert not docker.containers.by_name
+        create_projects(c, A, "site")
+        assert c.get("/p/site/api/info", headers=A).status_code == 200
+        assert c.delete("/workspaces/site?delete_data=true", headers=A).status_code == 204
+        assert c.get("/p/site/api/info", headers=A).status_code == 404
+        assert [n for n, x in docker.containers.by_name.items() if not x.removed] == []
+        assert c.get("/p/default/api/info", headers=A).status_code == 200  # always exists
 
 
 def test_proxy_forwards_query_and_does_not_leak_caller_headers():
@@ -131,7 +166,35 @@ def test_proxy_model_and_agent_lists_carry_no_settings():
         agents = c.get("/p/default/api/agent", headers=A)
     assert "SECRET" not in models.text and "SECRET" not in agents.text
     assert models.json() == {"data": [{"id": "claude-x", "providerID": "anthropic", "name": "Claude X", "variants": [{"id": "high"}]}]}
-    assert agents.json() == {"data": [{"id": "build", "name": "build", "description": "default", "mode": "primary"}]}
+    assert agents.json() == {"data": [{"id": "build", "name": "build", "description": "default", "mode": "primary",
+                                       "permissions": [], "model": {}}]}
+
+
+def test_filters_keep_full_records_and_remove_secrets_at_any_depth():
+    # OpenCode's apps need whole model records (cost, limits, status, ...) and the
+    # {location, data} envelope; only fields that can hold credentials go.
+    model = {"id": "m", "providerID": "anthropic", "modelID": "claude-x", "status": "active",
+             "cost": [{"input": 3, "output": 15, "cache": {"read": 0.3, "write": 3.75}}],
+             "settings": {"apiKey": "k"}, "variants": [{"id": "high", "settings": {"apiKey": "k2"}}],
+             "options": {"headers": {"authorization": "Bearer x"}, "api_key": "y", "timeout": 5}}
+    hosted = {"id": "free", "providerID": "opencode"}
+    body = {"location": {"directory": "/workspace"}, "data": [model, hosted]}
+    out = ocp.filter_response(["model"], body, False)
+    assert out == {"location": {"directory": "/workspace"}, "data": [{
+        "id": "m", "providerID": "anthropic", "modelID": "claude-x", "status": "active",
+        "cost": [{"input": 3, "output": 15, "cache": {"read": 0.3, "write": 3.75}}],
+        "variants": [{"id": "high"}], "options": {"timeout": 5}}]}
+    assert [m["id"] for m in ocp.filter_response(["model"], body, True)["data"]] == ["m", "free"]
+
+
+def test_provider_list_drops_settings():
+    c, _, _, _ = proxy_client()
+    with c:
+        r = c.get("/p/default/api/provider", headers=A)
+        one = c.get("/p/default/api/provider/anthropic", headers=A)
+    assert "SECRET" not in r.text and "SECRET" not in one.text
+    assert r.json() == {"location": {"directory": "/workspace"}, "data": [{"id": "anthropic", "name": "Anthropic"}]}
+    assert one.json() == {"data": {"id": "anthropic", "name": "Anthropic"}}
 
 
 def test_proxy_refusals_and_errors():
@@ -140,14 +203,15 @@ def test_proxy_refusals_and_errors():
         assert c.get("/p/default/api/health").status_code == 401
         assert c.get("/p/bad%20id/api/health", headers=A).status_code == 400
         assert c.put("/p/default/api/credential/x", json={}, headers=A).status_code == 403
-        assert c.get("/p/default/api/config", headers=A).status_code == 403
+        assert c.patch("/p/default/api/config", json={}, headers=A).status_code == 403
+        assert c.put("/p/default/api/provider/anthropic", json={}, headers=A).status_code == 403
         assert c.get("/p/default/api/pty/pty_1/connect", headers=A).status_code == 400
         assert c.get("/p/default/api/session/%2E%2E/x", headers=A).status_code == 400
         assert c.get("/p/default/api/a%5Cb", headers=A).status_code == 400
         r = c.get("/p/default/api/session/ses_missing", headers=A)
         assert r.status_code == 404 and r.json()["name"] == "NotFoundError"  # OpenCode's own error body
         assert c.get("/p/default/api/boom", headers=A).status_code == 502
-    assert not [p for (_, _, p, _) in seen if "credential" in p or "config" in p]
+    assert not [(m, p) for (_, m, p, _) in seen if "credential" in p or (m != "GET" and ("config" in p or "provider" in p))]
 
 
 def test_proxy_streams_events_and_releases_the_lease():

@@ -91,6 +91,10 @@ class _Entry:
     ref: SandboxRef | None = None
 
 
+# Polled until it answers 200 when a sandbox starts.
+READY_PATH = "/api/info"
+
+
 class SandboxManager:
     def __init__(
         self,
@@ -275,11 +279,13 @@ class SandboxManager:
             if ep:
                 client = self._client_factory(ep.url, ep.password)
                 try:
-                    r = await client.get("/api/health", timeout=3.0)
+                    # OpenCode 2.1 has no /api/health; /api/info needs the password, so a
+                    # 200 also proves the gateway can authenticate.
+                    r = await client.get(READY_PATH, timeout=3.0)
                     if r.status_code == 200:
                         now = time.monotonic()
                         return _Entry(client, ep.url, ep.password, now, now, ref=ref)
-                    last = f"HTTP {r.status_code} from /api/health"
+                    last = f"HTTP {r.status_code} from {READY_PATH}"
                 except httpx.HTTPError as e:
                     last = str(e) or type(e).__name__
                 await client.aclose()
@@ -336,16 +342,29 @@ class SandboxManager:
         only visible to this one process (used for short-lived git credentials)."""
         return await self.provider.exec(self._ref(user, workspace), cmd, env, workdir)
 
+    async def revive(self, user: str, workspace: str) -> None:
+        """Start a sandbox the provider reports stopped although this gateway didn't stop
+        it (a crash, a host restart). Its cached entry may still look healthy for up to
+        health_recheck_seconds, so drop it first. Started as it was (same env and config)."""
+        ref = self._ref(user, workspace)
+        entry = self._entries.pop(ref.key, None)
+        if entry:
+            await entry.client.aclose()
+        await self.ensure(user, workspace)
+
     async def stop(self, user: str, workspace: str, reason: str = "manual") -> None:
         await self._sleep(self._ref(user, workspace), reason)
 
     async def destroy(self, user: str, workspace: str, delete_data: bool = False) -> None:
         ref = self._ref(user, workspace)
-        entry = self._entries.pop(ref.key, None)
-        if entry:
-            await entry.client.aclose()
-        self._orphans.pop(ref.key, None)
-        await self.provider.destroy(ref, delete_data)
+        # After any start in progress (ensure holds the same lock), so a sandbox a request was
+        # starting at that moment is removed too instead of outliving its project.
+        async with self._locks.setdefault(ref.key, asyncio.Lock()):
+            entry = self._entries.pop(ref.key, None)
+            if entry:
+                await entry.client.aclose()
+            self._orphans.pop(ref.key, None)
+            await self.provider.destroy(ref, delete_data)
         self._emit("destroyed", ref, data_deleted=delete_data)
 
     # ---- per-user limit, busy check, sleep ----------------------------------------
@@ -388,27 +407,46 @@ class SandboxManager:
         for _, _, other in sorted(idle, key=lambda t: (t[0], t[1]))[:need]:
             await self._sleep(other, "make_room")
 
-    async def _busy(self, ref: SandboxRef) -> bool:
-        """True if OpenCode in this sandbox has a session still working."""
+    async def _peek(self, ref: SandboxRef, path: str) -> Any | None:
+        """GET a JSON resource from OpenCode in a running sandbox without counting as
+        use (no lease, idle clock untouched). None if unreachable or not 200."""
         entry = self._entries.get(ref.key)
         client, temp = (entry.client, False) if entry else (None, False)
         if client is None:
             ep = await self.provider.endpoint(ref)
             if ep is None:
-                return False
+                return None
             client, temp = self._client_factory(ep.url, ep.password), True
         try:
-            r = await client.get("/api/session/active", timeout=5.0)
+            r = await client.get(path, timeout=5.0)
             if r.status_code != 200:
-                return False
+                return None
             data = r.json()
-            data = data.get("data", data) if isinstance(data, dict) else data
-            return bool(data)
+            return data.get("data", data) if isinstance(data, dict) else data
         except (httpx.HTTPError, ValueError):
-            return False  # unreachable: nothing worth keeping awake
+            return None
         finally:
             if temp:
                 await client.aclose()
+
+    async def _busy(self, ref: SandboxRef) -> bool:
+        """True if OpenCode in this sandbox has a session still working."""
+        return bool(await self._peek(ref, "/api/session/active"))  # unreachable: nothing worth keeping awake
+
+    async def active_sessions(self, user: str, workspace: str) -> dict | None:
+        """{session id: status} of the sessions working in a running sandbox (OpenCode's
+        GET /api/session/active), or None if it can't be asked. Doesn't count as use."""
+        data = await self._peek(self._ref(user, workspace), "/api/session/active")
+        return data if isinstance(data, dict) else None
+
+    async def session_info(self, user: str, workspace: str, session_id: str) -> dict | None:
+        """OpenCode's record of one session (title, outcome, tokens, cost). Doesn't count as use."""
+        data = await self._peek(self._ref(user, workspace), f"/api/session/{session_id}")
+        return data if isinstance(data, dict) else None
+
+    async def sandbox_states(self) -> dict[tuple[str, str], bool]:
+        """{(user, workspace): running} for every sandbox the provider knows."""
+        return {(i.ref.user, i.ref.workspace): i.running for i in await self.provider.list(include_stopped=True)}
 
     async def _sleep(self, ref: SandboxRef, reason: str = "idle") -> None:
         entry = self._entries.pop(ref.key, None)

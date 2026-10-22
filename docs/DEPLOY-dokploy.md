@@ -3,16 +3,17 @@
 Short path for your domain and the go-live checklist: [PRODUCTION-READY.md](PRODUCTION-READY.md).
 
 Everything runs on one Ubuntu 24.04 VPS managed by [Dokploy](https://dokploy.com):
-the web app, the gateway, Postgres, the egress proxy and the sandboxes (one Docker
-container per user and project, created by the gateway). Dokploy's Traefik gives
-both domains HTTPS.
+the web app, the sign-in server (self-hosted Better Auth), the gateway, Postgres, the
+egress proxy and the sandboxes (one Docker container per user and project, created by
+the gateway). Dokploy's Traefik gives the three domains HTTPS.
 
 ```
- https://app.example.com ─┐                 ┌─ web (nginx, static)
- https://api.example.com ─┴─ Traefik (Dokploy) ─┴─ gateway ── Docker socket ──▶ sandboxes
-                                                      │                          │ HTTP(S)_PROXY only
-                                                      ├── db (Postgres)          ▼
-                                                      └────────────────────── egress (Squid) ──▶ internet
+ https://app.example.com  ─┐                    ┌─ web (nginx, static)
+ https://auth.example.com ─┼─ Traefik (Dokploy) ─┼─ auth (Better Auth) ──┐
+ https://api.example.com  ─┘                    └─ gateway ──────────────┴── db (Postgres)
+                                                     │ Docker socket ──▶ sandboxes
+                                                     │                    │ HTTP(S)_PROXY only
+                                                     └──────────────── egress (Squid) ──▶ internet
 ```
 
 ## What you need
@@ -25,9 +26,10 @@ both domains HTTPS.
   runs about 2 awake projects next to Dokploy and the platform services (about
   2.5 GB of memory caps); asleep projects only use disk. The sandbox image is a few
   GB (toolchains and Chromium).
-- Two DNS names pointing at the VPS (A records): `app.example.com` (web app) and
-  `api.example.com` (gateway).
-- A Clerk application (production instance) and, for repositories, a GitHub App.
+- Three DNS names pointing at the VPS (A records): `app.example.com` (web app),
+  `auth.example.com` (sign-in) and `api.example.com` (gateway).
+- For repositories, a GitHub App. Optionally GitHub and Google OAuth apps for
+  "Sign in with GitHub/Google" (email and password works without them).
 - The VPS should run nothing else important: the gateway controls Docker through
   its socket, which is root on that machine.
 
@@ -48,13 +50,18 @@ follow it (some VPS kernels need gVisor's ptrace platform) or leave
 `SANDBOX_RUNTIME` empty for now; sandboxes then run as plain containers (all
 capabilities dropped, no new privileges, but a shared kernel).
 
-## 2. Clerk
+## 2. Sign-in
 
-In the Clerk dashboard (production instance):
+Sign-in is the `auth` service (Better Auth, `services/auth`), with its tables in the
+same Postgres; it creates or updates them on each start. It signs JWTs with a key it
+keeps in the database, and the gateway checks them with its public keys
+(`http://auth:3001/api/auth/jwks` inside the compose network).
 
-- Domains: `app.example.com`.
-- API keys: copy the **publishable key** (`pk_live_...`) and the **JWKS URL**
-  (`https://<your-clerk-frontend-api>/.well-known/jwks.json`).
+Optional social sign-in: create an OAuth app at GitHub (Settings > Developer settings
+> OAuth Apps) and/or Google (Cloud Console > Credentials > OAuth client, Web) with the
+callback `https://auth.example.com/api/auth/callback/github` (or `/google`), and set
+its client ID and secret below. The sign-in page shows a button only for the
+providers that are set.
 
 ## 3. GitHub App (for linking repositories)
 
@@ -82,7 +89,9 @@ Paste and fill in (generate the secrets with the commands in the comments):
 
 ```ini
 # --- Domains -------------------------------------------------------------------
-VITE_GATEWAY_URL=https://api.example.com
+# Compiled into the web app.
+VITE_OPENSESSION_GATEWAY_URL=https://api.example.com
+VITE_OPENSESSION_AUTH_URL=https://auth.example.com
 OPENSESSION_WEB_URL=https://app.example.com
 CORS_ORIGINS=https://app.example.com,app://opensession
 # The gateway's own public address (links it hands out, e.g. preview links).
@@ -90,12 +99,23 @@ GATEWAY_PUBLIC_URL=https://api.example.com
 # Optional: previews on their own origin (see "Previews on their own domain" below).
 PREVIEW_DOMAIN=
 
-# --- Sign-in (Clerk) -------------------------------------------------------------
-AUTH_MODE=clerk
-VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
-CLERK_JWKS_URL=https://<your-clerk-frontend-api>/.well-known/jwks.json
-CLERK_AUTHORIZED_PARTIES=https://app.example.com
-# Clerk user ids (comma separated) who can open the Admin page and change limits:
+# --- Sign-in (Better Auth) --------------------------------------------------------
+AUTH_MODE=betterauth
+BETTER_AUTH_URL=https://auth.example.com
+# openssl rand -base64 32
+BETTER_AUTH_SECRET=
+AUTH_TRUSTED_ORIGINS=https://app.example.com,app://opensession
+# The JWTs' issuer and audience (both BETTER_AUTH_URL). The compose file points
+# AUTH_JWKS_URL at the auth service's internal address.
+AUTH_ISSUER=https://auth.example.com
+AUTH_AUDIENCE=https://auth.example.com
+# Optional: "Sign in with GitHub / Google".
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+# User ids (comma separated) who can use the admin API and change limits; see
+# "Admin" under Day to day for how to find yours.
 ADMIN_USER_IDS=
 
 # --- Secrets -----------------------------------------------------------------------
@@ -140,6 +160,7 @@ safe. Losing it makes the stored keys unreadable; changing it needs
 | Service | Host | Container port | HTTPS |
 |---|---|---|---|
 | `web` | `app.example.com` | 80 | on (Let's Encrypt) |
+| `auth` | `auth.example.com` | 3001 | on (Let's Encrypt) |
 | `gateway` | `api.example.com` | 8000 | on (Let's Encrypt) |
 
 Server-sent events and the WebSockets (terminal, `/browser/connect`) go through
@@ -149,44 +170,35 @@ gateway, which also sits on every sandbox's network.
 ### Deploy
 
 Press **Deploy**. The first deploy takes a few minutes: it builds the web app, the
-gateway, the egress proxy and the sandbox image (`sandbox-image` builds
+sign-in server, the gateway, the egress proxy and the sandbox image (`sandbox-image` builds
 `opencode-sandbox:latest` and then just sleeps, so Docker cleanups keep the image).
 
 Check:
 
 ```bash
 curl https://api.example.com/health        # {"status":"ok",...}: gateway and database up
+curl https://auth.example.com/health       # ok
 ```
 
 Dokploy shows each service's healthcheck; the gateway's is the same `/health`.
 
-Then open `https://app.example.com`, sign in, add a model key under Settings and
-start a session in the Default project: the first one starts its sandbox (a few
-seconds), later ones resume it.
+Then open `https://app.example.com`, create an account, add a model key under
+Settings > Providers and start a session in a project: the first one starts its
+sandbox (a few seconds), later ones resume it.
 
-## Desktop app and CLI
+## Desktop app
 
-Point them at your server:
+The **Release** GitHub workflow (`.github/workflows/release.yml`) builds the desktop
+app (`packages/desktop`) for macOS, Windows and Linux with the OpenCode CLI bundled.
+Set the repository variables `OPENSESSION_GATEWAY_URL` and `OPENSESSION_AUTH_URL`
+(compiled in) and optionally `OPENCODE_VERSION` (the same as the sandbox image's),
+then push a `v*` tag: the installers are attached to a GitHub Release under stable
+names (`OpenSession-mac-arm64.dmg`, ...). The workflow's header lists the signing
+secrets.
 
-```bash
-opensession config --gateway https://api.example.com --web https://app.example.com
-opensession login
-```
-
-The desktop app has the two addresses compiled in. Build its installers on each OS
-you ship to:
-
-```bash
-pnpm desktop:build --web https://app.example.com --gateway https://api.example.com
-# or: pnpm desktop:build --env .env   (reads OPENSESSION_WEB_URL / VITE_GATEWAY_URL)
-```
-
-Or let the **Release** GitHub workflow build all three and the CLI: set the
-repository variables `OPENSESSION_WEB_URL` and `OPENSESSION_GATEWAY_URL`, then push a
-`v*` tag. Users download them from `https://app.example.com/download`, and install
-the CLI with `curl -fsSL https://app.example.com/install.sh | sh` (Windows:
-`irm https://app.example.com/install.ps1 | iex`) or `npm install -g opensession-cli`.
-See `scripts/build-desktop.mjs` for signing.
+Signing in to the cloud from the desktop app, and the OpenSession CLI (an OpenCode
+plugin), are still being moved to the new apps; the desktop app works locally
+meanwhile.
 
 ## Day to day
 
@@ -198,11 +210,12 @@ See `scripts/build-desktop.mjs` for signing.
 - **Backups:** the `pg-data` volume (users, tokens, encrypted keys, projects) via
   Dokploy's Volume Backups. Project files live in Docker volumes named
   `ocws-<id>` / `ocst-<id>`; back up `/var/lib/docker/volumes` if you need them.
-- **Admin page:** signed in as one of `ADMIN_USER_IDS`, open **Admin** from the
-  account menu. It shows requests per minute, errors and latency, every sandbox
-  (put one to sleep from there), recent errors and sandbox events, server load,
-  memory and disk, settings to fix, and per-user limits. Its figures cover the
-  gateway since it last started.
+- **Admin:** user ids are Better Auth's. Find yours in the `db` service's terminal
+  with `psql -U opensession -c 'select id, email from "user"'`, put it in
+  `ADMIN_USER_IDS` and redeploy. The admin API (`/admin/...`) gives requests per
+  minute, errors and latency, every sandbox, recent errors and sandbox events,
+  server load, settings to fix, and per-user limits. (The Admin page is still being
+  moved to the new web app.)
 - **Prometheus:** `GET /admin/metrics` with an admin's personal access token
   (Settings > Access tokens) as the bearer token: request counts and time by route,
   sandbox events, running/asleep sandboxes.
@@ -261,7 +274,7 @@ the egress proxy, so the browser reaches exactly what the sandbox can.
 
 The sandbox reaches the internet only through the egress proxy: the platform list in
 `services/egress/allowlist.txt` (model providers, GitHub, package registries) plus
-each user's own domains (Settings > General). When the agent needs another domain it
+each user's own domains (Settings > Network access). When the agent needs another domain it
 asks in the chat; allowing it adds the domain for that user.
 
 ## Previews on their own domain (optional)

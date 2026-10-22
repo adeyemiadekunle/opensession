@@ -11,13 +11,13 @@
 ```
  LOCAL                                          CLOUD
  ─────                                          ─────
- Desktop app (Electron) ─┐                      Web app (Vite + React + Clerk)
- CLI (opensession local) ┤                         │  Clerk session token
+ Desktop app (Electron) ─┐                      Web app ── Auth server (Better Auth)
+ CLI (opensession local) ┤                         │  Better Auth JWT
                          │                      CLI (opensession run/keys/egress)
                          ▼                         │  access token osk_...
           @opensession/local-runner                ▼
           opencode serve on 127.0.0.1    Gateway (FastAPI, services/gateway)
-          in the user's project folder     - who is calling (Clerk / token)
+          in the user's project folder     - who is calling (JWT / token)
           keys saved by OpenCode locally   - which sandbox (user + workspace)
                                            - injects the user's API keys
                                            - writes per-user egress rules
@@ -68,13 +68,16 @@ Postgres (`DATABASE_URL`; `db.py` also supports SQLite for development and tests
 ## Sign-in
 
 OpenCode has no user accounts; each OpenCode server just has a password. Accounts
-belong to OpenSession and use Clerk:
+belong to OpenSession and use a self-hosted [Better Auth](https://better-auth.com)
+server (`services/auth`, Bun + Hono, tables in the same Postgres):
 
-- **Web app:** Clerk's React SDK (`@clerk/react`) signs users in. Every gateway call
-  carries `Authorization: Bearer <session token>` from `getToken()`. The gateway
-  verifies it with Clerk's public key (`CLERK_JWT_KEY` or `CLERK_JWKS_URL`), checks
-  `exp`/`nbf`, the `azp` origin against `CLERK_AUTHORIZED_PARTIES`, and uses `sub` as
-  the user id.
+- **Web app:** signs in against the auth server (email/password, optionally GitHub or
+  Google), which keeps the session in a cookie. Before calling the gateway the web app
+  gets a short-lived JWT (`GET /api/auth/token`, 15 minutes, Ed25519) and sends it as
+  `Authorization: Bearer <JWT>`. The gateway verifies it against the auth server's
+  public keys (`AUTH_JWKS_URL`, or a PEM in `AUTH_JWT_KEY`), checks `exp`, `iss`
+  (`AUTH_ISSUER`) and `aud` (`AUTH_AUDIENCE`), and uses `sub` (the Better Auth user id)
+  as the user id. The gateway never sees passwords or session cookies.
 - **CLI (cloud commands):** `opensession login` listens once on 127.0.0.1 and opens
   the web app's `/cli-auth` page. The signed-in user clicks Authorize; the web app
   creates an access token (`POST /tokens`) and sends it to the CLI's listener with a

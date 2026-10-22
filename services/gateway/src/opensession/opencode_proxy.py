@@ -6,10 +6,14 @@ clients speak the same API as a local `opencode serve`. This module holds the fe
 product rules that still apply (see docs/DESIGN-unified-runtime.md, D1):
 
 - deny: endpoints that conflict with how the gateway manages the sandbox
-  (credentials come from the keystore, debug/migration/server operations, provider
-  settings that carry API keys) and WebSocket endpoints (terminal tickets instead);
-- rewrite: new sessions always live in /workspace and need a model;
-- filter: model and agent lists return display fields only;
+  (credentials come from the keystore, debug/migration/server operations, changes
+  to provider settings or the config) and WebSocket endpoints (terminal tickets
+  instead). Config and providers can still be read: OpenCode's own apps need them;
+- rewrite: new sessions always live in /workspace and need a model, and the default
+  location (GET /api/location without a directory) is /workspace, not OpenCode's
+  home directory (where `opencode serve --service` runs);
+- filter: model, agent and provider lists lose every field that can carry
+  credentials (settings, apiKey, headers), at any depth; the rest passes through;
 - agent work (prompt, command, generate) is refused over the disk limit.
 
 Everything is a pure function of (method, path segments, body) so it can be tested
@@ -19,7 +23,7 @@ without a sandbox.
 from __future__ import annotations
 
 import json
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode
 
 WORKSPACE_DIR = "/workspace"
 
@@ -58,17 +62,21 @@ def _match(segs: list[str], pattern: tuple[str, ...]) -> bool:
     return all(p == "*" or p == s for p, s in zip(pattern, segs))
 
 
-# (path prefix, reason). Checked for every method.
+# Path prefixes refused for every method.
 DENIED: tuple[tuple[tuple[str, ...], str], ...] = (
     (("credential",), "API keys are managed by OpenSession: use /keys"),
     (("integration", "*", "connect"), "API keys are managed by OpenSession: use /keys"),
-    (("provider",), "provider settings carry API keys: use /keys and /p/{project}/api/model"),
-    (("config",), "the sandbox's config is written from your agent setup: use /agent-config"),
     (("debug",), "not available in the cloud"),
     (("experimental", "migration"), "not available in the cloud"),
     (("experimental", "persistent-pty", "handoff"), "not available in the cloud"),
     (("experimental", "persistent-pty", "shutdown"), "not available in the cloud"),
     (("plugin", "update"), "plugins come from your agent setup: use /agent-config"),
+)
+
+# Path prefixes that can be read (GET) but not changed.
+READ_ONLY: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("provider",), "provider settings carry API keys: use /keys"),
+    (("config",), "the sandbox's config is written from your agent setup: use /agent-config"),
 )
 
 # WebSocket endpoints: a browser cannot authenticate them with a header.
@@ -82,6 +90,10 @@ def check(method: str, segs: list[str]) -> None:
     for pattern, reason in DENIED:
         if _match(segs, pattern):
             raise ProxyRefused(403, reason)
+    if method != "GET":
+        for pattern, reason in READ_ONLY:
+            if _match(segs, pattern):
+                raise ProxyRefused(403, reason)
     for pattern in WEBSOCKETS:
         if _match(segs, pattern) and len(segs) == len(pattern):
             raise ProxyRefused(400, "WebSocket endpoint: use POST /terminals/{pty}/ticket, then /terminals/{pty}/connect")
@@ -114,24 +126,43 @@ def rewrite_request(method: str, segs: list[str], body: bytes, allow_opencode_pr
     return json.dumps(payload).encode()
 
 
+def rewrite_query(method: str, segs: list[str], query: str) -> str:
+    """The project is /workspace: asking for the default location (no directory, or an
+    empty one) gets that, so OpenCode's apps open the project instead of $HOME."""
+    if method != "GET" or segs != ["location"]:
+        return query
+    params = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k != "location[directory]"]
+    directory = dict(parse_qsl(query, keep_blank_values=True)).get("location[directory]", "")
+    params.append(("location[directory]", directory or WORKSPACE_DIR))
+    return urlencode(params)
+
+
 def filters_response(method: str, segs: list[str]) -> bool:
-    return method == "GET" and segs in (["model"], ["agent"])
+    return method == "GET" and (segs in (["model"], ["agent"]) or segs[:1] == ["provider"])
 
 
 def filter_response(segs: list[str], body: dict | list, allow_opencode_provider: bool):
-    """Model and agent entries carry provider settings (which can include API keys):
-    return display fields only, in OpenCode's own {"data": [...]} shape."""
-    items = body.get("data", []) if isinstance(body, dict) else body
-    out = []
-    for m in items if isinstance(items, list) else []:
-        if not isinstance(m, dict):
-            continue
-        if segs == ["model"]:
-            if m.get("providerID") == "opencode" and not allow_opencode_provider:
-                continue
-            item = {k: m[k] for k in ("id", "providerID", "name", "family", "capabilities") if k in m}
-            item["variants"] = [{"id": v["id"]} for v in m.get("variants") or [] if isinstance(v, dict) and "id" in v]
-        else:
-            item = {k: m[k] for k in ("id", "name", "description", "mode") if k in m}
-        out.append(item)
-    return {"data": out}
+    """Model, agent and provider entries can carry provider settings, which can hold API
+    keys. Everything else passes through as OpenCode sent it (its apps need the full
+    records: costs, limits, variants, ...): only secret-bearing fields are removed, at any
+    depth. OpenCode's own hosted provider is hidden unless the deployment allows it."""
+    body = _scrubbed(body)
+    if segs == ["model"] and not allow_opencode_provider:
+        items = body.get("data") if isinstance(body, dict) else body
+        if isinstance(items, list):
+            kept = [m for m in items if not (isinstance(m, dict) and m.get("providerID") == "opencode")]
+            body = {**body, "data": kept} if isinstance(body, dict) else kept
+    return body
+
+
+# Fields that hold or may hold credentials: provider settings (baseURL, apiKey, headers)
+# and keys by name.
+SECRET_FIELDS = {"settings", "apiKey", "api_key", "headers"}
+
+
+def _scrubbed(value):
+    if isinstance(value, list):
+        return [_scrubbed(x) for x in value]
+    if isinstance(value, dict):
+        return {k: _scrubbed(v) for k, v in value.items() if k not in SECRET_FIELDS}
+    return value

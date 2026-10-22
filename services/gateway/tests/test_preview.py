@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from opensession import preview as pv
 from opensession.gateway import create_app
 
-from .fakes import make_manager
+from .fakes import make_manager, create_projects
 
 A = {"X-User-Id": "alice", "X-Workspace": "web", "Authorization": "Bearer secret"}
 
@@ -34,6 +34,7 @@ def setup(handler=None):
 def test_preview_serves_the_sandbox_port_without_the_users_credentials():
     c, seen = setup()
     with c:
+        create_projects(c, A, "web")
         r = c.post("/preview", json={"port": 5173}, headers=A)
         assert r.status_code == 201
         url = r.json()["url"]
@@ -63,6 +64,7 @@ def test_unknown_ticket_and_nothing_listening():
 
     c, _ = setup(refuse)
     with c:
+        create_projects(c, A, "web")
         assert c.get("/preview/" + "a" * pv.TICKET_LEN + "/").status_code == 404
         url = c.post("/preview", json={"port": 3000}, headers=A).json()["url"]
         r = c.get(url)
@@ -73,6 +75,7 @@ def test_preview_domain_serves_on_its_own_host(monkeypatch):
     monkeypatch.setenv("PREVIEW_DOMAIN", "preview.example.com")
     c, seen = setup()
     with c:
+        create_projects(c, A, "web")
         url = c.post("/preview", json={"port": 5173}, headers=A).json()["url"]
         assert url.startswith("https://") and url.endswith(".preview.example.com/")
         host = url.removeprefix("https://").rstrip("/")
