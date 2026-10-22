@@ -16,14 +16,17 @@ Local mode is only the desktop app and the CLI; the web app always works in the 
 
 ## Repository layout
 
-    apps/
-      web/              Vite + React + Clerk: cloud workspace and settings
-      desktop/          Electron: local workspace (runs OpenCode on this computer)
-      cli/              `opensession` command: login, keys, egress, run, local
+The web app, desktop app and CLI are OpenCode's own packages, imported fresh from
+[anomalyco/opencode](https://github.com/anomalyco/opencode) (`dev` branch, see `UPSTREAM.md`)
+and adapted from there.
+
     packages/
-      api-client/       TypeScript client: CloudClient (gateway) and LocalClient (OpenCode)
-      ui/               React workspace UI shared by web and desktop
-      local-runner/     starts/stops `opencode serve` locally (desktop, CLI)
+      app/              web UI (SolidJS + Vite), also the desktop app's renderer
+      desktop/          Electron shell around packages/app
+      cli/              `opencode` command and TUI
+      core, server, client, sdk-side packages, ui, session-ui, ...  OpenCode internals they need
+    patches/            dependency patches (bun patchedDependencies)
+    script/             OpenCode's repo tooling (lint rules, release helpers)
     services/
       gateway/          Python FastAPI backend: auth, sandboxes, keys, egress rules
       sandbox/          sandbox image (OpenCode V2 + toolchains, non-root)
@@ -32,16 +35,18 @@ Local mode is only the desktop app and the CLI; the web app always works in the 
     scripts/check/      checks against real Docker + OpenCode (Windows .bat files)
     docker-compose.yml  gateway + egress proxy for running the cloud side
 
-TypeScript uses pnpm workspaces and Turborepo; the backend is a normal Python package.
+TypeScript uses Bun workspaces and Turborepo (`bun install`, `bun dev:web`,
+`bun dev:desktop`, `bun dev` for the CLI); the backend is a normal Python package.
 
 ## Quick start
 
-Requirements: Node 22+, pnpm 10 (`npm i -g pnpm`), Python 3.10+, Docker.
+Requirements: Bun 1.4.2, Node 22+, Python 3.10+, Docker.
 
-    pnpm install
-    pnpm test            # all TypeScript packages
-    pnpm typecheck
-    pnpm build
+    bun install
+    bun typecheck
+    bun dev:web          # web app (packages/app)
+    bun dev:desktop      # desktop app (packages/desktop)
+    bun dev              # CLI (packages/cli)
 
     cd services/gateway
     python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # Windows: .venv\Scripts\pip
