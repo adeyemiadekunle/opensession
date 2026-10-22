@@ -212,6 +212,29 @@ export function removeProviderKey(provider: string) {
   return gatewayRequest(`/keys/${encodeURIComponent(provider)}`, { method: "DELETE" })
 }
 
+export interface Repository {
+  full_name: string
+  default_branch: string
+  private: boolean
+}
+
+/** Repositories the account's GitHub connection can see; none without a connection. */
+export async function githubRepositories(): Promise<Repository[]> {
+  const github = await gatewayRequest<{ configured: boolean; installations: unknown[] }>("/github")
+  if (!github.configured || github.installations.length === 0) return []
+  return gatewayRequest<Repository[]>("/github/repos")
+}
+
+/** A new cloud project; with a repository, its sandbox clones it on first use. */
+export function createProject(name: string, repo?: string) {
+  return gatewayRequest<Project>("/workspaces", { method: "POST", body: JSON.stringify({ name, repo: repo || undefined }) })
+}
+
+/** Removes the project's sandbox and, with its files, its storage. */
+export function deleteProject(id: string) {
+  return gatewayRequest(`/workspaces/${encodeURIComponent(id)}?delete_data=true`, { method: "DELETE" })
+}
+
 /** The user's projects. A rejected token (revoked, expired) clears the stored access. */
 export async function projects(access: Access): Promise<Project[]> {
   try {

@@ -49,6 +49,7 @@
   [data-slot^="dropdown-menu"],
   [data-slot^="card"],
   [data-slot^="text-field"],
+  [data-slot^="select"],
   [data-slot="button"] {
     border-color: var(--color-border);
   }

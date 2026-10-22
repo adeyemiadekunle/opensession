@@ -294,3 +294,10 @@ def make_manager(**cfg_kw):
 def master_key(kid="k1"):
     """A fresh KEYSTORE_MASTER_KEYS entry."""
     return f"{kid}:{base64.b64encode(os.urandom(32)).decode()}"
+
+
+def create_projects(client, headers, *names):
+    """Projects must exist before they get a sandbox (only "default" always does)."""
+    for name in names:
+        r = client.post("/workspaces", json={"name": name}, headers={k: v for k, v in headers.items() if k != "X-Workspace"})
+        assert r.status_code in (201, 409), r.text

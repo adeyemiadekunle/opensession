@@ -357,11 +357,14 @@ class SandboxManager:
 
     async def destroy(self, user: str, workspace: str, delete_data: bool = False) -> None:
         ref = self._ref(user, workspace)
-        entry = self._entries.pop(ref.key, None)
-        if entry:
-            await entry.client.aclose()
-        self._orphans.pop(ref.key, None)
-        await self.provider.destroy(ref, delete_data)
+        # After any start in progress (ensure holds the same lock), so a sandbox a request was
+        # starting at that moment is removed too instead of outliving its project.
+        async with self._locks.setdefault(ref.key, asyncio.Lock()):
+            entry = self._entries.pop(ref.key, None)
+            if entry:
+                await entry.client.aclose()
+            self._orphans.pop(ref.key, None)
+            await self.provider.destroy(ref, delete_data)
         self._emit("destroyed", ref, data_deleted=delete_data)
 
     # ---- per-user limit, busy check, sleep ----------------------------------------

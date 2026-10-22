@@ -274,6 +274,9 @@ class ApiKeyBody(BaseModel):
     api_key: SecretStr = Field(min_length=8, max_length=512)
 
 
+# The project every user has without creating it.
+DEFAULT_WORKSPACE = "default"
+
 _FROM_ENV = object()
 
 
@@ -544,6 +547,10 @@ def create_app(
 
     async def get_client(request: Request, ref: tuple[str, str]) -> httpx.AsyncClient:
         mgr: SandboxManager = request.app.state.sandboxes
+        # Only "default" and the user's own projects get a sandbox. Otherwise any name in a URL
+        # would start one, e.g. a tab still talking to a project that was just deleted.
+        if ref[1] != DEFAULT_WORKSPACE and not await workspace_record(request, ref):
+            raise HTTPException(404, f"no project {ref[1]!r}: create it first (POST /workspaces)")
         env, cfg = await user_profile(request, ref[0])
         try:
             client = await mgr.client(*ref, env, cfg)
@@ -978,8 +985,9 @@ def create_app(
     async def delete_workspace(ws_id: str, request: Request, delete_data: bool = False, user: str = Depends(current_user)):
         if not WORKSPACE_ID_RE.match(ws_id):
             raise HTTPException(400, "invalid workspace id")
-        await request.app.state.sandboxes.destroy(user, ws_id, delete_data=delete_data)
+        # The record first: from then on no request can start the project's sandbox (get_client).
         await asyncio.to_thread(request.app.state.users.delete_workspace, user, ws_id)
+        await request.app.state.sandboxes.destroy(user, ws_id, delete_data=delete_data)
         await asyncio.to_thread(request.app.state.runs.delete_workspace, user, ws_id)
 
     @app.get("/runs")

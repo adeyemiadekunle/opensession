@@ -9,7 +9,7 @@ from opensession import orchestrator
 from opensession.gateway import create_app
 from opensession.orchestrator import SandboxUserLimitError
 
-from .fakes import BUSY_HOSTS, make_manager
+from .fakes import BUSY_HOSTS, make_manager, create_projects
 
 A = {"X-User-Id": "alice"}
 
@@ -147,6 +147,7 @@ def app_client(monkeypatch, admins="", **cfg):
 def test_api_limit_429_status_and_project_states(monkeypatch):
     c, mgr, docker = app_client(monkeypatch, max_per_user=1)
     with c:
+        create_projects(c, A, "a", "b")
         assert c.get("/workspace", headers={**A, "X-Workspace": "a"}).json()["state"] == "new"
         assert c.get("/p/a/api/health", headers=A).status_code == 200
         st = c.get("/workspace", headers={**A, "X-Workspace": "a"}).json()
@@ -188,6 +189,7 @@ def test_disk_limit_blocks_agent_work_but_not_cleanup(monkeypatch):
     )
     H = {**A, "X-Workspace": "big"}
     with c:
+        create_projects(c, A, "big")
         assert c.get("/p/big/api/health", headers=H).status_code == 200
         assert c.get("/workspace", headers=H).json()["disk_mb"] == 1520
         r = c.post("/p/big/api/session/ses_1/prompt", json={"text": "hi"}, headers=H)

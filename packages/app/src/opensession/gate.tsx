@@ -38,7 +38,7 @@ export function OpenSessionGate(props: { children: (servers: ServerConnection.Ht
   // Google): check once before showing the sign-in screen.
   const [state, setState] = createStore({ access: stored, checking: !stored })
   // Keyed on the token alone: a profile change (name, email) must not reload the projects.
-  const [servers] = createResource(
+  const [servers, { refetch }] = createResource(
     () => state.access?.token,
     async () => {
       const current = state.access!
@@ -70,7 +70,8 @@ export function OpenSessionGate(props: { children: (servers: ServerConnection.Ht
       <Match when={!state.access}>
         <SignIn onSignedIn={(access) => setState("access", access)} />
       </Match>
-      <Match when={servers.error}>
+      {/* After the first load the app keeps its list: a failed reload (Settings > Cloud projects) doesn't replace it. */}
+      <Match when={servers.error && !servers.latest}>
         <Page>
           <Card class="gap-4 py-5">
             <CardHeader class="text-center">
@@ -88,7 +89,7 @@ export function OpenSessionGate(props: { children: (servers: ServerConnection.Ht
           </Card>
         </Page>
       </Match>
-      <Match when={servers()}>
+      <Match when={servers.latest}>
         {(list) => (
           <AccountContext.Provider
             value={{
@@ -99,6 +100,9 @@ export function OpenSessionGate(props: { children: (servers: ServerConnection.Ht
                 return state.access!.email
               },
               signOut: () => void leave(),
+              reloadProjects: async () => {
+                await refetch()
+              },
               update: (patch) => {
                 setState("access", (current) => current && { ...current, ...patch })
                 store(state.access)

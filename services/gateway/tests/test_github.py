@@ -2,6 +2,8 @@
 
 import base64
 import json
+import os
+import tempfile
 import time
 
 import httpx
@@ -11,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from opensession.gateway import create_app
+from opensession.userstore import UserStore
 from opensession.github import GitHubApp, GitHubAppConfig, GitHubError, app_slug, git_auth_env, pem_key
 
 from .fakes import make_manager
@@ -101,7 +104,9 @@ def client(github=True):
     fake = FakeGitHub()
     http = httpx.AsyncClient(transport=httpx.MockTransport(fake))
     gh = GitHubApp(gh_config(), http) if github else None
-    app = create_app(manager=mgr, reaper=False, keystore=None, github=gh)
+    # Its own database: these tests list the user's projects, which other tests also create.
+    users = UserStore(os.path.join(tempfile.mkdtemp(prefix="ostest-gh-"), "users.db"))
+    app = create_app(manager=mgr, reaper=False, keystore=None, github=gh, users=users)
     return TestClient(app), docker, seen, fake, gh
 
 

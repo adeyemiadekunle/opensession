@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from opensession import opencode_proxy as ocp
 from opensession.gateway import create_app
 
-from .fakes import BODIES, QUERIES, make_manager
+from .fakes import BODIES, QUERIES, make_manager, create_projects
 
 A = {"X-User-Id": "alice"}
 
@@ -102,6 +102,7 @@ def test_proxy_forwards_to_the_callers_own_sandbox():
     c, mgr, docker, seen = proxy_client()
     BODIES.clear()
     with c:
+        create_projects(c, A, "api")
         r = c.get("/p/default/api/session/ses_1/message?order=desc&limit=5", headers=A)
         assert r.status_code == 200 and r.json() == {"path": "/api/session/ses_1/message"}
         # Endpoints the old hand-written routes never exposed now just work.
@@ -117,6 +118,21 @@ def test_proxy_forwards_to_the_callers_own_sandbox():
     assert auth.startswith("Basic ")  # the sandbox password, added by the gateway
     assert base64.b64decode(auth.split()[1]).decode().startswith("opencode:")
     assert ("/api/session/ses_1/fork", b'{"messageID":"msg_1"}') in BODIES
+
+
+def test_only_existing_projects_get_a_sandbox():
+    # A name in a URL is not enough: e.g. a tab still talking to a project that was just deleted
+    # must not bring its sandbox back.
+    c, mgr, docker, _ = proxy_client()
+    with c:
+        assert c.get("/p/nope/api/info", headers=A).status_code == 404
+        assert not docker.containers.by_name
+        create_projects(c, A, "site")
+        assert c.get("/p/site/api/info", headers=A).status_code == 200
+        assert c.delete("/workspaces/site?delete_data=true", headers=A).status_code == 204
+        assert c.get("/p/site/api/info", headers=A).status_code == 404
+        assert [n for n, x in docker.containers.by_name.items() if not x.removed] == []
+        assert c.get("/p/default/api/info", headers=A).status_code == 200  # always exists
 
 
 def test_proxy_forwards_query_and_does_not_leak_caller_headers():

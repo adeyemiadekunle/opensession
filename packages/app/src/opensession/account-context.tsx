@@ -8,6 +8,8 @@ export interface Account {
   readonly name: string
   readonly email: string
   signOut: () => void
+  /** Reads the account's projects again (one server each), e.g. after creating or deleting one. */
+  reloadProjects: () => Promise<void>
   /** After a profile change: what the app shows and remembers. */
   update: (patch: { name?: string; email?: string }) => void
 }
