@@ -32,3 +32,4 @@ scripts/check/openapi.json
 scripts/check/e2e-output.txt
 scripts/check/provider-output.txt
 scripts/check/config-output.txt
+scripts/check/durable/run-*.log

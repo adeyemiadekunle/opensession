@@ -37,4 +37,11 @@ elif [ -f /usr/local/lib/opensession/browser-view.mjs ]; then
   pkill -f /usr/local/lib/opensession/browser-view.mjs 2>/dev/null || true
   nohup node /usr/local/lib/opensession/browser-view.mjs >"$HOME/.cache/browser-view.log" 2>&1 &
 fi
-exec opencode serve --hostname 0.0.0.0 --port 4096
+# Service mode is the only one that resumes the turns a crash, kill or restart
+# interrupted (OpenCode's restart sweep; docs/DURABLE-BASELINE.md). It takes its
+# address and password from service.json instead of flags and the environment, so
+# write that from OPENCODE_SERVER_PASSWORD on every start.
+: "${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is not set}"
+mkdir -p "$CFG"
+(umask 077 && node -e 'process.stdout.write(JSON.stringify({hostname: "0.0.0.0", port: 4096, password: process.env.OPENCODE_SERVER_PASSWORD}))' >"$CFG/service.json")
+exec opencode serve --service
