@@ -14,6 +14,8 @@ import zh from "@/runtime/i18n/zh"
 import { authFromToken } from "@/runtime/server/api"
 import pkg from "../package.json"
 import { ServerConnection } from "@/runtime/server/registry"
+import { enabled as openSession } from "@/opensession/account"
+import { OpenSessionGate } from "@/opensession/gate"
 
 const getLocale = () => {
   if (typeof navigator === "undefined") return "en" as const
@@ -96,17 +98,19 @@ if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
         }
       : undefined
 
+    const app = (servers: ServerConnection.Http[]) => (
+      <AppInterface canonicalLocalServer={servers[0] ? ServerConnection.key(servers[0]) : undefined} servers={servers}>
+        <KeyboardInsets />
+        {standalone && <PwaRoutePersistence />}
+      </AppInterface>
+    )
+
     render(
       () => (
         <PlatformProvider value={web.platform}>
           <AppBaseProviders locale={locale}>
-            <AppInterface
-              canonicalLocalServer={server ? ServerConnection.key(server) : undefined}
-              servers={server ? [server] : []}
-            >
-              <KeyboardInsets />
-              {standalone && <PwaRoutePersistence />}
-            </AppInterface>
+            {/* OpenSession: with accounts enabled, sign in first; each cloud project is a server. */}
+            {openSession ? <OpenSessionGate>{app}</OpenSessionGate> : app(server ? [server] : [])}
           </AppBaseProviders>
         </PlatformProvider>
       ),

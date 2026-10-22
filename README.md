@@ -52,6 +52,17 @@ Requirements: Bun 1.4.2, Node 22+, Python 3.10+, Docker.
     python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # Windows: .venv\Scripts\pip
     .venv/bin/pytest
 
+The web app talks to a local `opencode serve` by default. To use OpenSession accounts and
+cloud projects instead, start the cloud stack (below) and put this in
+`packages/app/.env.development.local`:
+
+    VITE_OPENSESSION_GATEWAY_URL=http://localhost:8787
+    VITE_OPENSESSION_AUTH_URL=http://localhost:3001
+
+The app then asks you to sign in (Better Auth), and each of your projects appears as a
+server (`<gateway>/p/<project>`). In `.env`, CORS_ORIGINS and AUTH_TRUSTED_ORIGINS must
+include `http://localhost:3000`.
+
 ### Cloud: gateway + web app
 
 1. Build the sandbox image and configure the gateway:

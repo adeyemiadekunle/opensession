@@ -82,6 +82,7 @@
     "@solidjs/router": "catalog:",
     "@tanstack/solid-query": "5.91.4",
     "@tanstack/solid-virtual": "catalog:",
+    "better-auth": "1.7.10",
     "core-js": "3.50.0",
     "effect": "catalog:",
     "fuzzysort": "catalog:",
