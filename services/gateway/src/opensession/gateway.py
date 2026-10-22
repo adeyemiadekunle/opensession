@@ -4,7 +4,7 @@ FastAPI gateway: routes each user's requests to that user's own OpenCode sandbox
     pip install -e .
     SANDBOX_IMAGE=opencode-sandbox:latest uvicorn opensession.gateway:app
 
-Every request must be signed in (auth.py: Clerk session token from the web app,
+Every request must be signed in (auth.py: Better Auth session JWT from the web app,
 or a personal access token "osk_..." from the CLI/desktop app; AUTH_MODE=dev also
 accepts an X-User-Id header for local testing). A request may name a workspace with
 the X-Workspace header (default "default"). The user's sandbox is created or
@@ -124,7 +124,7 @@ def production_problems(app) -> list[str]:
     st = app.state
     out = []
     if st.auth.cfg.mode == "dev":
-        out.append("AUTH_MODE=dev lets anyone act as any user; use AUTH_MODE=clerk")
+        out.append("AUTH_MODE=dev lets anyone act as any user; use AUTH_MODE=betterauth")
     if st.keystore is None:
         out.append("KEYSTORE_MASTER_KEYS is not set, so users can't store model API keys")
     if st.github is not None and not os.environ.get("GITHUB_STATE_SECRET"):

@@ -3,11 +3,12 @@ Who is calling? Three ways to authenticate, checked in this order:
 
 1. Personal access token: "Authorization: Bearer osk_..." (CLI, desktop app).
    Created from the web app (POST /tokens) and stored hashed in UserStore.
-2. Clerk session token: "Authorization: Bearer <JWT>" from the web app
-   (Clerk's getToken()). Verified with Clerk's public key: either CLERK_JWT_KEY
-   (PEM, no network needed) or the JWKS at CLERK_JWKS_URL
-   (https://<your-frontend-api>/.well-known/jwks.json). The user id is `sub`.
-   `azp` must be one of CLERK_AUTHORIZED_PARTIES (your web app origins) when set.
+2. Better Auth session JWT: "Authorization: Bearer <JWT>" from the web app, which
+   gets it from our self-hosted auth server (services/auth, GET /api/auth/token).
+   Verified with the auth server's public keys: the JWKS at AUTH_JWKS_URL
+   (<auth server>/api/auth/jwks), or a PEM in AUTH_JWT_KEY (no network needed).
+   The user id is `sub`. `iss` and `aud` must match AUTH_ISSUER / AUTH_AUDIENCE when
+   set (Better Auth sets both to the auth server's base URL).
 3. Dev mode (AUTH_MODE=dev only): "X-User-Id: alice". Never enable in production.
 """
 
@@ -16,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import jwt
 from fastapi import HTTPException, Request
@@ -24,36 +25,37 @@ from fastapi import HTTPException, Request
 from .userstore import TOKEN_PREFIX, UserStore
 
 USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# What Better Auth's JWT plugin can sign with (EdDSA/Ed25519 is its default).
+ALGORITHMS = ["EdDSA", "ES256", "ES512", "RS256", "PS256"]
 
 
 @dataclass
 class Principal:
     user_id: str
-    via: str  # "clerk", "token" or "dev"
+    via: str  # "session", "token" or "dev"
 
 
 @dataclass
 class AuthConfig:
-    mode: str = "clerk"  # "clerk" or "dev"
-    clerk_jwt_key: str | None = None  # PEM public key
-    clerk_jwks_url: str | None = None
-    clerk_issuer: str | None = None  # optional extra check on `iss`
-    authorized_parties: list[str] = field(default_factory=list)
+    mode: str = "betterauth"  # "betterauth" or "dev"
+    jwt_key: str | None = None  # PEM public key
+    jwks_url: str | None = None
+    issuer: str | None = None
+    audience: str | None = None
     leeway: int = 5
 
     @classmethod
     def from_env(cls) -> "AuthConfig":
         e = os.environ.get
-        parties = [p.strip() for p in (e("CLERK_AUTHORIZED_PARTIES") or "").split(",") if p.strip()]
-        key = e("CLERK_JWT_KEY")
+        key = e("AUTH_JWT_KEY")
         if key:
             key = key.replace("\\n", "\n")
         return cls(
-            mode=e("AUTH_MODE", "clerk"),
-            clerk_jwt_key=key or None,
-            clerk_jwks_url=e("CLERK_JWKS_URL") or None,
-            clerk_issuer=e("CLERK_ISSUER") or None,
-            authorized_parties=parties,
+            mode=e("AUTH_MODE", "betterauth"),
+            jwt_key=key or None,
+            jwks_url=e("AUTH_JWKS_URL") or None,
+            issuer=e("AUTH_ISSUER") or None,
+            audience=e("AUTH_AUDIENCE") or None,
         )
 
 
@@ -61,31 +63,26 @@ class Authenticator:
     def __init__(self, cfg: AuthConfig, users: UserStore | None):
         self.cfg = cfg
         self.users = users
-        self._jwks = jwt.PyJWKClient(cfg.clerk_jwks_url, cache_keys=True) if cfg.clerk_jwks_url else None
-        if cfg.mode not in ("clerk", "dev"):
-            raise ValueError("AUTH_MODE must be 'clerk' or 'dev'")
-        if cfg.mode == "clerk" and not (cfg.clerk_jwt_key or cfg.clerk_jwks_url):
-            raise ValueError("AUTH_MODE=clerk needs CLERK_JWT_KEY or CLERK_JWKS_URL")
+        self._jwks = jwt.PyJWKClient(cfg.jwks_url, cache_keys=True) if cfg.jwks_url else None
+        if cfg.mode not in ("betterauth", "dev"):
+            raise ValueError("AUTH_MODE must be 'betterauth' or 'dev'")
+        if cfg.mode == "betterauth" and not (cfg.jwt_key or cfg.jwks_url):
+            raise ValueError("AUTH_MODE=betterauth needs AUTH_JWKS_URL or AUTH_JWT_KEY")
 
-    def _verify_clerk(self, token: str) -> str:
-        key = self.cfg.clerk_jwt_key
+    def _verify_session(self, token: str) -> str:
+        key = self.cfg.jwt_key
         if key is None:
             assert self._jwks is not None
             key = self._jwks.get_signing_key_from_jwt(token).key
-        options = {"require": ["exp", "sub"], "verify_aud": False}
         claims = jwt.decode(
             token,
             key=key,
-            algorithms=["RS256"],
-            options=options,
+            algorithms=ALGORITHMS,
+            options={"require": ["exp", "sub"], "verify_aud": self.cfg.audience is not None},
             leeway=self.cfg.leeway,
-            issuer=self.cfg.clerk_issuer,
+            issuer=self.cfg.issuer,
+            audience=self.cfg.audience,
         )
-        azp = claims.get("azp")
-        if self.cfg.authorized_parties and azp is not None and azp not in self.cfg.authorized_parties:
-            raise jwt.InvalidTokenError("azp not allowed")
-        if claims.get("sts") == "pending":
-            raise jwt.InvalidTokenError("session pending")
         return str(claims["sub"])
 
     async def authenticate(self, request: Request) -> Principal:
@@ -98,12 +95,12 @@ class Authenticator:
                 if not user:
                     raise HTTPException(401, "invalid access token")
                 return self._checked(user, "token")
-            if self.cfg.clerk_jwt_key or self._jwks:
+            if self.cfg.jwt_key or self._jwks:
                 try:
-                    user = await asyncio.to_thread(self._verify_clerk, token)
+                    user = await asyncio.to_thread(self._verify_session, token)
                 except (jwt.PyJWTError, KeyError) as e:
                     raise HTTPException(401, f"invalid session token: {type(e).__name__}") from None
-                return self._checked(user, "clerk")
+                return self._checked(user, "session")
         if self.cfg.mode == "dev":
             dev_user = request.headers.get("x-user-id")
             if dev_user:

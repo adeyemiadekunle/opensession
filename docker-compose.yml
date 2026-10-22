@@ -1,5 +1,5 @@
 # Cloud stack: the gateway in a container managing sandbox containers through the
-# Docker socket, Postgres for its data, and the egress proxy.
+# Docker socket, the Better Auth server for sign-in, Postgres for both, and the egress proxy.
 #   docker build -t opencode-sandbox:latest services/sandbox
 #   docker compose up --build
 services:
@@ -16,6 +16,7 @@ services:
       # file instead, remove this line (data stays in /data/opensession.db).
       DATABASE_URL: postgresql://opensession:${POSTGRES_PASSWORD:-opensession-dev}@db:5432/opensession
       OPENSESSION_DB: /data/opensession.db
+      AUTH_JWKS_URL: http://auth:3001/api/auth/jwks
     ports:
       - "127.0.0.1:${GATEWAY_HOST_PORT:-8787}:8000"
     volumes:
@@ -27,6 +28,21 @@ services:
     depends_on:
       egress:
         condition: service_started
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_started
+
+  # Sign-in (Better Auth, self-hosted). Issues the JWTs the gateway checks.
+  auth:
+    build: services/auth
+    container_name: opensession-auth
+    env_file: ${OPENSESSION_ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: postgresql://opensession:${POSTGRES_PASSWORD:-opensession-dev}@db:5432/opensession
+    ports:
+      - "127.0.0.1:${AUTH_HOST_PORT:-3001}:3001"
+    depends_on:
       db:
         condition: service_healthy
 

@@ -13,11 +13,13 @@
     "lint": "oxlint",
     "postinstall": "bun run --cwd packages/core fix-node-pty",
     "gateway:test": "cd services/gateway && python -m pytest -q",
-    "test": "echo \"do not run tests from root\" && exit 1"
+    "test": "echo \"do not run tests from root\" && exit 1",
+    "dev:auth": "bun run --cwd services/auth dev"
   },
   "workspaces": {
     "packages": [
-      "packages/*"
+      "packages/*",
+      "services/auth"
     ],
     "catalog": {
       "@effect/opentelemetry": "4.0.1",

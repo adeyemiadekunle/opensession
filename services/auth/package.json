@@ -1,0 +1,23 @@
+{
+  "name": "@opensession/auth",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted Better Auth server: sign-in for OpenSession, JWTs for the gateway",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "migrate": "bun src/migrate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-auth": "^1.7.0",
+    "hono": "catalog:",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/pg": "^8.15.0",
+    "typescript": "catalog:"
+  }
+}
