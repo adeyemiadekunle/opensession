@@ -3,15 +3,18 @@
 // settings, help and the account, built from shadcn-solid's dropdown menu (./ui).
 
 import { Icon } from "@opencode/ui/icon"
-import { Show } from "solid-js"
+import { createEffect, Show } from "solid-js"
 import { createHomeController } from "@/home/model"
 import { createHomeProjectsController } from "@/home/projects/controller"
 import { HomeProjects } from "@/home/projects/region"
+import { useServers } from "@/runtime/server/registry"
+import { useGlobal } from "@/runtime/server/runtime"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useCommand } from "@/shell/commands/command"
 import { useSettingsCommand } from "@/settings/command"
 import { useAccount } from "./account-context"
+import { isCloudServer } from "./account"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,9 +29,25 @@ import {
 
 const HELP_URL = "https://github.com/adeyemiadekunle/opensession/issues"
 
+// A cloud project's sandbox has one folder for the project: always keep it open, so the
+// sidebar never shows a cloud project as empty or its folder as "recently closed".
+const CLOUD_FOLDER = "/workspace"
+
 export function SidebarProjects(props: { onPicked: () => void }) {
   const home = createHomeController()
   const projects = createHomeProjectsController(home)
+  const servers = useServers()
+  const global = useGlobal()
+
+  createEffect(() => {
+    // Before the saved list loads, opening would be overwritten (or persist over it).
+    if (!servers.hydrated()) return
+    for (const conn of servers.visible) {
+      if (conn.type !== "http" || !isCloudServer(conn.http.url)) continue
+      const opened = global.ensureServerCtx(conn).projects
+      if (!opened.list().some((project) => project.worktree === CLOUD_FOLDER)) opened.open(CLOUD_FOLDER)
+    }
+  })
 
   return (
     <div data-slot="sidebar-projects" class="flex max-h-[40%] min-h-0 w-full shrink-0 flex-col">
