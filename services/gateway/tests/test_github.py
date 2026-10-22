@@ -147,6 +147,25 @@ def test_connect_and_callback_flow():
         assert c.get("/github", headers=A).json()["installations"] == []
 
 
+def test_link_records_installations_that_already_exist():
+    """The app was installed earlier (or from GitHub): signing in with it links every
+    installation the person can reach, without an install step."""
+    c, _, _, fake, gh = client()
+    fake.user_installations = [42, 43]
+    with c:
+        url = c.post("/github/link", headers=A).json()["url"]
+        assert url.startswith("https://github.com/login/oauth/authorize?client_id=") and "&state=" in url
+        state = url.split("state=")[1]
+        r = c.get("/github/callback", params={"state": state, "code": "good-code"}, follow_redirects=False)
+        assert r.status_code == 302 and r.headers["location"].endswith("/settings/connectors?github=connected")
+        assert [i["installation_id"] for i in c.get("/github", headers=A).json()["installations"]] == [42, 43]
+
+        fake.user_installations = []  # signed in, but the app isn't installed anywhere for them
+        r = c.get("/github/callback", params={"state": gh.make_state("bob"), "code": "good-code"}, follow_redirects=False)
+        assert "github=error" in r.headers["location"] and "Connect%20GitHub" in r.headers["location"]
+        assert c.get("/github", headers={"X-User-Id": "bob"}).json()["installations"] == []
+
+
 def connect(c, gh):
     state = gh.make_state("alice")
     c.get("/github/callback", params={"state": state, "code": "good-code", "installation_id": 42}, follow_redirects=False)

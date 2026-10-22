@@ -12,22 +12,32 @@ export function GithubCard({ client }: { client: CloudClient }) {
   const [err, setErr] = useState<string | null>(null);
   const params = new URLSearchParams(globalThis.location?.search ?? "");
   const result = params.get("github");
-  const connect = async () => {
+  const go = async (url: () => Promise<string>) => {
     try {
-      globalThis.location.href = await client.githubConnectUrl();
+      globalThis.location.href = await url();
     } catch (e) {
       setErr(errText(e));
     }
   };
+  const connect = () => go(() => client.githubConnectUrl());
+  // The app already installed (earlier, or from GitHub): saving its GitHub page doesn't come back here.
+  const link = () => go(() => client.githubLinkUrl());
   return (
     <SettingsCard
       title="GitHub"
       description="Connect GitHub to open your repositories in projects, switch branches, push and open pull requests. You choose which repositories OpenSession can see; it gets short-lived access to one repository at a time."
       footer={
         gh.data?.configured ? (
-          <Button variant="default" onClick={connect}>
-            {gh.data.installations.length ? "Connect another account or change repositories" : "Connect GitHub"}
-          </Button>
+          <>
+            {gh.data.installations.length ? null : (
+              <Button variant="outline" onClick={link} title="Use this when the OpenSession app is already installed on your GitHub account">
+                Already installed? Link it
+              </Button>
+            )}
+            <Button variant="default" onClick={connect}>
+              {gh.data.installations.length ? "Connect another account or change repositories" : "Connect GitHub"}
+            </Button>
+          </>
         ) : undefined
       }
     >
