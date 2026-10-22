@@ -177,6 +177,13 @@ export async function signOut(access: Access | undefined) {
   store(undefined)
 }
 
+/** A gateway call as the signed-in account (settings pages: keys, tokens, ...). */
+export function gatewayRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const access = storedAccess()
+  if (!access) return Promise.reject(new GatewayError(401, "not signed in"))
+  return gateway<T>(path, { ...init, bearer: access.token })
+}
+
 /** The user's projects. A rejected token (revoked, expired) clears the stored access. */
 export async function projects(access: Access): Promise<Project[]> {
   try {

@@ -51,6 +51,7 @@ import { ExtensionSettingsPages } from "@/runtime/extension/settings-page-view"
 import "@/settings/settings.css"
 import { useAccount } from "@/opensession/account-context"
 import { SettingsProfile } from "@/opensession/profile"
+import { SettingsKeys } from "@/opensession/keys"
 
 const GuiExtensionsSettings = import.meta.env.DEV
   ? lazy(() =>
@@ -281,7 +282,7 @@ function RootSettings() {
 
     if (view.tab === "gui-extensions" && !guiExtensions) surface.open("general")
 
-    if (view.tab === "profile" && !account) surface.open("general")
+    if ((view.tab === "profile" || view.tab === "keys") && !account) surface.open("general")
   })
 
   const addServer = () =>
@@ -291,7 +292,14 @@ function RootSettings() {
 
   const groups = createMemo<SettingsNavGroup[]>(() => [
     ...(account
-      ? [{ items: [{ value: "profile", icon: pageIcons.profile, label: language.t("opensession.profile.title") }] }]
+      ? [
+          {
+            items: [
+              { value: "profile", icon: pageIcons.profile, label: language.t("opensession.profile.title") },
+              { value: "keys", icon: pageIcons.keys, label: language.t("opensession.keys.title") },
+            ],
+          },
+        ]
       : []),
     {
       items: [
@@ -367,6 +375,9 @@ function RootSettings() {
       <Show when={account}>
         <Tabs.Content value="profile" class="settings-panel">
           <SettingsProfile />
+        </Tabs.Content>
+        <Tabs.Content value="keys" class="settings-panel">
+          <SettingsKeys />
         </Tabs.Content>
       </Show>
       <Tabs.Content value="general" class="settings-panel">
