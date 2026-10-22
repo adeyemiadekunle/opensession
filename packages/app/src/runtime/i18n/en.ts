@@ -1056,7 +1056,6 @@ export const dict = {
   "opensession.social.github": "Continue with GitHub",
   "opensession.social.google": "Continue with Google",
   "opensession.social.or": "Or continue with",
-  "opensession.field.name": "Name",
   "opensession.field.email": "Email",
   "opensession.field.emailPlaceholder": "you@example.com",
   "opensession.field.password": "Password",

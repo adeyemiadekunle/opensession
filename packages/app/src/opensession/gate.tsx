@@ -69,7 +69,7 @@ export function OpenSessionGate(props: { children: (servers: ServerConnection.Ht
       </Match>
       <Match when={servers.error}>
         <Page>
-          <Card>
+          <Card class="gap-4 py-5">
             <CardHeader class="text-center">
               <CardTitle class="text-xl">{language.t("opensession.projects.loadFailed")}</CardTitle>
               <CardDescription>{String(servers.error?.message ?? servers.error)}</CardDescription>
@@ -121,8 +121,9 @@ function Brand() {
 
 function Page(props: { children?: JSX.Element }) {
   return (
-    <div class="flex min-h-svh flex-col items-center justify-center gap-6 bg-sidebar p-6 md:p-10">
-      <div class="flex w-full max-w-sm flex-col gap-6">
+    // Scrolls when the card is taller than the window; the column centers itself only when it fits.
+    <div class="flex h-dvh w-full flex-col overflow-y-auto bg-sidebar p-4">
+      <div class="m-auto flex w-full max-w-sm flex-col gap-4">
         <Brand />
         {props.children}
       </div>
@@ -149,7 +150,6 @@ function SignIn(props: { onSignedIn: (access: Access) => void }) {
   const [providers] = createResource(socialProviders, { initialValue: [] })
   const [form, setForm] = createStore({
     mode: "sign-in" as "sign-in" | "sign-up",
-    name: "",
     email: "",
     password: "",
     busy: false,
@@ -184,14 +184,15 @@ function SignIn(props: { onSignedIn: (access: Access) => void }) {
       props.onSignedIn(
         signingIn()
           ? await signIn(email, form.password)
-          : await signUp(form.name.trim() || email, email, form.password),
+          : // No name field: the account starts with its email as name (editable later).
+            await signUp(email, email, form.password),
       )
     })
   }
 
   return (
     <Page>
-      <Card>
+      <Card class="gap-4 py-5">
         <CardHeader class="text-center">
           <CardTitle class="text-xl">
             {language.t(signingIn() ? "opensession.signIn.title" : "opensession.signUp.title")}
@@ -201,9 +202,9 @@ function SignIn(props: { onSignedIn: (access: Access) => void }) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form class="grid gap-6" onSubmit={submit}>
+          <form class="grid gap-4" onSubmit={submit}>
             <Show when={providers().length > 0}>
-              <div class="flex flex-col gap-4">
+              <div class="flex flex-col gap-2">
                 <For each={providers()}>
                   {(provider) => (
                     <Button
@@ -227,14 +228,8 @@ function SignIn(props: { onSignedIn: (access: Access) => void }) {
                 </span>
               </div>
             </Show>
-            <div class="grid gap-6">
-              <Show when={!signingIn()}>
-                <TextField value={form.name} onChange={(value) => setForm("name", value)}>
-                  <TextFieldLabel>{language.t("opensession.field.name")}</TextFieldLabel>
-                  <TextFieldInput autocomplete="name" />
-                </TextField>
-              </Show>
-              <TextField value={form.email} onChange={(value) => setForm("email", value)} required>
+            <div class="grid gap-3">
+              <TextField class="gap-1.5" value={form.email} onChange={(value) => setForm("email", value)} required>
                 <TextFieldLabel>{language.t("opensession.field.email")}</TextFieldLabel>
                 <TextFieldInput
                   type="email"
@@ -242,7 +237,7 @@ function SignIn(props: { onSignedIn: (access: Access) => void }) {
                   placeholder={language.t("opensession.field.emailPlaceholder")}
                 />
               </TextField>
-              <TextField value={form.password} onChange={(value) => setForm("password", value)} required>
+              <TextField class="gap-1.5" value={form.password} onChange={(value) => setForm("password", value)} required>
                 <TextFieldLabel>{language.t("opensession.field.password")}</TextFieldLabel>
                 <TextFieldInput
                   type="password"
