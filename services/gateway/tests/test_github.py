@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from opensession.gateway import create_app
-from opensession.github import GitHubApp, GitHubAppConfig, GitHubError, app_slug, git_auth_env
+from opensession.github import GitHubApp, GitHubAppConfig, GitHubError, app_slug, git_auth_env, pem_key
 
 from .fakes import make_manager
 
@@ -111,6 +111,26 @@ def test_app_slug_accepts_the_app_page_url():
     assert app_slug("https://github.com/apps/opensession-kunemi") == "opensession-kunemi"
     assert app_slug(" https://github.com/apps/opensession-kunemi/ ") == "opensession-kunemi"
     assert app_slug("https://github.com/apps/opensession-kunemi/installations/new") == "opensession-kunemi"
+
+
+def test_pem_key_survives_one_line_env_vars():
+    pem = gh_config().private_key
+    body = pem.strip().splitlines()
+    assert pem_key(pem) == pem.strip() + "\n"
+    assert pem_key(" ".join(body)) == pem.strip() + "\n"  # line breaks became spaces
+    assert pem_key("\\n".join(body)) == pem.strip() + "\n"  # literal \\n
+    assert pem_key('"' + "\\n".join(body) + '"') == pem.strip() + "\n"  # quoted
+    assert pem_key(base64.b64encode(pem.encode()).decode()) == pem.strip() + "\n"  # base64 of the .pem
+    gh = GitHubApp(GitHubAppConfig(**{**gh_config().__dict__, "private_key": pem_key(" ".join(body))}), httpx.AsyncClient())
+    assert gh.app_jwt().count(".") == 2  # signs
+
+
+def test_unreadable_key_is_a_clear_error_not_a_500():
+    c, _, _, fake, gh = client()
+    gh.cfg.private_key = "not a key"
+    with c:
+        r = c.get("/github/callback", params={"state": gh.make_state("alice"), "code": "good-code", "installation_id": 42}, follow_redirects=False)
+        assert r.status_code == 302 and "github=error" in r.headers["location"] and "GITHUB_APP_PRIVATE_KEY" in r.headers["location"]
 
 
 def test_git_auth_env_keeps_token_off_command_line():
