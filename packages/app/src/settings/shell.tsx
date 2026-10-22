@@ -54,6 +54,7 @@ import { SettingsProfile } from "@/opensession/profile"
 import { SettingsCloudProjects } from "@/opensession/projects"
 import { SettingsAccessTokens } from "@/opensession/tokens"
 import { SettingsNetwork } from "@/opensession/network"
+import { SettingsGitHub } from "@/opensession/github"
 
 const GuiExtensionsSettings = import.meta.env.DEV
   ? lazy(() =>
@@ -284,7 +285,7 @@ function RootSettings() {
 
     if (view.tab === "gui-extensions" && !guiExtensions) surface.open("general")
 
-    if (["profile", "cloud-projects", "access-tokens", "network"].includes(view.tab) && !account)
+    if (["profile", "cloud-projects", "access-tokens", "network", "github"].includes(view.tab) && !account)
       surface.open("general")
   })
 
@@ -310,6 +311,7 @@ function RootSettings() {
                 label: language.t("opensession.tokens.title"),
               },
               { value: "network", icon: pageIcons.network, label: language.t("opensession.network.title") },
+              { value: "github", icon: pageIcons.github, label: language.t("opensession.github.title") },
             ],
           },
         ]
@@ -397,6 +399,9 @@ function RootSettings() {
         </Tabs.Content>
         <Tabs.Content value="network" class="settings-panel">
           <SettingsNetwork />
+        </Tabs.Content>
+        <Tabs.Content value="github" class="settings-panel">
+          <SettingsGitHub />
         </Tabs.Content>
       </Show>
       <Tabs.Content value="general" class="settings-panel">

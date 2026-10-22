@@ -827,7 +827,9 @@ def create_app(
 
     # ---- GitHub, projects (workspaces) and git ----------------------------------
 
-    WEB_URL = os.environ.get("OPENSESSION_WEB_URL", "http://localhost:5173")
+    WEB_URL = os.environ.get("OPENSESSION_WEB_URL", "http://localhost:3000")
+    # The web app's GitHub settings page, where the GitHub callback sends the browser back.
+    GITHUB_SETTINGS = f"{WEB_URL}/settings?tab=github"
 
     def require_github(request: Request) -> GitHubApp:
         gh = request.app.state.github
@@ -925,8 +927,8 @@ def create_app(
         except GitHubError as e:
             from urllib.parse import quote
 
-            return RedirectResponse(f"{WEB_URL}/settings/connectors?github=error&reason={quote(str(e))}", 302)
-        return RedirectResponse(f"{WEB_URL}/settings/connectors?github=connected", 302)
+            return RedirectResponse(f"{GITHUB_SETTINGS}&github=error&reason={quote(str(e))}", 302)
+        return RedirectResponse(f"{GITHUB_SETTINGS}&github=connected", 302)
 
     @app.delete("/github/installations/{installation_id}", status_code=204)
     async def github_forget(installation_id: int, request: Request, user: str = Depends(current_user)):

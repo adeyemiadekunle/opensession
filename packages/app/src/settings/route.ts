@@ -3,6 +3,7 @@ export type SettingsRootTab =
   | "cloud-projects" // OpenSession: the account's cloud projects (src/opensession/projects.tsx)
   | "access-tokens" // OpenSession: CLI and desktop tokens (src/opensession/tokens.tsx)
   | "network" // OpenSession: the sandboxes' allowed domains (src/opensession/network.tsx)
+  | "github" // OpenSession: the account's GitHub connection (src/opensession/github.tsx)
   | "general"
   | "appearance"
   | "notifications"
@@ -55,6 +56,7 @@ const rootTabs: Record<SettingsRootTab, true> = {
   "cloud-projects": true,
   "access-tokens": true,
   network: true,
+  github: true,
   general: true,
   appearance: true,
   notifications: true,
